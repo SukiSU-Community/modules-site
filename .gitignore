@@ -1,0 +1,12 @@
+# 构建产物：node tools/build.mjs 由 public/ 复制生成
+dist/
+
+# Qoder Sites 本地描述符：每次部署都变，且内嵌整份 index.html
+*.qoder.site
+
+# 依赖与系统/编辑器噪音
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini

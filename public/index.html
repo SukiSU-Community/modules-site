@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>模块投稿台 · 人人共建的 KernelSU / Magisk 模块索引</title>
+    <meta
+      name="description"
+      content="把散落在酷安帖子和网盘链接里的 KernelSU / Magisk 模块投稿进公开索引：上传 zip、自动解析 module.prop、实时查重、审核后进索引，所有人可在管理器里一键安装。"
+    />
+    <meta name="theme-color" id="theme-color" content="#07080B" />
+    <script>
+      // 首屏绘制前就把主题定下来：app.js 是 module（defer），等它再设会先闪一帧深色底。
+      // 用户手动选过就一直用他选的；没选过则跟随系统，并跟着系统切换。
+      (function () {
+        var mode;
+        try {
+          var saved = localStorage.getItem("panel-theme");
+          mode =
+            saved === "light" || saved === "dark"
+              ? saved
+              : window.matchMedia("(prefers-color-scheme: light)").matches
+              ? "light"
+              : "dark";
+        } catch (e) {
+          mode = "dark";
+        }
+        document.documentElement.setAttribute("data-theme", mode);
+        document
+          .getElementById("theme-color")
+          .setAttribute("content", mode === "light" ? "#F5F3EE" : "#07080B");
+      })();
+    </script>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2307080b'/%3E%3Cpath d='M4 4h18l6 6v18H10l-6-6z' fill='none' stroke='%23ffb020' stroke-width='3'/%3E%3Crect x='12' y='13' width='9' height='9' fill='%23ffb020'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./fonts/fonts.css" />
+    <link rel="stylesheet" href="./styles/panel.css" />
+    <script type="module" src="./scripts/app.js"></script>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <a class="skip" href="#main">跳到主要内容</a>
+
+    <header class="bezel">
+      <div class="bezel__rail" aria-hidden="true"></div>
+      <div class="bezel__in">
+        <div class="plate">
+          <span class="plate__mark" aria-hidden="true">M</span>
+          <span class="plate__txt">
+            <span class="plate__lat">MODULE·PANEL</span>
+            <span class="plate__zh" id="brand-zh">模块投稿台</span>
+          </span>
+        </div>
+        <nav class="nav" aria-label="站点分区">
+          <a href="#/submit"><i>01</i>投稿台</a>
+          <a href="#/index"><i>02</i>已收录</a>
+          <a href="#/about"><i>03</i>说明</a>
+        </nav>
+        <button class="theme" id="theme" type="button" title="切换显示模式">
+          <svg class="theme__ico theme__ico--moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z" />
+          </svg>
+          <svg class="theme__ico theme__ico--sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <circle cx="12" cy="12" r="4.4" />
+            <path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6" stroke-linecap="round" />
+          </svg>
+          <span id="theme-txt">夜间</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="main">
+      <!-- ====================== 01 投稿台 ====================== -->
+      <section class="view" id="view-submit" aria-labelledby="h-submit">
+        <div class="hero rise">
+          <div class="hero__grid">
+            <div>
+              <h1 id="h-submit">
+                把你手上的<span class="hi">好模块</span><br />
+                分享给大家
+              </h1>
+              <p class="hero__lede" id="hero-lede">
+                大量国内自制模块只存在于酷安帖子里的网盘链接，几个月后就成死链，主流索引也搜不到。
+                这里就是给这些模块开的投稿入口：把 zip 传上来、写清出处，服务端把它存成长期可用的下载地址，
+                审核通过后进入公开索引，所有人就能在管理器里搜到并一键安装。
+              </p>
+              <p class="readout" id="boot" aria-live="polite"></p>
+            </div>
+            <div class="spec" aria-label="投稿硬性条件">
+              <div class="spec__row">
+                <span class="spec__k">大小上限</span>
+                <span class="spec__v" id="spec-max"><b>8</b> MB</span>
+              </div>
+              <div class="spec__row">
+                <span class="spec__k">zip 形态</span>
+                <span class="spec__v">根目录含 <b>module.prop</b></span>
+              </div>
+              <div class="spec__row">
+                <span class="spec__k">溯源</span>
+                <span class="spec__v">酷安出处 + 投稿人 <b>UID</b></span>
+              </div>
+              <div class="spec__row">
+                <span class="spec__k">提交之后</span>
+                <span class="spec__v">自动开 <b>GitHub PR</b> 待审</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <form id="form" novalidate>
+          <!-- 01 目标文件 -->
+          <section class="panel rise" aria-labelledby="p1t">
+            <div class="panel__hd">
+              <span class="panel__no">01</span>
+              <h2 id="p1t">目标文件</h2>
+              <span class="panel__tag">module.zip</span>
+            </div>
+            <p class="panel__note">
+              选 zip 后浏览器会当场解一次包：验证根目录有没有
+              <code>module.prop</code>，并把里面写的信息自动填到下面，不用你手打六遍。
+            </p>
+
+            <label class="drop" id="drop">
+              <svg class="drop__glyph" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                <path d="M12 3 3 7.5v9L12 21l9-4.5v-9L12 3Z" />
+                <path d="M3 7.5 12 12l9-4.5M12 12v9" />
+              </svg>
+              <span class="drop__t">拖入模块 zip，或点击选择文件</span>
+              <span class="drop__s" id="drop-hint">上限 8 MB · 不要多套一层文件夹</span>
+              <input type="file" id="file" name="zip" accept=".zip,application/zip" />
+            </label>
+
+            <div class="term" id="term" hidden aria-live="polite"></div>
+          </section>
+
+          <!-- 02 模块元数据 -->
+          <section class="panel rise" aria-labelledby="p2t">
+            <div class="panel__hd">
+              <span class="panel__no">02</span>
+              <h2 id="p2t">模块元数据</h2>
+              <span class="panel__tag" id="meta-src">手动填写</span>
+            </div>
+            <p class="panel__note" id="meta-note">
+              这些信息应来自 zip 内 <code>module.prop</code>。改了这里不等于改了包里的文件，
+              请照实填写，服务端与审核都按包内内容为准。
+            </p>
+
+            <div class="grid2">
+              <div class="field span2">
+                <div class="field__lab"><label for="f-id">模块 ID<span class="req">*</span></label></div>
+                <input class="mono" type="text" id="f-id" data-k="id" placeholder="如：kasucc-free" autocomplete="off" spellcheck="false" required />
+                <p class="field__help">
+                  <code>module.prop</code> 里的 <b>id</b>，索引认它，不认名字。填完下面版本号，这里会自动查重。
+                </p>
+                <p class="field__err" data-err="id">请填写模块 ID</p>
+              </div>
+              <div class="field span2">
+                <div class="field__lab"><label for="f-name">模块名称<span class="req">*</span></label></div>
+                <input type="text" id="f-name" data-k="name" placeholder="如：KSU CC (Cross Manager)" autocomplete="off" required />
+                <p class="field__err" data-err="name">请填写模块名称</p>
+              </div>
+              <div class="field">
+                <div class="field__lab"><label for="f-version">版本字符串<span class="req">*</span></label></div>
+                <input class="mono" type="text" id="f-version" data-k="version" placeholder="v1.2.0" autocomplete="off" required />
+                <p class="field__err" data-err="version">请填写版本字符串</p>
+              </div>
+              <div class="field">
+                <div class="field__lab"><label for="f-versionCode">版本号<span class="req">*</span></label></div>
+                <input class="mono" type="number" id="f-versionCode" data-k="versionCode" placeholder="12" step="1" min="0" inputmode="numeric" required />
+                <p class="field__err" data-err="versionCode">必须是整数</p>
+              </div>
+              <div class="field span2">
+                <div class="field__lab"><label for="f-author">模块作者<span class="opt">选填</span></label></div>
+                <input type="text" id="f-author" data-k="author" placeholder="原作者的署名或酷安昵称" autocomplete="off" />
+                <p class="field__help">写<b>原作者</b>，不是投稿人。抄自谁的帖子就写谁。</p>
+              </div>
+              <div class="field span2">
+                <div class="field__lab"><label for="f-description">描述<span class="opt">选填</span></label></div>
+                <textarea class="mono" id="f-description" data-k="description" placeholder="模块做什么，一两句话" rows="3"></textarea>
+              </div>
+            </div>
+
+            <div class="status" id="check" hidden aria-live="polite">
+              <span class="chip" id="check-chip">…</span>
+              <div class="status__body">
+                <div class="status__t" id="check-t"></div>
+                <p class="status__d" id="check-d"></p>
+              </div>
+            </div>
+            <p class="field__help" id="check-where">
+              还没确认过是否已收录 —— 填完模块 ID 与版本号会自动查一次，免得白传一个 8 MB 的文件。
+              <a href="#/index">或直接翻已收录列表</a>
+            </p>
+          </section>
+
+          <!-- 03 出处与身份 -->
+          <section class="panel rise" aria-labelledby="p3t">
+            <div class="panel__hd">
+              <span class="panel__no">03</span>
+              <h2 id="p3t">出处与身份</h2>
+              <span class="panel__tag">traceability</span>
+            </div>
+            <p class="panel__note">
+              这两项是<b style="color: var(--amber)">硬性要求</b>：出处说明包从哪来，UID 说明是谁带上来的。
+              溯源是日后追责和审核的唯一抓手，缺一项服务端就会拒收。
+            </p>
+            <div class="field">
+              <div class="field__lab"><label for="f-source">模块出处<span class="req">*</span></label></div>
+              <input class="mono" type="text" id="f-source" data-k="source" placeholder="https://www.coolapk.com/feed/65432100" autocomplete="off" spellcheck="false" required />
+              <p class="field__help">
+                只收<b>酷安站内链接</b>：原帖 <code>coolapk.com/feed/…</code> 或原作者主页
+                <code>coolapk.com/u/…</code> 都行。网盘下载链会失效，别填网盘。
+              </p>
+              <p class="field__err" data-err="source">请填写酷安站内链接</p>
+            </div>
+            <div class="grid2">
+              <div class="field">
+                <div class="field__lab"><label for="f-uploader">投稿者署名<span class="req">*</span></label></div>
+                <input type="text" id="f-uploader" data-k="uploader" placeholder="你在酷安的昵称" autocomplete="nickname" required />
+                <p class="field__help">会<b>公开展示在索引里</b>。核实通过后这里会自动填上你的酷安昵称。</p>
+                <p class="field__err" data-err="uploader">请填写投稿者署名</p>
+              </div>
+              <div class="field">
+                <div class="field__lab"><label for="f-uid">酷安 UID<span class="req">*</span></label></div>
+                <input class="mono" type="text" id="f-uid" data-k="coolapkUid" placeholder="2781460" inputmode="numeric" autocomplete="off" spellcheck="false" required />
+                <p class="field__help">
+                  酷安「我的 → 个人主页」链接 <code>coolapk.com/u/</code><b>末尾那串数字</b>就是。
+                  <a href="https://www.coolapk.com/u/2781460" target="_blank" rel="noopener noreferrer">举个例子</a>
+                </p>
+                <p class="field__err" data-err="coolapkUid">UID 应是 4-12 位纯数字</p>
+              </div>
+            </div>
+            <div class="status" id="uid-check" hidden aria-live="polite">
+              <img class="uid__avatar" id="uid-avatar" alt="" hidden />
+              <span class="chip" id="uid-chip">…</span>
+              <div class="status__body">
+                <div class="status__t" id="uid-t"></div>
+                <p class="status__d" id="uid-d"></p>
+              </div>
+            </div>
+          </section>
+
+          <!-- 04 确认与上传 -->
+          <section class="panel panel--dim rise" aria-labelledby="p4t">
+            <div class="panel__hd">
+              <span class="panel__no">04</span>
+              <h2 id="p4t">确认与上传</h2>
+              <span class="panel__tag">irreversible</span>
+            </div>
+            <p class="panel__note">
+              上传是<b style="color: var(--amber)">公开且长期保留</b>的动作，所以下面三道确认一屏都跳不过去。
+            </p>
+
+            <ul class="gate" id="gate" aria-label="提交前自检"></ul>
+
+            <div id="turnstile-slot" class="callout" hidden></div>
+
+            <div class="btn-row cta-inline">
+              <button type="button" class="btn btn--go" data-open-confirm disabled>打开确认屏</button>
+              <span class="count hide-sm" id="gate-note">先把上面几项填齐</span>
+            </div>
+          </section>
+        </form>
+      </section>
+
+      <!-- ====================== 02 已收录 ====================== -->
+      <section class="view" id="view-index" aria-labelledby="h-index">
+        <div class="hero rise">
+          <h1 id="h-index">已收录<span class="hi">模块</span></h1>
+          <p class="hero__lede">
+            公开索引里的全部内容。投稿前先搜一下，别重复提交已经有人在维护的模块。
+          </p>
+          <p class="readout" id="index-readout" aria-live="polite"></p>
+        </div>
+
+        <div class="tools rise">
+          <div class="search">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6.5" />
+              <path d="M15.5 15.5 21 21" />
+            </svg>
+            <input
+              type="text"
+              id="q"
+              class="mono"
+              placeholder="按 ID / 名称 / 作者 / 描述 过滤"
+              aria-label="过滤已收录模块"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <span class="count" id="count"></span>
+        </div>
+
+        <ul class="mods" id="mods"></ul>
+        <div class="empty" id="index-state" hidden></div>
+      </section>
+
+      <!-- ====================== 03 说明 ====================== -->
+      <section class="view" id="view-about" aria-labelledby="h-about">
+        <div class="hero rise">
+          <h1 id="h-about">为什么要<span class="hi">人人共建</span></h1>
+          <p class="hero__lede">这个索引解决的是一个很具体的问题，不是又一个模块站。</p>
+        </div>
+
+        <article class="panel rise doc">
+          <h3><span>A</span>装不到的模块，其实满地都是</h3>
+          <p>
+            Android 的 KernelSU / Magisk 生态里，模块以 zip 分发；模块仓库是一份 JSON 索引，
+            让大家在管理器 App 里直接浏览、一键安装。但大量优质模块根本不在任何索引里 ——
+            它们是国内社区的个人开发者自制，作者把 zip 传网盘、在帖子里发个链接，别人下载后手动刷。
+          </p>
+          <ol class="pains">
+            <li><b>进不了主流索引。</b>主流仓库要求模块 ID 等于仓库名、提交者必须是仓库所有者，个人自制模块不符合。</li>
+            <li><b>网盘链接会死。</b>有效期、要转存、账号封禁，几个月后帖子里就只剩一个打不开的页面。</li>
+            <li><b>搜不到。</b>索引里没有条目，只能靠人传人，装过的永远知道，没装过的永远不知道。</li>
+          </ol>
+
+          <h3><span>B</span>投稿之后会发生什么</h3>
+          <p>
+            任何人手上有一个还没被收录的模块，都可以把它投稿上来。流程是固定的：
+          </p>
+          <ol class="flow">
+            <li><i>1</i><div><b>你上传 zip</b>服务端收下这个包。</div></li>
+            <li><i>2</i><div><b>存成 GitHub Release asset</b>长期稳定、可下载，替掉会失效的网盘链接。</div></li>
+            <li><i>3</i><div><b>自动开一个 PR</b>PR 里只有元数据 JSON，不含 zip 本体。</div></li>
+            <li><i>4</i><div><b>自动安全审核</b>静态扫描模块脚本里的危险行为、外联、敏感信息。</div></li>
+            <li class="human"><i>5</i><div><b>人工审核（版本更新必走）</b>对已收录模块的更新一律人工过一遍。</div></li>
+            <li><i>6</i><div><b>合并进公开索引</b>从此所有人能在管理器里搜到它，下载链接长期有效。</div></li>
+          </ol>
+          <div class="callout">
+            <b>别以为提交完就立刻上线。</b>低风险的新模块可以自动通过；但「对已收录模块的版本更新」
+            一定要人工审核。这是刻意的安全设计 —— 否则有人 fork 一个热门模块、加几行恶意代码、
+            伪装成「更新」投稿，所有已安装用户就会收到恶意更新提示。
+          </div>
+
+          <h3><span>C</span>两个投稿入口</h3>
+          <p>
+            手机上：<b>管理器 App</b> —— 选本地 zip 时会提示投稿，已实现。<br />
+            电脑上 / 作者本人：<b>就是这个网页站</b>，同时也作为这个索引的对外门面。
+          </p>
+
+          <h3><span>D</span>为什么投稿人必须给酷安 UID</h3>
+          <p>
+            索引是公开可编辑的，任何人都能往里塞东西，所以<b>唯一可靠的安全机制是「找得到人」</b>。
+            自由文本的署名可以被随便冒充，而酷安 UID 是一个唯一、可回访、平台可处置的标识：
+            出事时点开 <code>coolapk.com/u/&lt;UID&gt;</code> 就知道是谁，社区也能对具体账号做处理。
+          </p>
+          <p>
+            出处同理，只收<b>酷安站内链接</b>：模块必须能回溯到某个帖子或某个作者主页，
+            网盘直链、匿名转存链接一律不算出处。
+          </p>
+          <div class="callout">
+            <b>署名昵称和 UID 是两个字段。</b>昵称给人看（会公开显示在索引里），UID 给审核和追责用。
+            填对 UID 后会自动核实这个账号确实存在，核实通过还会把昵称自动填上。
+          </div>
+
+          <h3><span>E</span>怎么加源</h3>
+          <p id="addsrc">索引地址还没配置，暂时给不出一键加源链接。</p>
+
+          <h3><span>F</span>这个站自己的状态</h3>
+          <p>纯静态站点，没有任何自己的服务端；所有请求都直连投稿后端。下面是当前接线情况：</p>
+          <ul class="selfcheck" id="selfcheck"></ul>
+          <p style="margin-top:12px">
+            已知待办：<b style="color:var(--ink)">投稿端点目前没有鉴权与限流</b>，
+            后续会接 Cloudflare Turnstile。界面上留了接入位，后端配好 sitekey 填进
+            <code>config.js</code> 即可，本站不自己伪造任何验证码。
+          </p>
+        </article>
+      </section>
+    </main>
+
+    <!-- 移动端常驻操作条 -->
+    <div class="dock" id="dock">
+      <span class="dock__txt"><b id="dock-t">待填：模块 zip</b><span id="dock-s">四项必填 + 三道确认</span></span>
+      <button type="button" class="btn btn--go btn--sm" data-open-confirm disabled>确认屏</button>
+    </div>
+
+    <!-- 确认屏：仿 Bootloader 解锁警告 -->
+    <div class="layer" id="layer-confirm" role="dialog" aria-modal="true" aria-labelledby="warn-ttl" hidden>
+      <div class="warn">
+        <div class="warn__hazard" aria-hidden="true"></div>
+        <div class="warn__hd">
+          <svg class="warn__tri" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="M12 3.2 1.6 21h20.8L12 3.2Z" />
+            <path d="M12 9.6v5" stroke-linecap="round" />
+            <circle cx="12" cy="17.8" r="1.1" fill="currentColor" stroke="none" />
+          </svg>
+          <div>
+            <div class="warn__ttl" id="warn-ttl">Confirm Upload</div>
+            <p class="warn__sub">这一屏跳不过去。三道确认全勾上，上传按钮才会亮。</p>
+          </div>
+        </div>
+        <div class="warn__body">
+          <p class="warn__lead">! 你即将把这个文件公开到互联网上</p>
+          <ul class="ticks">
+            <li><label class="tick" for="ck1">
+              <input type="checkbox" id="ck1" />
+              <span class="tick__txt"><span class="no">01 / PUBLIC</span>
+                我知道这个 zip 会被<b>公开存储、任何人都能下载、长期保留</b>，
+                提交不是私有的，也不是可撤销的草稿。</span>
+            </label></li>
+            <li><label class="tick" for="ck2">
+              <input type="checkbox" id="ck2" />
+              <span class="tick__txt"><span class="no">02 / PRIVACY</span>
+                我确认包里<b>不含个人隐私、账号信息、密钥</b>。
+                自制模块里经常藏着作者的个人路径、调试脚本、硬编码 token ——
+                先打开 <code>module.prop</code>、<code>customize.sh</code>、<code>service.sh</code> 看一遍再传。</span>
+            </label></li>
+            <li><label class="tick" for="ck3">
+              <input type="checkbox" id="ck3" />
+              <span class="tick__txt"><span class="no">03 / REVIEW</span>
+                我知道投稿后<b>需要审核才会进公开索引，不是提交就立刻上线</b>；
+                已收录模块的版本更新一律人工审核，可能等更久。</span>
+            </label></li>
+          </ul>
+          <div class="warn__sum" id="warn-sum"></div>
+        </div>
+        <div class="warn__ft">
+          <button type="button" class="btn btn--ghost" id="confirm-back">返回修改</button>
+          <button type="button" class="btn btn--go" id="confirm-go" disabled>确认并上传</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 上传中 / 结果 -->
+    <div class="layer" id="layer-run" role="dialog" aria-modal="true" aria-labelledby="run-ttl" hidden>
+      <div class="done">
+        <div class="done__hd">
+          <div class="done__kicker" id="run-kicker">UPLOADING</div>
+          <h2 class="done__ttl" id="run-ttl">正在上传…</h2>
+        </div>
+        <div class="done__body">
+          <div id="run-progress">
+            <div class="bar__meta">
+              <span id="run-bytes">0 B / 0 B</span>
+              <span class="bar__pct" id="run-pct">0%</span>
+            </div>
+            <div class="bar"><div class="bar__fill" id="run-fill"></div></div>
+            <p class="field__help" style="margin-top:10px">
+              请勿关闭页面。上传完成后服务端会解包校验，然后开 PR —— 这两段都不受本页控制。
+            </p>
+          </div>
+          <div id="run-result" hidden></div>
+        </div>
+        <div class="done__ft" id="run-ft"></div>
+      </div>
+    </div>
+
+    <footer class="nameplate">
+      <span>MODULE·PANEL — 人人共建的 KernelSU / Magisk 模块索引</span>
+      <span class="sp" id="plate-note">static build · 本站不自带后端</span>
+    </footer>
+
+    <script>
+      // 无 JS 时至少说清楚为什么不行，别留一屏空白
+      document.documentElement.classList.add("js");
+    </script>
+  </body>
+</html>

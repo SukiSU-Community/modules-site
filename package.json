@@ -1,0 +1,16 @@
+{
+  "name": "module-panel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KernelSU / Magisk 模块投稿站 —— 纯静态前端，直连投稿 Worker",
+  "scripts": {
+    "serve": "node tools/serve.mjs",
+    "test": "node tools/selftest.mjs",
+    "fonts": "node tools/fetch-fonts.mjs",
+    "build": "node tools/build.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
