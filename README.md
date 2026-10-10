@@ -17,9 +17,9 @@
 | 公开索引地址 | `config.js:21` `INDEX_URL` | 「已收录模块」页直接 fetch 这个 MMRL JSON。不填则浏览页显示「索引地址待配置」，投稿功能不受影响。 |
 | **反机器人校验** | `config.js:29-30` `TURNSTILE_SITEKEY` / `TURNSTILE_FIELD` | 留空 = 界面显示「待接入」说明，提交时只随表带一个空的 token 字段。填入 sitekey 后自动加载 Turnstile 脚本并渲染部件，token 用 `TURNSTILE_FIELD` 的字段名发出（后端字段名不同就只改这一行）。 |
 | **酷安 UID 字段名** | `config.js:38` `COOLAPK_UID_FIELD` | 投稿人身份发两个字段：`uploader` = 昵称（索引里公开显示），`coolapkUid` = 酷安 UID 数字。后端约定的名字不同就改这一行。 |
-| **酷安核实端点** | `config.js:49-50` `COOLAPK_USER_PATH` / `COOLAPK_VERIFY_REQUIRED` | 见下面第 2 节。路径留空 = 不核实，界面显示「未经核实」，投稿照常能提。`COOLAPK_VERIFY_REQUIRED: true` 则必须核实通过才放行。 |
+| **酷安核实端点** | `config.js:54-55` `COOLAPK_USER_PATH` / `COOLAPK_VERIFY_REQUIRED` | 见下面第 2 节。路径留空 = 不核实，界面显示「未经核实」，投稿照常能提。`COOLAPK_VERIFY_REQUIRED: true` 则必须核实通过才放行。**四种状态**：`verified`（真反查到昵称）/ `self_reported`（后端只回显，没核实能力）/ `not_found`（拦住）/ `unavailable`（想核实但没核实成，只提示）。前两种在界面上文案不同，不许混。 |
 | 一键加源 scheme | `config.js:60` `SCHEME_ADD_SOURCE` | 例 `kernelsu://mmrl?url=<你的 INDEX_URL>`，说明页会用它渲染加源按钮。 |
-| 大小上限 | `config.js:55` `MAX_UPLOAD_BYTES` | 当前 `8 * 1024 * 1024`，**必须和服务端常量同步**，否则前端拦不住 / 前端误拦。 |
+| **大小上限** | `config.js:63` `MAX_UPLOAD_BYTES` | **这里不是上限的定义处，只是问不到时的兜底值。** 真实上限由 Worker 通过 `GET ${API_BASE}/` 的 `maxBytes` 字段自报，页面启动时问一次（`api.js` 的 `fetchServiceLimits()`），问到就重画拖放区提示、投稿规格与说明页状态。以前在这里抄一份的结果是抄出 8MB、后端实际 2MB：用户按页面写的数字传到一半被 400 拒，而页面还写着允许 8MB。 |
 | 站名 | `config.js:63-64` | 只影响标题、导航铭牌与 `<title>`。 |
 
 说明页（`#/about`）最后有一块「这个站自己的状态」，会把上面几项的实际接线情况显示出来 —— 你自己或别人打开就能看出哪里还没配。
@@ -28,15 +28,15 @@
 
 **跨域：`/submit` 我特意保持成「CORS 简单请求」。**
 `multipart/form-data` 本身在 CORS 允许列表里，而且我在 `submitModule()`（`public/scripts/api.js:82` 起）
-里**不设置任何自定义请求头**，所以浏览器不会发 `OPTIONS` 预检。因此你的 Worker 只需要：
+里**不设置任何自定义请求头**，所以浏览器不会发 `OPTIONS` 预检。
 
-- 给响应加 `Access-Control-Allow-Origin`（可以是 `*`，这个接口本来就公开）
-- 给响应加 `Access-Control-Allow-Headers` 与 `OPTIONS` 预检处理作为保险（将来一旦有人给请求加头就需要）
+Worker 侧已经落好了（`contrib/worker/src/index.ts`）：所有响应统一带
+`Access-Control-Allow-Origin: *`（含 400 与 404，否则错误也会被 CORS 掩盖成看不懂的浏览器报错），
+`OPTIONS` 预检回 204 并带 `Allow-Methods` / `Allow-Headers` 作为保险，另外
+**`GET /` 现在多返回一个 `maxBytes` 字段**，前端启动时读它，上限因此只有后端一个定义处。
 
-`GET /check` 同理，只需 `Access-Control-Allow-Origin`。
-
-我**没有**在前端做任何绕过（没改 `no-cors`、没上 JSONP、没加代理）。联调时若看到 CORS 报错，
-那是后端响应头还没加，请在那里修。
+我**没有**在前端做任何绕过（没改 `no-cors`、没上 JSONP、没加代理）。联调时若还看到 CORS 报错，
+那是部署的版本还没带上这些头，请在那里修。
 
 **错误原因会被原样显示。** 文档写「失败返回 400 加中文原因」，我按两种形态都做了兼容
 （`api.js:152` 的 `readReason` / `stripHtml`）：
@@ -62,11 +62,18 @@
 ```
 GET ${API_BASE}/user?uid=2781460
   → {"status":"verified","uid":"2781460","nickname":"某某","avatar":"https://avatar.coolapk.com/..."}
+  → {"status":"self_reported","uid":"2781460"}   只回显、没有核实能力 —— 现在就该回这个
   → {"status":"not_found"}      查无此人 —— 前端会拦住，不让提交
   → {"status":"unavailable"}    酷安不可达/超时 —— 前端只提示，不拦
 ```
 
-服务端侧要查的接口（同一份文档第 5.1 / 5.2 节）：
+**这个端点目前仍未实现**（Worker 现在只认 `/check`、`/submit`、`/`）。前端对 404 的处理是
+把它归为 `self_reported` 而不是 `unavailable`：「这条能力压根没接」和「这次没查到」是两件事，
+界面文案不同 —— 前者显示「署名未经核实」，后者才说「暂时无法核实」。
+`verified` 这个词只有真的反查到昵称与 UID 对应才允许返回；将来违规公示要用真实昵称时，
+这个端点是唯一能证明「昵称属于这个 UID」的来源，不要为了流程顺畅而提前升格它。
+
+服务端要查的接口（同一份文档第 5.1 / 5.2 节）：
 
 - `GET https://api.coolapk.com/v6/user/space?uid=<UID>`（主页头部信息，含昵称）
 - 或 `GET https://api.coolapk.com/v6/user/profile?uid=<UID>`（基本公开资料）
@@ -86,7 +93,9 @@ GET ${API_BASE}/user?uid=2781460
 `normalizeCoolapkUrl()`（`api.js:179`）用 `URL` 解析而不是字符串正则：必须 `http(s)` 协议、
 主机是 `coolapk.com` 或其子域，`coolapk.com.evil.tld`、`https://evil.tld/https://www.coolapk.com`、
 `javascript:` 都会被拒。用户只粘 `www.coolapk.com/feed/123` 时会自动补上 `https://`。
-**服务端建议同样按这个规则校验一遍**，前端校验挡不住直接打接口的人。
+**服务端已经按同一条规则复核过了**（`contrib/worker` 的 `coolapkSourceUrl()`，与 `normalizeCoolapkUrl()`
+逐条对齐：协议白名单、`URL` 解析后比主机名、拒 `coolapk.com.evil.tld` 与路径藏域名、漏协议补 `https://`）。
+前端校验只是省一次上传，真正拦人的是服务端 —— 直接打接口的人不受前端约束。
 
 ## 3. 功能对照
 
@@ -172,12 +181,20 @@ deflate 与 stored 两种压缩、UTF-8 中文内容、`description` 里再出�
 2. **`source` 现在限酷安站内链接**（按你的要求）。我用 `type=text` + 自己的 `normalizeCoolapkUrl()`
    而不是 `type=url`：`type=url` 会在浏览器层面拦住 `www.coolapk.com/feed/123` 这种漏写协议的粘帖，
    报错信息还是浏览器原生的英文提示，没法按我们的文案说话；现在会自动补 `https://` 并给出中文原因。
-   代价是**这条规则前端挡不住直接打接口的人**，服务端必须同样校验一遍主机名。
-3. **`versionCode` 用 `type=number`** 会带来滚轮改值、`e` 字符等输入意外。现在前端只接受
+   代价是**这条规则前端挡不住直接打接口的人**，所以服务端也实现了一遍同样的规则（见上面第 2 节）。
+3. **`coolapkUid` 现在是服务端必收字段**：缺失、非纯数字、位数不在 4~12 都直接 400。
+   Worker 以前收到它就丢掉，索引发布后没人能回答「这个包是谁投的」，整套「溯源是追责的唯一抓手」
+   等于空话；现在它一路写进 `pending/<id>/<versionCode>.json` 顶层，并出现在 PR 正文里
+   （做成可点开的 `coolapk.com/u/<UID>` 链接）。**App 端投稿也必须带这个字段，否则会被拒。**
+4. **`versionCode` 用 `type=number`** 会带来滚轮改值、`e` 字符等输入意外。现在前端只接受
    `/^\d+$/`，非整数会明确报错；但服务端最好同样按整数解析（文档写「整数版本号」，默认你会处理）。
-4. **查重结果不是提交的前置条件**：`unknown` 和「查不了重」都允许继续投稿（符合你文档
+5. **查重结果不是提交的前置条件**：`unknown` 和「查不了重」都允许继续投稿（符合你文档
    「任何情况下都返回 200、客户端只读 status」的设计意图）。只有 `recorded`（已收录且不更新）
    我给的文案是「不需要再投稿」，但没有硬拦 —— 让服务端做最终判断更稳。
-5. **一个后端侧建议**：`/submit` 现在无鉴权限流，而它会往 GitHub Release 写文件并开 PR。
-   Turnstile 加上之前，建议先按 IP/署名做个粗限流，否则第一个被刷的会是 PR 队列而不是你预期的脏包。
-6. 站点没有自己的 favicon 文件，用了一个内联 SVG data-URI，省一个请求也不会有 404。
+6. **后端侧现状（已更新）**：`/submit` 现在有了两道准入闸 —— 按 IP 每小时 5 次的 KV 滑动窗口限流，
+   以及 Cloudflare Turnstile 人机校验（`contrib/worker` 的 `kvRateLimiter` / `turnstileVerifier`，
+   不配对应环境变量就自动跳过）。原先写的「无鉴权限流、第一个被刷的会是 PR 队列」已经不成立。
+   两处仍要注意：① Turnstile 在 Cloudflare 自身故障时是 **fail-open**（放行，让限流兜底），
+   ② 限流的 IP 只认 `cf-connecting-ip` —— 以前会回退读 `x-forwarded-for` 的第一段，
+   而那个头是客户端自己写的，每次换一个伪造值就是一个新桶，限流形同虚设。
+7. 站点没有自己的 favicon 文件，用了一个内联 SVG data-URI，省一个请求也不会有 404。

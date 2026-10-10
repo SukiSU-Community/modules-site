@@ -216,6 +216,17 @@ export const USER_STATUS = {
     title: "暂时无法核实",
     hint: "酷安接口没响应或后端核实不可用。不影响你继续投稿，但署名会标为未核实。",
   },
+  // 后端明确告诉我们「只收到、没核实」。和 unavailable（想核实但没核实成）不同，
+  // 这一档是后端目前压根没有核实能力 —— 界面必须说清楚是哪一种，
+  // 否则投稿人会以为「显示未核实」只是网络抖动，而实际上是这条能力还没接。
+  self_reported: {
+    tone: "muted",
+    label: "self reported",
+    title: "署名未经核实",
+    hint:
+      "后端收到了 UID，但目前没有核实它对应哪个真实酷安账号。" +
+      "投稿照常，只是这个署名属于「你自己报的」，出问题时公示按自报处理。",
+  },
 };
 
 /**
@@ -233,6 +244,12 @@ export async function lookupCoolapkUser(uid) {
   } catch {
     return { status: "unavailable" };
   }
+  if (!res.ok) {
+    // 非 2xx（最常见是 404：后端压根还没实现这个端点）意味着「没有核实能力」，
+    // 不是「这次没核实成」。两者在界面上必须分开：前者要写「未经核实」，
+    // 后者才写「暂时无法核实」。混在一起会让人以为再等等就好。
+    return { status: "self_reported", uid };
+  }
   let json;
   try {
     json = await res.json();
@@ -249,7 +266,41 @@ export async function lookupCoolapkUser(uid) {
     };
   }
   if (json.status === "not_found") return { status: "not_found" };
+  // Worker 只做原样回显时给的就是这个值 —— 它诚实，所以照原样呈现，不升格成 verified
+  if (json.status === "self_reported") return { status: "self_reported", uid: String(json.uid || uid) };
   return { status: "unavailable" };
+}
+
+/**
+ * 问后端要它自己的真实上限。
+ *
+ * 为什么要问而不是在 config.js 里抄一份：抄出来的那一份一定会有人对不上 ——
+ * 前端写过 8MB、Worker 实际 2MB，于是用户按 8MB 传，传到一半被 400 拒掉，
+ * 而页面上明明还写着「允许 8MB」。现在上限只有 Worker 一个定义处，
+ * config.js 的那份退化成「问不到时的兜底值」。
+ *
+ * 失败不抛错：这个站要能在后端没接的时候照常浏览与填表，问不到就用兜底值。
+ * from 字段给说明页的「这个站自己的状态」用，让人看得出接线到哪一档。
+ */
+export async function fetchServiceLimits() {
+  const fallback = { maxBytes: CONFIG.MAX_UPLOAD_BYTES, from: "config" };
+  if (!IS_API_CONFIGURED) return fallback;
+  let res;
+  try {
+    res = await fetch(url("/"), { method: "GET", headers: { Accept: "application/json" } });
+  } catch {
+    return { ...fallback, from: "unreachable" };
+  }
+  if (!res.ok) return { ...fallback, from: "unreachable" };
+  let json;
+  try {
+    json = await res.json();
+  } catch {
+    return { ...fallback, from: "unreachable" };
+  }
+  const n = Number(json?.maxBytes);
+  if (!Number.isFinite(n) || n <= 0) return { ...fallback, from: "no-field" };
+  return { maxBytes: Math.floor(n), from: "backend" };
 }
 
 function httpUrl(value) {

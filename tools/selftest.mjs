@@ -3,6 +3,10 @@
 // 实现可以原样在这里跑，不需要为测试另写一份。
 // 用法：node tools/selftest.mjs
 import zlib from "node:zlib";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { CONFIG } from "../public/scripts/config.js";
 import {
   ZipError,
   canInflateRaw,
@@ -217,9 +221,8 @@ async function main() {
   check("非 MMRL 结构报 BackendError", bad instanceof BackendError, String(bad && bad.name));
 
   console.log("\n[8] 酷安 UID 与出处规则");
-  const { isCoolapkUid, normalizeCoolapkUrl, lookupCoolapkUser } = await import(
-    "../public/scripts/api.js"
-  );
+  const { isCoolapkUid, normalizeCoolapkUrl, lookupCoolapkUser, USER_STATUS, fetchServiceLimits } =
+    await import("../public/scripts/api.js");
   check("2781460 是合法 UID", isCoolapkUid("2781460") === true);
   check("带空格也认", isCoolapkUid("  2781460 ") === true);
   check("拒绝带链接前缀", isCoolapkUid("https://www.coolapk.com/u/2781460") === false);
@@ -242,6 +245,41 @@ async function main() {
   // API_BASE 未配置时不发任何请求，直接回 off —— 界面据此显示「未经核实」而不是报错卡死
   const off = await lookupCoolapkUser("2781460");
   check("后端未接线时核实返回 off 而不是抛错", off.status === "off", JSON.stringify(off));
+
+  /* ------------------------------------------------ 与后端的字段名/契约对齐
+     这一节防的是「两边各自改了常量，直到线上报错才发现」。曾经前端发 turnstile、
+     后端读 cf-turnstile-response；前端写 8MB、后端实际 2MB。两个都是静默失效。 */
+
+  check(
+    "人机校验字段名在后端认的范围内",
+    CONFIG.TURNSTILE_FIELD === "turnstile" || CONFIG.TURNSTILE_FIELD === "cf-turnstile-response",
+    CONFIG.TURNSTILE_FIELD
+  );
+  check("酷安 UID 字段名与后端约定一致", CONFIG.COOLAPK_UID_FIELD === "coolapkUid", CONFIG.COOLAPK_UID_FIELD);
+  check("前端不再自己决定上限：上限改为问后端", typeof fetchServiceLimits === "function");
+  check(
+    "核实状态里有诚实的 self_reported（不拿「暂时无法核实」糊弄「这条能力没接」）",
+    Boolean(USER_STATUS.self_reported) && USER_STATUS.self_reported.tone !== "ok"
+  );
+
+  // 后端仓库在同一台机器上时，直接把它的源码当契约的另一端来读；不在就跳过。
+  // 这不是跨仓库依赖——缺后端时这段自动放行，测试照样绿。
+  const here = dirname(fileURLToPath(import.meta.url));
+  const workerCandidates = [
+    "../../刷机包/contrib/worker/src/index.ts",
+    "../contrib/worker/src/index.ts",
+  ];
+  const workerPath = workerCandidates.map((p) => resolve(here, p)).find((p) => existsSync(p));
+  if (!workerPath) {
+    console.log("  skip 后端源码不在本机，跳过字段名交叉校验");
+  } else {
+    const worker = readFileSync(workerPath, "utf8");
+    check("后端确实读 turnstile 这个字段名", /fields\["?'?turnstile'?\"?\]/.test(worker) || /fields\['turnstile'\]/.test(worker));
+    check("后端确实读 coolapkUid 并写进 pending JSON", /fields\.coolapkUid/.test(worker) && /coolapkUid:/.test(worker));
+    check("后端自报 maxBytes 给前端", /maxBytes:\s*MAX_TOTAL_BYTES/.test(worker));
+    check("后端只信 cf-connecting-ip（不再信任可伪造的 x-forwarded-for）", !/headers\.get\(["']x-forwarded-for["']\)/i.test(worker));
+    check("后端自己校验出处主机名", /coolapk\.com\.evil\.tld|endsWith\(["']\.coolapk\.com["']\)/.test(worker));
+  }
 
   console.log(`\n${fail === 0 ? "全部通过" : "有失败项"}：${pass} passed, ${fail} failed`);
   if (fail) process.exitCode = 1;

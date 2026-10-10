@@ -12,6 +12,7 @@ import {
   checkModule,
   submitModule,
   fetchIndex,
+  fetchServiceLimits,
   lookupCoolapkUser,
   isCoolapkUid,
   normalizeCoolapkUrl,
@@ -30,8 +31,11 @@ const state = {
   file: null,
   zip: null, // { arrayBuffer, entries, inspect, prop }
   checkStatus: null,
-  uidStatus: "idle", // idle | checking | off | verified | not_found | unavailable | invalid
+  uidStatus: "idle", // idle | checking | off | verified | not_found | unavailable | self_reported | invalid
   uidInfo: null, // { uid, nickname, avatar }
+  // 上限由后端自报（api.js 的 fetchServiceLimits）；config.js 那份只是问不到时的兜底。
+  maxBytes: CONFIG.MAX_UPLOAD_BYTES,
+  maxBytesFrom: "config", // config | backend | unreachable | no-field
   index: null,
   indexError: null,
   attempted: false,
@@ -135,6 +139,8 @@ function renderRoute() {
     else a.removeAttribute("aria-current");
   });
   $("#dock").hidden = name !== "submit";
+  // 状态表里有「实测状态」这种会随时间变的内容，进 about 时重画一次，别让人看到过期值
+  if (name === "about") renderAbout();
   if (params.has("q")) {
     state.query = params.get("q") || "";
     $("#q").value = state.query;
@@ -197,7 +203,7 @@ function typeReadout() {
   const bits = ["面板就绪"];
   bits.push(IS_API_CONFIGURED ? `后端 ${CONFIG.API_BASE}` : "后端 API_BASE 未配置");
   bits.push(IS_INDEX_CONFIGURED ? "索引地址已接" : "索引 INDEX_URL 未配置");
-  bits.push(`上限 ${Math.round(CONFIG.MAX_UPLOAD_BYTES / MB)} MB`);
+  bits.push(`上限 ${Math.round(state.maxBytes / MB)} MB${state.maxBytesFrom === "backend" ? "" : "（后端未自报，用兜底值）"}`);
   if (!canInflateRaw()) bits.push("本浏览器读不了 zip，元数据需手填");
   const text = bits.join(" · ");
   const el = $("#boot");
@@ -260,7 +266,7 @@ async function intake(file) {
   state.file = file;
   state.zip = null;
 
-  const limit = CONFIG.MAX_UPLOAD_BYTES;
+  const limit = state.maxBytes;
   out.push([null, `读取 ${file.name} · ${fmtBytes(file.size)}`]);
 
   if (!/\.zip$/i.test(file.name)) {
@@ -364,7 +370,7 @@ function bindFile() {
   const drop = $("#drop");
   const input = $("#file");
   input.addEventListener("change", () => intake(input.files && input.files[0]));
-  $("#drop-hint").textContent = `上限 ${Math.round(CONFIG.MAX_UPLOAD_BYTES / MB)} MB · 不要多套一层文件夹`;
+  paintLimit();
 
   ["dragenter", "dragover"].forEach((type) =>
     drop.addEventListener(type, (e) => {
@@ -1073,12 +1079,22 @@ function renderAbout() {
       v: IS_TURNSTILE_CONFIGURED ? "已配置" : "未配置（提交时只带空 token 字段）",
       ok: IS_TURNSTILE_CONFIGURED,
     },
-    { k: "MAX_UPLOAD_BYTES", v: fmtBytes(CONFIG.MAX_UPLOAD_BYTES), ok: true },
+    {
+      k: "上传上限",
+      v:
+        state.maxBytesFrom === "backend"
+          ? `${fmtBytes(state.maxBytes)}（后端自报，与服务端一致）`
+          : `${fmtBytes(state.maxBytes)}（后端未自报 maxBytes，这里用的是 config.js 的兜底值，可能与服务端实际值不一致）`,
+      ok: state.maxBytesFrom === "backend",
+    },
     {
       k: CONFIG.COOLAPK_UID_FIELD,
       v: IS_UID_VERIFY_ON
-        ? `${CONFIG.COOLAPK_USER_PATH}?uid= 核实端点已启用`
+        ? state.uidStatus === "idle"
+          ? `${CONFIG.COOLAPK_USER_PATH}?uid= 已接，填入 UID 后显示实测结果`
+          : `${CONFIG.COOLAPK_USER_PATH}?uid= 已接，实测：${USER_STATUS[state.uidStatus]?.title || state.uidStatus}`
         : "只校验格式，不核实账号是否存在",
+      // 这一行问的是「接线了没有」，所以端点在就算 OK；能不能真的核实由上面的实测文案说话
       ok: IS_UID_VERIFY_ON,
     },
     {
@@ -1133,13 +1149,42 @@ function renderAbout() {
 
 /* -------------------------------------------------------------------- 启动 */
 
+/**
+ * 把「当前生效的上限」画到界面上。上限是问后端要的，异步到货，
+ * 所以两处显示（拖放区提示与投稿规格）都必须能从这一个函数重画。
+ */
+function paintLimit() {
+  const mb = Math.round(state.maxBytes / MB);
+  const hint = $("#drop-hint");
+  if (hint) hint.textContent = `上限 ${mb} MB · 不要多套一层文件夹`;
+  const spec = $("#spec-max");
+  if (spec) spec.replaceChildren(node("b", null, mb), " MB");
+}
+
+/**
+ * 问后端它自己的真实上限。
+ *
+ * 这一步存在的理由很具体：前端曾经抄了一份 8MB，而后端常量是 2MB，
+ * 于是用户按页面上的数字传到一半被 400 拒掉，界面还写着「允许 8MB」。
+ * 抄来的常量一定会漂移，所以让它只有后端一个定义处，前端这份退化成兜底。
+ */
+async function syncLimits() {
+  const r = await fetchServiceLimits();
+  const changed = r.maxBytes !== state.maxBytes || r.from !== state.maxBytesFrom;
+  state.maxBytes = r.maxBytes;
+  state.maxBytesFrom = r.from;
+  if (!changed) return;
+  paintLimit();
+  renderAbout();
+  // 开机读数那段是打字机动画，只在数字真的变了时重打一次，否则白白打断阅读
+  typeReadout();
+}
+
 function init() {
   $("#brand-zh").textContent = CONFIG.SITE_NAME;
   document.title = `${CONFIG.SITE_NAME} · ${CONFIG.SITE_SUBTITLE}`;
-  $("#spec-max").replaceChildren(
-    node("b", null, Math.round(CONFIG.MAX_UPLOAD_BYTES / MB)),
-    " MB"
-  );
+  paintLimit();
+  syncLimits();
 
   if (IS_TURNSTILE_CONFIGURED) {
     const slot = $("#turnstile-slot");
