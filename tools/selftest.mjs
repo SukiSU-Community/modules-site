@@ -1,7 +1,8 @@
 // zip 解析与 module.prop 预填的自检：手搓真实字节喂给浏览器端的解析代码。
 // Node 18+ 也有 DecompressionStream / Blob / Response，所以 public/scripts 里的
 // 实现可以原样在这里跑，不需要为测试另写一份。
-// 用法：node tools/selftest.mjs
+// 用法：node tools/selftest.mjs [--require-backend]
+//   --require-backend 把「找不到后端源码」从跳过升级为失败，CI 用这个。
 import zlib from "node:zlib";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -16,8 +17,11 @@ import {
 } from "../public/scripts/zipread.js";
 import { parseModuleProp, missingRequired } from "../public/scripts/moduleprop.js";
 
+const REQUIRE_BACKEND = process.argv.includes("--require-backend");
+
 let pass = 0;
 let fail = 0;
+let skipped = 0;
 function check(name, ok, extra) {
   if (ok) {
     pass++;
@@ -26,6 +30,17 @@ function check(name, ok, extra) {
     fail++;
     console.log(`  FAIL ${name}${extra ? " —— " + extra : ""}`);
   }
+}
+
+/**
+ * 跳过的检查必须出现在总结里。
+ * 上一版把「后端源码不在本机」做成静默跳过，结果 contrib 目录一搬家，
+ * 5 条跨仓库字段名校验就再也不跑了，而输出仍然写着「全部通过」——
+ * 这正是最坏的一种绿：契约检查消失了，而没人看见它消失。
+ */
+function skip(name, why) {
+  skipped++;
+  console.log(`  SKIP ${name} —— ${why}`);
 }
 
 const CRC_TABLE = (() => {
@@ -262,17 +277,25 @@ async function main() {
     Boolean(USER_STATUS.self_reported) && USER_STATUS.self_reported.tone !== "ok"
   );
 
-  // 后端仓库在同一台机器上时，直接把它的源码当契约的另一端来读；不在就跳过。
-  // 这不是跨仓库依赖——缺后端时这段自动放行，测试照样绿。
+  // 后端仓库在同一台机器上时，直接把它的源码当契约的另一端来读。
+  // 路径靠猜迟早会像 contrib 从 H:\刷机包 搬到 H:\sukisu 那样一次搬家就全哑掉，
+  // 所以显式环境变量优先：WORKER_SRC=/path/to/worker/src/index.ts npm test
   const here = dirname(fileURLToPath(import.meta.url));
   const workerCandidates = [
-    "../../刷机包/contrib/worker/src/index.ts",
+    process.env.WORKER_SRC,
+    "../../sukisu/contrib/worker/src/index.ts",
     "../contrib/worker/src/index.ts",
-  ];
+  ].filter(Boolean);
   const workerPath = workerCandidates.map((p) => resolve(here, p)).find((p) => existsSync(p));
   if (!workerPath) {
-    console.log("  skip 后端源码不在本机，跳过字段名交叉校验");
+    const msg = `找不到后端源码（试过：${workerCandidates.join(" / ")}）`;
+    if (REQUIRE_BACKEND) {
+      check("后端源码必须存在（--require-backend）", false, msg);
+    } else {
+      skip("5 条跨仓库字段名交叉校验", msg);
+    }
   } else {
+    console.log(`  后端契约另一端：${workerPath}`);
     const worker = readFileSync(workerPath, "utf8");
     check("后端确实读 turnstile 这个字段名", /fields\["?'?turnstile'?\"?\]/.test(worker) || /fields\['turnstile'\]/.test(worker));
     check("后端确实读 coolapkUid 并写进 pending JSON", /fields\.coolapkUid/.test(worker) && /coolapkUid:/.test(worker));
@@ -281,7 +304,11 @@ async function main() {
     check("后端自己校验出处主机名", /coolapk\.com\.evil\.tld|endsWith\(["']\.coolapk\.com["']\)/.test(worker));
   }
 
-  console.log(`\n${fail === 0 ? "全部通过" : "有失败项"}：${pass} passed, ${fail} failed`);
+  const summary = `${fail === 0 ? "全部通过" : "有失败项"}：${pass} passed, ${fail} failed`;
+  console.log(`\n${skipped ? `${summary}，跳过 ${skipped} 组` : summary}`);
+  if (skipped && !REQUIRE_BACKEND) {
+    console.log("注意：跳过的这些是跨仓库契约校验。CI 里请用 npm test -- --require-backend，别让它们静默消失。");
+  }
   if (fail) process.exitCode = 1;
 }
 
