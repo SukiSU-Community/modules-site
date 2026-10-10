@@ -111,6 +111,7 @@ GET ${API_BASE}/user?uid=2781460
 | 已收录模块浏览页（MMRL） | `#view-index` + `api.js:fetchIndex()/normalizeIndex()`，搜索按 ID/名称/作者/描述过滤并高亮 |
 | 预留 Turnstile token 字段 | `api.js` 始终 append 该字段；`config.js:29` 控制是否渲染真部件 |
 | 上传大小 / zip 形态前端预检 | 超过上限、非 `.zip`、根目录无 `module.prop` 都在选文件那一刻就拒掉并把原因打出来 |
+| 包内 `module.prop` 与表单一致性 | **服务端判**（`contrib/worker/src/index.ts` 的 ⑤-a）：`id` 必须一致，包内写了 `versionCode` 也必须一致；不一致 → 400 并把两边的值都打出来。前端不做同一条检查 —— 它已经解析过 module.prop，再判一次就是第二处规则，迟早和后端漂移（本站的做法是让前端问后端，不抄第二份，见「上限自报」）；服务端的原因原样显示在失败屏（`api.js:readReason`） |
 
 关于「版本更新需人工审核」这条，界面在三个地方如实说明了：查重结果 `version_update` 的提示、
 确认屏第三条勾选、以及说明页的流程管线里把「人工审核」单独高亮。没有把投稿写成「提交即上线」。

@@ -35,7 +35,7 @@ function check(name, ok, extra) {
 /**
  * 跳过的检查必须出现在总结里。
  * 上一版把「后端源码不在本机」做成静默跳过，结果 contrib 目录一搬家，
- * 5 条跨仓库字段名校验就再也不跑了，而输出仍然写着「全部通过」——
+ * 6 条跨仓库字段名校验（当时是 5 条）就再也不跑了，而输出仍然写着「全部通过」——
  * 这正是最坏的一种绿：契约检查消失了，而没人看见它消失。
  */
 function skip(name, why) {
@@ -292,7 +292,7 @@ async function main() {
     if (REQUIRE_BACKEND) {
       check("后端源码必须存在（--require-backend）", false, msg);
     } else {
-      skip("5 条跨仓库字段名交叉校验", msg);
+      skip("6 条跨仓库契约校验", msg);
     }
   } else {
     console.log(`  后端契约另一端：${workerPath}`);
@@ -302,6 +302,14 @@ async function main() {
     check("后端自报 maxBytes 给前端", /maxBytes:\s*MAX_TOTAL_BYTES/.test(worker));
     check("后端只信 cf-connecting-ip（不再信任可伪造的 x-forwarded-for）", !/headers\.get\(["']x-forwarded-for["']\)/i.test(worker));
     check("后端自己校验出处主机名", /coolapk\.com\.evil\.tld|endsWith\(["']\.coolapk\.com["']\)/.test(worker));
+    // ⑤-a：包内 module.prop 与表单的一致性只能在提交阶段判（索引的键取自表单，安装器读的是包内文件）。
+    // 前端故意不重复这条规则，所以这里必须钉住「后端真的在判」，否则两边就都没人了。
+    check(
+      "后端在提交阶段核对包内 module.prop 的 id 与 versionCode（⑤-a）",
+      /zipReadRootFile\(zipBytes, size, ['"]module\.prop['"]\)/.test(worker) &&
+        /prop\.id !== id/.test(worker) &&
+        /prop\.versionCode && Number\(prop\.versionCode\) !== versionCode/.test(worker),
+    );
   }
 
   const summary = `${fail === 0 ? "全部通过" : "有失败项"}：${pass} passed, ${fail} failed`;
