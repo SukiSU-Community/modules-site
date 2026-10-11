@@ -8,7 +8,8 @@ export const CONFIG = {
   // 填法：Worker 的根地址，结尾不要带斜杠。
   //   例：'https://module-submit.xxxxx.workers.dev'
   //   例：'https://api.你的域名.com'
-  // 前端只会请求 `${API_BASE}/check` 与 `${API_BASE}/submit`。
+  // 前端会请求 `${API_BASE}/check`、`${API_BASE}/user` 与 `${API_BASE}/submit`
+  // （另外启动时问一次 `${API_BASE}/` 拿真实大小上限）。
   // 留空字符串时投稿页仍可正常填写，但 /check 与提交会被拦下并明确提示未配置。
   API_BASE: "",
 
@@ -45,7 +46,8 @@ export const CONFIG = {
   //     → {"status":"verified","uid":"2781460","nickname":"…","avatar":"…"}
   //       只有真的反查过酷安、确认昵称与 UID 对应，才允许回这个值
   //     → {"status":"self_reported","uid":"…"}
-  //       后端只是原样回显，没有核实能力 —— 现在就该回这个，别让人误以为核实过了
+  //       后端只是原样回显，这次没核实（核实开关被运维关掉，或 UID 形状不对）
+  //       —— 别把它写成核实过：界面必须说「未经核实」
   //     → {"status":"not_found"}      查无此人（前端会拦住，不让提交）
   //     → {"status":"unavailable"}    想核实但没核实成（酷安不可达/超时）
   // 界面会把 self_reported 与 unavailable 分开写：前者是「这条能力还没接」，
