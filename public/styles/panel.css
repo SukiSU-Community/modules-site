@@ -273,11 +273,19 @@ code {
   flex-wrap: wrap;
 }
 
+/* —— 站名锁版式 ——
+   logo 与中文占一行，英文另起一行：左端贴 logo 左边、右端贴「酷模」右边，
+   所以英文那行要撑满整条锁版式的宽度。 */
 .plate {
+  display: grid;
+  gap: 5px;
+  margin-right: auto;
+}
+
+.plate__top {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-right: auto;
 }
 
 .plate__mark {
@@ -291,36 +299,38 @@ code {
   width: 100%;
   height: 100%;
 }
-/* 切角外框 + 实心模块块：形状与 favicon 同一套（两角切角，不是四角）。 */
-.plate__frame {
-  fill: none;
-  stroke: var(--amber-fill);
-  stroke-width: 2.8;
-}
-.plate__core {
+/* 圆角方块里刻出 M：方块实色、M 是负形（用 mask 挖出来），
+   所以 M 显示的是背后的底色 —— 深浅两个主题都自然成立。
+   颜色走 CSS 而不是 SVG 属性，才能跟着 --amber-fill 一起换主题。 */
+.plate__disc {
   fill: var(--amber-fill);
 }
 
-.plate__txt {
-  display: grid;
-  line-height: 1.2;
-}
-/* 中文在上、拉丁在下：中文是品牌主名，所以它更亮更大；拉丁只是副行。 */
+/* 中文是品牌主名，最大最亮。 */
 .plate__zh {
   font-family: var(--sans);
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: 0.06em;
   color: var(--ink);
 }
+
+/* 英文只是副行，但要两端分别贴住 logo 左边和中文名右边。
+   `width: 0` 是必需的：让它不参与上面那行的列宽计算，否则「COOL MODULE」
+   的自然宽度会反过来把锁版式撑宽，右端就对不上中文名的右边缘了；
+   `min-width: 100%` 再在布局时把它拉回整宽，两个词由 space-between 分到两端。
+   字号只有 9.5px 是因为这行必须塞进 78px 里（11 个字符）。 */
 .plate__lat {
-  margin-top: 3px;
+  display: flex;
+  justify-content: space-between;
+  width: 0;
+  min-width: 100%;
   font-family: var(--display);
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 600;
   line-height: 1.2;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.1em;
   color: var(--ink-3);
 }
 
@@ -446,7 +456,7 @@ main {
 }
 h1 {
   margin: 0 0 10px;
-  font-size: clamp(30px, 6.6vw, 50px);
+  font-size: clamp(38px, 8.4vw, 58px);
   font-weight: 800;
   line-height: 1.1;
   letter-spacing: -0.02em;
@@ -1761,16 +1771,24 @@ mark {
   main {
     padding-bottom: 108px;
   }
+  /* 顶栏从 760 起就不许换行：品牌、分区、主题开关必须在同一条横线上 */
   .bezel__in {
     gap: 10px;
     padding: 10px var(--gut) 8px;
+    flex-wrap: nowrap;
   }
+  .nav {
+    min-width: 0;
+  }
+  /* 窄屏锁版式整体缩一档。英文的字号必须跟着缩：它要塞进上面那行里，
+     字号不动的话自然宽度会超过那行，右端会溢出到导航上。 */
   .plate__zh {
-    font-size: 15px;
+    font-size: 16px;
     letter-spacing: 0.04em;
   }
   .plate__lat {
-    letter-spacing: 0.16em;
+    font-size: 9px;
+    letter-spacing: 0.08em;
   }
   .panel {
     padding: 16px var(--gut) 18px;
@@ -1807,16 +1825,49 @@ mark {
   }
 }
 
-@media (max-width: 400px) {
-  h1 {
-    font-size: 27px;
+/* 手机档顶栏：品牌只留中文、分区去掉编号、主题开关只留图标。
+   省下来的宽度刚好让整条横线在 390px 上排成一排 —— 不换行是硬要求，
+   所以宁可收装饰，也不让分区滚动。 */
+@media (max-width: 620px) {
+  :root {
+    --gut: 12px;
+  }
+  .bezel__in {
+    gap: 8px;
+  }
+  .plate__top {
+    gap: 6px;
+  }
+  .plate__lat {
+    display: none;
+  }
+  .plate__mark {
+    width: 24px;
+    height: 24px;
+  }
+  .nav {
+    gap: 2px;
+  }
+  .nav a i {
+    display: none;
   }
   .nav a {
-    padding: 6px 9px;
+    gap: 0;
+    padding: 9px 6px;
     font-size: 12.5px;
   }
+  .theme {
+    position: relative;
+    padding: 6px;
+  }
+  /* 不用 display:none —— 那样按钮就没有可读名字了；只把它从视觉上收掉。 */
   .theme span {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
 

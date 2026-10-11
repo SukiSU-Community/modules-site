@@ -448,6 +448,16 @@ async function main() {
     /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/.test(panelCss) &&
       !/\.spec\s*\{[^}]*grid-template-columns:\s*1fr/.test(panelCss)
   );
+  // 顶栏与标语各踩过一次「窄屏另有硬编码，clamp 白写」：这两条钉的就是那两个坑。
+  check(
+    "顶栏窄屏不换行（.bezel__in 用 nowrap 覆盖默认的 wrap）",
+    /\.bezel__in\s*\{[^}]*flex-wrap: nowrap/.test(panelCss)
+  );
+  check(
+    "标语字号只由 clamp 决定，没有任何媒体查询再用固定 px 把它压回去",
+    /h1 \{[^}]*font-size: clamp\((3[6-9]|[4-9][0-9])px/.test(panelCss) &&
+      !/h1 \{[^}]*font-size: \d+px/.test(panelCss)
+  );
   check(
     "昵称那一行排在 UID 输入框之后（用户只填 UID，结果跟在后面）",
     formHtml.indexOf('data-k="coolapkUid"') > 0 &&
