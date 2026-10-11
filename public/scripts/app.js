@@ -502,6 +502,17 @@ function uidBlocked() {
   return false;
 }
 
+/* 口令只在「UID 核实通过」那一刻生成（runUidCheck 里那一行是唯一赋值点），所以这条没过时，
+   原因可能在站点这边（核实根本没接），也可能在流程还没走完（正在查 / 还没查）。两者写成同一句
+   「口令没生成」，被拦住的人就只剩一个说不清为什么的坏按钮 —— 状态文案必须说清卡在谁手上。
+   注意这里改的全是说明文字：ok 只看 Boolean(state.nonce)，前端不加第二条闸，判定在 Worker。 */
+const NONCE_WHY = {
+  off: "后端没配置酷安身份核实，口令生成不了 —— 投稿通道未开放，这一步要站点来接",
+  self_reported: "后端收到了 UID 但没核实它，口令生成不了 —— 投稿通道未开放，这一步要站点来接",
+  unavailable: "这次没核实成，口令还没生成 —— 把 UID 重敲一遍会再查；一直不通是后端没接上核实",
+  checking: "正在核实 UID —— 通过后这串口令自动出现",
+};
+
 function gateItems() {
   const { zipOk, missing, badCode, badUid, badSource } = collect();
   const metaKeys = ["id", "name", "version", "versionCode"];
@@ -522,10 +533,18 @@ function gateItems() {
         ? "酷安用户已核实"
         : uidBlocked()
         ? "酷安用户核实没通过"
-        : "酷安用户核实（接口不可用时不拦你）";
+        // 「这条不拦你」只说自己这一条，不承诺整张清单放行 —— 核实没成时口令也不会有，
+        // 于是下一条才是真正按住按钮的那条。两句并排时必须各说各的范围，否则互相打脸。
+        : "酷安用户核实（这一条不拦你；口令要核实通过才生成）";
     items.push({ ok: !uidBlocked(), text: label });
   }
-  items.push({ ok: Boolean(state.nonce), text: "投稿口令已生成（填进酷安签名）" });
+  const nonceText = state.nonce
+    ? fieldValue("id")
+      ? "投稿口令已生成（填进酷安签名）"
+      // 口令有了但还没 id，派生串就没有来源，下面那一行也就还是藏着的
+      : "投稿口令已生成 —— 填上模块 ID 就显示这一串"
+    : NONCE_WHY[state.uidStatus] || "投稿口令还没生成 —— UID 核实通过之后自动出现这一串";
+  items.push({ ok: Boolean(state.nonce), text: nonceText });
   items.push({ ok: IS_API_CONFIGURED, text: "后端 API_BASE 已配置" });
   return items;
 }

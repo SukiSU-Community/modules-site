@@ -21,7 +21,7 @@
 | 处置台账地址 | `config.js` `DISPOSITIONS_URL` | **留空就按 `INDEX_URL` 同目录换文件名推导**（索引仓库里 `json/modules.json` 与 `json/dispositions.json` 是一对，Worker 的两个镜像端点也是一对）。只有把台账放去了别处才显式填。公示页（`#/incidents`）读它。 |
 | **反机器人校验** | `config.js` `TURNSTILE_SITEKEY` / `TURNSTILE_FIELD` | 留空 = 界面显示「待接入」说明，提交时只随表带一个空的 token 字段。填入 sitekey 后自动加载 Turnstile 脚本并渲染部件，token 用 `TURNSTILE_FIELD` 的字段名发出（后端字段名不同就只改这一行）。 |
 | **酷安 UID 字段名** | `config.js` `COOLAPK_UID_FIELD` | 投稿人身份发两个字段：`uploader` = 昵称（索引里公开显示），`coolapkUid` = 酷安 UID 数字。后端约定的名字不同就改这一行。 |
-| **酷安核实端点** | `config.js` `COOLAPK_USER_PATH` | 见下面第 2 节。路径留空 = 不核实，界面显示「未经核实」，投稿照常能提 —— 核实这条**没有前端开关**：能在浏览器里改到的开关就能被绕过，判定在 Worker。**四种状态**：`verified`（真反查到昵称）/ `self_reported`（后端只回显，这次没核实）/ `not_found`（拦住）/ `unavailable`（想核实但没核实成，只提示）。前两种在界面上文案不同，不许混。 |
+| **酷安核实端点** | `config.js` `COOLAPK_USER_PATH` | 见下面第 2 节。路径留空 = 不核实，界面显示「未经核实」，**投稿口令也就生成不了** —— 口令是清单里硬拦的一条，于是「上传前确认」按钮一直按死：这条端点没接上之前投稿通道是不开放的（口令是这套流程的硬要求，不是可关的旁路）。核实这条**没有前端开关**：能在浏览器里改到的开关就能被绕过，判定在 Worker。**四种状态**：`verified`（真反查到昵称，口令到这一步才生成）/ `self_reported`（后端只回显，这次没核实）/ `not_found`（这一条拦住）/ `unavailable`（想核实但没核实成；这一条本身只提示，可口令同样不会生成，按钮也就不会亮）。前两种在界面上文案不同，不许混。 |
 | 一键加源 scheme | `config.js` `SCHEME_ADD_SOURCE` | 例 `kernelsu://mmrl?url=<编码后的 INDEX_URL>`，说明页会用它渲染加源按钮。⚠️ 这条**没在真机管理器上验过**（编码形式是按惯例写的），所以别照着它宣传「一键加源」。 |
 | **大小上限** | `config.js` `MAX_UPLOAD_BYTES` | **这里不是上限的定义处，只是问不到时的兜底值。** 真实上限由 Worker 通过 `GET ${API_BASE}/` 的 `maxBytes` 字段自报，页面启动时问一次（`api.js` 的 `fetchServiceLimits()`），问到就重画拖放区提示、投稿规格与说明页状态。以前在这里抄一份的结果是抄出 8MB、后端实际 2MB：用户按页面写的数字传到一半被 400 拒，而页面还写着允许 8MB。 |
 | 站名 | `config.js` `SITE_NAME` / `SITE_SUBTITLE` | 只影响标题、导航铭牌与 `<title>`。 |
@@ -71,7 +71,7 @@ GET ${API_BASE}/user?uid=99999999
   → {"status":"verified","uid":"99999999","nickname":"某某","avatar":"https://avatar.coolapk.com/..."}
   → {"status":"self_reported","uid":"99999999"}   只回显、没有核实能力 —— 现在就该回这个
   → {"status":"not_found"}      查无此人 —— 前端会拦住，不让提交
-  → {"status":"unavailable"}    酷安不可达/超时 —— 前端只提示，不拦
+  → {"status":"unavailable"}    酷安不可达/超时 —— 这一条只提示，但口令同样不会生成，按钮也就不亮
 ```
 
 **这个端点已在 Worker 侧实现并上线**（2026-10-11，`contrib/worker/src/coolapk.ts`，线上实测
@@ -96,7 +96,10 @@ GET ${API_BASE}/user?uid=99999999
 前端行为（`api.js` 的 `lookupCoolapkUser` + `app.js` 的 `runUidCheck`）：UID 输入停止 500ms 后自动查，
 核实通过才让「投稿人酷安昵称」这一栏出现，值是反查回来的昵称且锁死（改署名只能改 UID），旁边显示头像与 UID；
 `not_found` 会挡住提交按钮；UID 一改动，上一个 UID 的昵称当场清空，不留到核实回来之后。
-端点没接或不可达时只标「未经核实」，不把人拦在外面 —— 前端拦人的只有「查无此人」与「UID 形状不对」两种。
+端点没接或不可达时，核实**这一条**只标「未经核实」，不在这条上拦人；但投稿口令只在 `verified` 时才生成，
+而口令是清单里硬拦的一条 —— 所以核实没接上时投稿通道整体是关着的。清单在这种情况下写的是
+「后端没配置酷安身份核实，口令生成不了」，说的是站点欠的那一步，不是访客可疑。
+前端在 UID 上拦人的只有「查无此人」与「UID 形状不对」两种。
 这个选择没有开关：能在浏览器里改到的闸拦不住任何真想提交的人，而「这个账号是不是本人、签名里有没有口令」
 本来就一律由 Worker 判。
 
