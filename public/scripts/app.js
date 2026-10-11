@@ -128,7 +128,7 @@ const fieldValue = (key) => (fieldEls[key] ? fieldEls[key].value.trim() : "");
 /* ------------------------------------------------------- 路由：hash 三视图 */
 
 const VIEWS = {
-  submit: { el: "#view-submit", label: "投稿台" },
+  submit: { el: "#view-submit", label: "投稿" },
   index: { el: "#view-index", label: "已收录" },
   incidents: { el: "#view-incidents", label: "处置公示" },
   about: { el: "#view-about", label: "说明" },

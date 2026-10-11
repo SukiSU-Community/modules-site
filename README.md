@@ -67,9 +67,9 @@ Worker 侧已经落好了（`contrib/worker/src/index.ts`）：所有响应统�
 请在 Worker 上加一个转发端点，契约照 `/check` 的风格 —— **任何情况都回 HTTP 200，前端只读 `status`**：
 
 ```
-GET ${API_BASE}/user?uid=2781460
-  → {"status":"verified","uid":"2781460","nickname":"某某","avatar":"https://avatar.coolapk.com/..."}
-  → {"status":"self_reported","uid":"2781460"}   只回显、没有核实能力 —— 现在就该回这个
+GET ${API_BASE}/user?uid=1234567
+  → {"status":"verified","uid":"1234567","nickname":"某某","avatar":"https://avatar.coolapk.com/..."}
+  → {"status":"self_reported","uid":"1234567"}   只回显、没有核实能力 —— 现在就该回这个
   → {"status":"not_found"}      查无此人 —— 前端会拦住，不让提交
   → {"status":"unavailable"}    酷安不可达/超时 —— 前端只提示，不拦
 ```

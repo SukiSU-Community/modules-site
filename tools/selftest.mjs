@@ -238,9 +238,9 @@ async function main() {
   console.log("\n[8] 酷安 UID 与出处规则");
   const { isCoolapkUid, normalizeCoolapkUrl, lookupCoolapkUser, USER_STATUS, fetchServiceLimits } =
     await import("../public/scripts/api.js");
-  check("2781460 是合法 UID", isCoolapkUid("2781460") === true);
-  check("带空格也认", isCoolapkUid("  2781460 ") === true);
-  check("拒绝带链接前缀", isCoolapkUid("https://www.coolapk.com/u/2781460") === false);
+  check("1234567 是合法 UID", isCoolapkUid("1234567") === true);
+  check("带空格也认", isCoolapkUid("  1234567 ") === true);
+  check("拒绝带链接前缀", isCoolapkUid("https://www.coolapk.com/u/1234567") === false);
   check("拒绝非数字", isCoolapkUid("27a1460") === false);
   check("拒绝过短/过长", isCoolapkUid("123") === false && isCoolapkUid("1".repeat(13)) === false);
 
@@ -311,7 +311,7 @@ async function main() {
         reason: "malware",
         by: "gh:mod@example.com",
         at: "2026-10-12T00:00:00+08:00",
-        coolapkUid: "2781460",
+        coolapkUid: "1234567",
         id: "bad.module",
         versionCode: 3,
       },
@@ -431,6 +431,11 @@ async function main() {
     /<label for="f-uid">投稿人酷安 UID<span class="req">\*<\/span><\/label>/.test(formHtml) &&
       !formHtml.includes("投稿者") &&
       !appSrc.includes("投稿者")
+  );
+  // placeholder 是全站都会渲染出来的字符串，往里塞一个真实 UID 等于把它贴公开。
+  check(
+    "输入框 placeholder 里不许出现纯数字示例（UID 那栏写的是规则不是号码）",
+    !/placeholder="\d{4,}"/.test(formHtml) && /id="f-uid"[^>]*placeholder="4-12 位数字"/.test(formHtml)
   );
   check(
     "硬性条件是 2×2 四格，且 app.js 要写的 #spec-max 还在其中一格",
@@ -612,7 +617,7 @@ async function main() {
     // 选择器集合从仓库那份的**归一化输出**里取，不抄常量：它才是「台账里可能出现哪些命中条件」的定义。
     const norm = repo.parseDispositions({
       schema: repo.DISPOSITIONS_SCHEMA,
-      dispositions: [{ kind: "revoke", reason: "other", by: "b", at: "2026-10-11T00:00:00Z", id: "a", versionCode: 1, sha256: "f".repeat(64), coolapkUid: "2781460" }],
+      dispositions: [{ kind: "revoke", reason: "other", by: "b", at: "2026-10-11T00:00:00Z", id: "a", versionCode: 1, sha256: "f".repeat(64), coolapkUid: "1234567" }],
     })[0];
     const repoSel = ["id", "versionCode", "sha256", "coolapkUid", "kind", "reason", "by", "at", "note", "verify"].filter((k) => k in norm);
     const frontSel = SELECTOR_KEYS.filter((k) => repoSel.includes(k));

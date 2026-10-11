@@ -482,6 +482,14 @@ h1 .hi::after {
   max-width: 54ch;
   color: var(--ink-2);
 }
+/* 导语里只划一处重点，用琥珀下划线而不是加粗：加粗在中文里几乎看不出来。 */
+.hero__lede .hl {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--amber);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
 .readout {
   font: 500 12.5px/1.9 var(--mono);
   color: var(--mint);
@@ -510,8 +518,8 @@ h1 .hi::after {
   display: grid;
   gap: 4px;
   padding: 12px 14px;
-  border-right: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  border-right: 2px solid var(--line-2);
+  border-bottom: 2px solid var(--line-2);
 }
 /* 十字线：右与下各一条，最右列与最底行收掉，中间才正好成十字 */
 .spec__cell:nth-child(2n) {
@@ -682,8 +690,10 @@ textarea {
 }
 input.mono,
 textarea.mono {
+  /* 字号与正文输入框一致（15px）：placeholder 在两种输入框之间不能一个 13.5 一个 15，
+     那会让人以为两个框填的东西重要程度不同。要区分靠等宽字体本身。 */
   font-family: var(--mono);
-  font-size: 13.5px;
+  font-size: 15px;
 }
 textarea {
   min-height: 76px;
