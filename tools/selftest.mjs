@@ -489,6 +489,32 @@ async function main() {
       formHtml.includes("上传前确认")
   );
 
+  /* ------------------------------------------------------- 两个浏览页的导语
+     公示页的导语是拿来威慑的，不是拿来解释的 —— 追责那半句一旦被人当啰嗦删掉，
+     这一页就退化成流水账。已收录页的导语是用户点名删掉的，删掉就别让它长回来。
+     另一条不在页面上看不出来：.hero__lede .hl 是 nowrap，标记短语一长就在 320px 撑破。 */
+  const idxSlice = formHtml.slice(
+    formHtml.indexOf('id="view-index"'),
+    formHtml.indexOf('id="view-incidents"')
+  );
+  check(
+    "已收录页没有导语段落（「公开索引里的全部内容」那句已删，不许自己长回来）",
+    idxSlice.length > 0 && !idxSlice.includes("hero__lede") && !formHtml.includes("公开索引里的全部内容")
+  );
+  const incLede = /id="view-incidents"[\s\S]*?<p class="hero__lede">([\s\S]*?)<\/p>/.exec(formHtml);
+  check(
+    "公示页导语留着威慑的四要素：root 权限 / 可核对的凭据 / 向公安机关报案 / 依法追究法律责任",
+    !!incLede &&
+      ["root 权限", "可核对的凭据", "向公安机关报案", "依法追究法律责任"].every((k) =>
+        incLede[1].includes(k)
+      )
+  );
+  const incMark = incLede && /<span class="hl">([^<]*)<\/span>/.exec(incLede[1]);
+  check(
+    "公示页导语里的琥珀短语不超过 12 字（.hl 是 nowrap，长了窄屏撑破）",
+    !!incMark && incMark[1].length <= 12
+  );
+
   check(
     "顶栏窄屏不换行（.bezel__in 用 nowrap 覆盖默认的 wrap）",
     /\.bezel__in\s*\{[^}]*flex-wrap: nowrap/.test(panelCss)
