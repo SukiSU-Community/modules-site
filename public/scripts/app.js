@@ -499,7 +499,7 @@ function gateItems() {
       text: "模块 ID / 名称 / 版本 / 版本号 齐全（版本号为整数）",
     },
     { ok: !missing.includes("source") && !badSource, text: "模块出处是酷安站内链接" },
-    { ok: !missing.includes("uploader"), text: "投稿者酷安昵称已取得" },
+    { ok: !missing.includes("uploader"), text: "投稿人酷安昵称已取得" },
     { ok: !missing.includes("coolapkUid") && !badUid, text: "酷安 UID 已填，且是 4-12 位纯数字" },
   ];
   if (IS_UID_VERIFY_ON) {
@@ -709,7 +709,7 @@ function openConfirm() {
     ["版本", `${fieldValue("version")} · versionCode ${fieldValue("versionCode")}`],
     ["作者", fieldValue("author") || "未填"],
     ["出处", fieldValue("source")],
-    ["投稿者酷安昵称", fieldValue("uploader")],
+    ["投稿人酷安昵称", fieldValue("uploader")],
     ["酷安 UID", uidLine()],
   ];
   for (const [k, v] of rows) {

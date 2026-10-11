@@ -420,10 +420,23 @@ async function main() {
     "utf8"
   );
   check(
-    "昵称整行默认不出现，出现时叫「投稿者酷安昵称」且不挂必填星号",
+    "昵称整行默认不出现，出现时叫「投稿人酷安昵称」且不挂必填星号",
     /id="nick-field" hidden/.test(formHtml) &&
-      /<label for="f-uploader">投稿者酷安昵称<\/label>/.test(formHtml) &&
-      !/for="f-uploader">投稿者酷安昵称<span class="req">/.test(formHtml)
+      /<label for="f-uploader">投稿人酷安昵称<\/label>/.test(formHtml) &&
+      !/for="f-uploader">投稿人酷安昵称<span class="req">/.test(formHtml)
+  );
+  // 界面上只有「投稿人」这一个称呼（about 页早就这么写了），混用会让人以为是两个人
+  check(
+    "UID 那栏点名是「投稿人酷安 UID」，且全站不再出现「投稿者」",
+    /<label for="f-uid">投稿人酷安 UID<span class="req">\*<\/span><\/label>/.test(formHtml) &&
+      !formHtml.includes("投稿者") &&
+      !appSrc.includes("投稿者")
+  );
+  check(
+    "硬性条件是 2×2 四格，且 app.js 要写的 #spec-max 还在其中一格",
+    (formHtml.match(/class="spec__cell"/g) || []).length === 4 &&
+      !formHtml.includes("spec__row") &&
+      (formHtml.match(/id="spec-max"/g) || []).length === 1
   );
   check(
     "昵称那一行排在 UID 输入框之后（用户只填 UID，结果跟在后面）",

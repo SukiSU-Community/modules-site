@@ -441,7 +441,7 @@ main {
 .hero__grid {
   display: grid;
   gap: 22px;
-  grid-template-columns: minmax(0, 1fr) 250px;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
 }
 h1 {
@@ -486,33 +486,32 @@ h1 .hi::after {
   color: var(--amber);
 }
 
-/* 规格铭牌 */
+/* 规格铭牌：2×2 四格，整块与下面的 .panel 同宽（都在 main 的内容盒里） */
 .spec {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 22px;
+}
+.spec__cell {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: linear-gradient(180deg, var(--panel-2), var(--panel));
-  overflow: hidden;
-}
-.spec__row {
-  display: grid;
-  grid-template-columns: 84px minmax(0, 1fr);
-  gap: 10px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--line);
-  font-size: 12.5px;
-}
-.spec__row:last-child {
-  border-bottom: 0;
+  box-shadow: inset 2px 0 0 var(--amber-line);
 }
 .spec__k {
   font: 500 10.5px/1.7 var(--mono);
-  letter-spacing: 0.1em;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
   color: var(--ink-3);
 }
 .spec__v {
   color: var(--ink);
   font-family: var(--mono);
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 .spec__v b {
@@ -605,33 +604,33 @@ h2 {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin-bottom: 5px;
-  font: 500 10.5px/1.6 var(--mono);
-  letter-spacing: 0.11em;
+  margin-bottom: 6px;
+  font: 600 12.5px/1.6 var(--mono);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ink-2);
+  color: var(--ink);
 }
 .field__lab .req {
   color: var(--amber);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1;
 }
 .field__lab .opt {
   color: var(--ink-3);
   border: 1px solid var(--line-2);
   border-radius: 3px;
-  padding: 0 4px;
-  font-size: 9.5px;
-  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
 }
 /* 署名这一项是「按 UID 反查酷安」带出来的，不是必填项 —— 用 * 会教人去敲一个本来该由系统给的值。 */
 .field__lab .auto {
   color: var(--amber);
   border: 1px solid var(--amber-line);
   border-radius: 3px;
-  padding: 0 4px;
-  font-size: 9.5px;
-  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
 }
 .field.is-pre input[readonly] {
   cursor: default;
@@ -1730,12 +1729,10 @@ mark {
   }
 }
 
-@media (max-width: 900px) {
-  .hero__grid {
-    grid-template-columns: 1fr;
-  }
+/* 窄屏：四格退回一列，宽度仍然跟下面的栏目矩形对齐 */
+@media (max-width: 620px) {
   .spec {
-    max-width: 420px;
+    grid-template-columns: 1fr;
   }
 }
 

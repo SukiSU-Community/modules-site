@@ -86,8 +86,8 @@
           <div class="hero__grid">
             <div>
               <h1 id="h-submit">
-                把你手上的<span class="hi">好模块</span><br />
-                分享给大家
+                让<span class="hi">好模块</span><br />
+                能够发光发热
               </h1>
               <p class="hero__lede" id="hero-lede">
                 大量国内自制模块只存在于酷安帖子里的网盘链接，几个月后就成死链，主流索引也搜不到。
@@ -95,38 +95,39 @@
                 审核通过后进入公开索引，所有人就能在管理器里搜到并一键安装。
               </p>
             </div>
-            <div class="spec" aria-label="投稿硬性条件">
-              <div class="spec__row">
-                <span class="spec__k">大小上限</span>
-                <span class="spec__v" id="spec-max"><b>8</b> MB</span>
-              </div>
-              <div class="spec__row">
-                <span class="spec__k">zip 形态</span>
-                <span class="spec__v">根目录含 <b>module.prop</b></span>
-              </div>
-              <div class="spec__row">
-                <span class="spec__k">溯源</span>
-                <span class="spec__v">酷安出处 + 投稿人 <b>UID</b></span>
-              </div>
-              <div class="spec__row">
-                <span class="spec__k">提交之后</span>
-                <span class="spec__v">自动开 <b>GitHub PR</b> 待审</span>
-              </div>
+          </div>
+          <!-- 四条硬性条件排成 2×2，整块与下面的栏目矩形同宽 -->
+          <div class="spec" aria-label="投稿硬性条件">
+            <div class="spec__cell">
+              <span class="spec__k">大小上限</span>
+              <span class="spec__v" id="spec-max"><b>8</b> MB</span>
+            </div>
+            <div class="spec__cell">
+              <span class="spec__k">zip 形态</span>
+              <span class="spec__v">根目录含 <b>module.prop</b></span>
+            </div>
+            <div class="spec__cell">
+              <span class="spec__k">溯源</span>
+              <span class="spec__v">酷安出处 + 投稿人 <b>UID</b></span>
+            </div>
+            <div class="spec__cell">
+              <span class="spec__k">提交之后</span>
+              <span class="spec__v">自动开 <b>GitHub PR</b> 待审</span>
             </div>
           </div>
         </div>
 
         <form id="form" novalidate>
-          <!-- 01 目标文件 -->
+          <!-- 01 目标模块 -->
           <section class="panel rise" aria-labelledby="p1t">
             <div class="panel__hd">
               <span class="panel__no">01</span>
-              <h2 id="p1t">目标文件</h2>
+              <h2 id="p1t">目标模块</h2>
               <span class="panel__tag">module.zip</span>
             </div>
             <p class="panel__note">
-              选 zip 后浏览器会当场解一次包：验证根目录有没有
-              <code>module.prop</code>，并把里面写的信息自动填到下面，不用你手打六遍。
+              选好 zip 后浏览器会当场解一次包：根据根目录下的
+              <code>module.prop</code> 自动填充模块信息到下面。
             </p>
 
             <label class="drop" id="drop">
@@ -219,7 +220,7 @@
               <p class="field__err" data-err="source">请填写酷安站内链接</p>
             </div>
             <div class="field">
-              <div class="field__lab"><label for="f-uid">酷安 UID<span class="req">*</span></label></div>
+              <div class="field__lab"><label for="f-uid">投稿人酷安 UID<span class="req">*</span></label></div>
               <input class="mono" type="text" id="f-uid" data-k="coolapkUid" placeholder="2781460" inputmode="numeric" autocomplete="off" spellcheck="false" required />
               <p class="field__help">
                 酷安 App「我的」→ <b>点头像进个人主页</b> → 右上角<b>三点</b> →
@@ -232,7 +233,7 @@
                  Worker 那边 uploader 空着直接 400，不能让酷安抖动把真人挡在投稿之外。 -->
             <div class="field" id="nick-field" hidden>
               <div class="field__lab">
-                <label for="f-uploader">投稿者酷安昵称</label>
+                <label for="f-uploader">投稿人酷安昵称</label>
                 <span class="auto" id="uploader-tag">按 UID 自动取</span>
               </div>
               <input type="text" id="f-uploader" data-k="uploader" placeholder="这次没取到昵称，请自己填一个" autocomplete="nickname" />

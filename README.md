@@ -94,7 +94,8 @@ GET ${API_BASE}/user?uid=2781460
   二是同一个人反复投稿没必要每次打过去。这个端点同样需要 `Access-Control-Allow-Origin`。
 
 前端行为（`api.js` 的 `lookupCoolapkUser` + `app.js` 的 `runUidCheck`）：UID 输入停止 500ms 后自动查，
-核实通过会把昵称自动填进「投稿者署名」，并显示头像与 UID；`not_found` 会挡住提交按钮；
+核实通过才让「投稿人酷安昵称」这一栏出现，值是反查回来的昵称且锁死（改署名只能改 UID），旁边显示头像与 UID；
+`not_found` 会挡住提交按钮；UID 一改动，上一个 UID 的昵称当场清空，不留到核实回来之后。
 端点没接或不可达时只标「未经核实」，不把人拦在外面（`COOLAPK_VERIFY_REQUIRED: true` 可改成硬拦）。
 
 ### 出处现在只收酷安站内链接
@@ -172,12 +173,23 @@ deflate 与 stored 两种压缩、UTF-8 中文内容、`description` 里再出�
 
 ## 5. 部署
 
-**Cloudflare Pages（你文档里的方案）**
-直接以 `public/` 作为发布根目录即可（构建命令留空，输出目录填 `public`）；
-或先 `node tools/build.mjs` 然后发布 `dist/`。项目还没有域名的话，用 `*.pages.dev` 子域名就行。
+**当前走 Cloudflare Pages**：项目 `cool-module`，地址 <https://cool-module.pages.dev>。
 
-**Qoder Sites**
-本项目当前就是走这条路发布：`node tools/build.mjs` 后以 `webDirectory: "dist"` 准备并发布。
+```bash
+node tools/build.mjs
+npx wrangler pages deploy dist --project-name=cool-module --commit-dirty=true
+```
+
+纯静态、没有 Pages Functions，所以不占 Workers 的请求配额；静态资源请求**免费且不限量、
+也没有带宽计量**。这是从 Qoder Sites 搬过来的原因：Qoder 那边官方文档写着「限时免费、
+设有使用额度，用量较高的站点也可能暂停公开访问」，对一个公开投稿站来说「某天突然打不开」
+比慢一点更糟。
+
+**Qoder Sites（旧地址，待下线）**：`https://module-panel-k97iem2de1f.qoder.zone`。
+搬走后它仍以旧品牌和旧后端地址对外服务（旧地址指向 `*.workers.dev`，在国内打不通），
+要在 Qoder 里 **设置 → 发布与访问 → 暂停**（或 设置 → 删除站点）把它停掉，
+否则那个链接会把用户带到一个查不了重的页面。
+
 同一份源码，两种托管都只要求「一个含 `index.html` 的静态目录」。
 
 **注意**：站点与后端不同源，所以上面第 2 节的 CORS 响应头在哪个托管商下都必须有。
