@@ -1,5 +1,5 @@
 /* ==========================================================================
-   MODULE PANEL —— 设计系统
+   COOL MODULE —— 设计系统
    方向：安卓「工程模式 / Bootloader 解锁警告」那种仪器面板。
    琥珀色信号 + 深空底 + 切角金属边框 + 等宽读数；
    确认屏直接借用刷机人天天路过的那块警告屏的形态。
@@ -284,34 +284,44 @@ code {
   width: 30px;
   height: 30px;
   flex: none;
-  display: grid;
-  place-items: center;
-  background: var(--amber-fill);
-  color: var(--amber-ink);
-  font: 700 15px/1 var(--display);
-  clip-path: polygon(
-    0 0,
-    calc(100% - var(--chamfer)) 0,
-    100% var(--chamfer),
-    100% 100%,
-    var(--chamfer) 100%,
-    0 calc(100% - var(--chamfer))
-  );
+  display: block;
+}
+.plate__mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* 切角外框 + 实心模块块：形状与 favicon 同一套（两角切角，不是四角）。 */
+.plate__frame {
+  fill: none;
+  stroke: var(--amber-fill);
+  stroke-width: 2.8;
+}
+.plate__core {
+  fill: var(--amber-fill);
 }
 
 .plate__txt {
   display: grid;
-  line-height: 1.25;
+  line-height: 1.2;
 }
-.plate__lat {
-  font: 700 13px/1.1 var(--display);
-  letter-spacing: 0.18em;
+/* 中文在上、拉丁在下：中文是品牌主名，所以它更亮更大；拉丁只是副行。 */
+.plate__zh {
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.06em;
   color: var(--ink);
 }
-.plate__zh {
-  font-size: 12px;
+.plate__lat {
+  margin-top: 3px;
+  font-family: var(--display);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.2em;
   color: var(--ink-3);
-  letter-spacing: 0.02em;
 }
 
 .nav {
@@ -1744,9 +1754,12 @@ mark {
     gap: 10px;
     padding: 10px var(--gut) 8px;
   }
+  .plate__zh {
+    font-size: 15px;
+    letter-spacing: 0.04em;
+  }
   .plate__lat {
-    font-size: 12px;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.16em;
   }
   .panel {
     padding: 16px var(--gut) 18px;

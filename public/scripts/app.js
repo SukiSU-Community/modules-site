@@ -1539,6 +1539,8 @@ async function syncLimits() {
 
 function init() {
   $("#brand-zh").textContent = CONFIG.SITE_NAME;
+  // 英文名可选：老配置里没有这个字段时保留 HTML 里的兜底文案，不要写成 undefined。
+  if (CONFIG.SITE_NAME_EN) $("#brand-lat").textContent = CONFIG.SITE_NAME_EN;
   document.title = `${CONFIG.SITE_NAME} · ${CONFIG.SITE_SUBTITLE}`;
   paintLimit();
   syncLimits();

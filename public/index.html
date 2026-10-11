@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>模块投稿台 · 人人共建的 KernelSU / Magisk 模块索引</title>
+    <title>酷模 · 人人共建的 KernelSU / Magisk 模块索引</title>
     <meta
       name="description"
       content="把散落在酷安帖子和网盘链接里的 KernelSU / Magisk 模块投稿进公开索引：上传 zip、自动解析 module.prop、实时查重、审核后进索引，所有人可在管理器里一键安装。"
@@ -47,10 +47,17 @@
       <div class="bezel__rail" aria-hidden="true"></div>
       <div class="bezel__in">
         <div class="plate">
-          <span class="plate__mark" aria-hidden="true">M</span>
+          <!-- 标识：切角外框里放一块实心模块 —— 「一个模块被收进索引」，也就是这个站干的事。
+               与 favicon 同一套几何，所以图标不用另起一套。 -->
+          <span class="plate__mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32">
+              <path class="plate__frame" d="M1.4 1.4H24.6L30.6 7.4V30.6H7.4L1.4 24.6Z" />
+              <path class="plate__core" d="M10 10H19.5L22 12.5V22H12.5L10 19.5Z" />
+            </svg>
+          </span>
           <span class="plate__txt">
-            <span class="plate__lat">MODULE·PANEL</span>
-            <span class="plate__zh" id="brand-zh">模块投稿台</span>
+            <span class="plate__zh" id="brand-zh">酷模</span>
+            <span class="plate__lat" id="brand-lat">COOL MODULE</span>
           </span>
         </div>
         <nav class="nav" aria-label="站点分区">
@@ -508,7 +515,7 @@
     </div>
 
     <footer class="nameplate">
-      <span>MODULE·PANEL — 人人共建的 KernelSU / Magisk 模块索引</span>
+      <span>COOL MODULE — 人人共建的 KernelSU / Magisk 模块索引</span>
       <span class="sp" id="plate-note">static build · 本站不自带后端</span>
     </footer>
 
