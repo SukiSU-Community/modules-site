@@ -433,7 +433,11 @@ function bindCheck() {
   for (const key of ["id", "versionCode"]) {
     fieldEls[key].addEventListener("input", runCheck);
   }
-  fieldEls.coolapkUid.addEventListener("input", runUidCheck);
+  fieldEls.coolapkUid.addEventListener("input", () => {
+    // 「这个昵称属于上一串 UID」在按键那一刻就已经成立，等不到 debounce 后的核实结果
+    syncUploaderField();
+    runUidCheck();
+  });
   fieldEls.source.addEventListener("blur", () => {
     // 很多人会直接粘 www.coolapk.com/feed/…，补上协议再存，省一次报错
     const fixed = normalizeCoolapkUrl(fieldEls.source.value);
@@ -603,7 +607,15 @@ function syncUploaderField() {
   const row = $("#nick-field");
   const tag = $("#uploader-tag");
   const help = $("#uploader-help");
-  const nickname = state.uidStatus === "verified" && state.uidInfo ? state.uidInfo.nickname : "";
+  // 只认「输入框里这串 UID」反查回来的昵称 —— verified 的结果可能属于上一串数字。
+  const nickname =
+    state.uidStatus === "verified" &&
+    state.uidInfo &&
+    state.uidInfo.uid === fieldValue("coolapkUid")
+      ? state.uidInfo.nickname
+      : "";
+  // UID 刚改过、debounce 还没把核实跑完：这时说「需要你填」是假的，正在重查。
+  const rechecking = state.uidStatus === "verified" && !nickname;
 
   if (nickname) {
     el.value = nickname; // 以反查结果为准
@@ -618,15 +630,23 @@ function syncUploaderField() {
 
   el.readOnly = false;
   field.classList.remove("is-pre");
+  // 只要现在没有反查到的昵称，上一个 UID 带出来的那份就必须消失 —— 放在藏行之前，
+  // 因为 COOLAPK_VERIFY_REQUIRED=false 时「正在查」也能提交，晚一步就漏进索引。手填的不动。
+  if (el.dataset.auto === "1") {
+    el.value = "";
+    delete el.dataset.auto;
+  }
   // 还没填 / 正在查 / 形状不对：这一行没有可说的，别占位
   if (state.uidStatus === "idle" || state.uidStatus === "checking" || state.uidStatus === "invalid") {
     if (row) row.hidden = true;
     return;
   }
   if (row) row.hidden = false;
-  delete el.dataset.auto;
-  if (tag) tag.textContent = "需要你填";
-  if (help) help.textContent = UPLOADER_FALLBACK[state.uidStatus] || "这次没从酷安取到昵称，请自己填一个署名。";
+  if (tag) tag.textContent = rechecking ? "正在按新 UID 重查" : "需要你填";
+  if (help)
+    help.textContent = rechecking
+      ? "UID 改过了，上一个 UID 的昵称不能沿用 —— 等新结果回来。"
+      : UPLOADER_FALLBACK[state.uidStatus] || "这次没从酷安取到昵称，请自己填一个署名。";
 }
 
 const runUidCheck = debounce(async () => {

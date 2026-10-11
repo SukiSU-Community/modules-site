@@ -442,9 +442,30 @@ async function main() {
       /row\.hidden = true;/.test(appSrc)
   );
   check(
-    "昵称以反查结果为准：verified 时直接把昵称写进字段",
-    /state\.uidStatus === "verified" && state\.uidInfo \? state\.uidInfo\.nickname : ""/.test(appSrc) &&
+    "昵称以反查结果为准，且只认「当前这串 UID」的那一次结果",
+    /state\.uidStatus === "verified" &&\s*\n\s*state\.uidInfo &&\s*\n\s*state\.uidInfo\.uid === fieldValue\("coolapkUid"\)/.test(appSrc) &&
       /el\.value = nickname;/.test(appSrc)
+  );
+  check(
+    "改 UID 的第一下就同步昵称，不等 debounce 里的核实回来",
+    /syncUploaderField\(\);\s*\n\s*runUidCheck\(\);/.test(appSrc)
+  );
+  check(
+    "UID 改过、还没重查完时写的是「正在按新 UID 重查」，不是「需要你填」",
+    /const rechecking = state\.uidStatus === "verified" && !nickname;/.test(appSrc) &&
+      /rechecking \? "正在按新 UID 重查" : "需要你填"/.test(appSrc)
+  );
+  // 改了 UID 却没取到新昵称时，上一个 UID 的昵称必须消失 —— 而且要赶在「把这一行藏起来」
+  // 之前：COOLAPK_VERIFY_REQUIRED=false 时「正在查」也允许提交，清空晚一步就漏进索引。
+  const syncBody = appSrc.slice(
+    appSrc.indexOf("function syncUploaderField()"),
+    appSrc.indexOf("\n}", appSrc.indexOf("function syncUploaderField()"))
+  );
+  check(
+    "取不到昵称时先抹掉自动带出的旧昵称，再删记号（手填的不受影响）",
+    /if \(el\.dataset\.auto === "1"\) \{\s*\n\s*el\.value = "";\s*\n\s*delete el\.dataset\.auto;/.test(syncBody) &&
+      syncBody.indexOf('el.value = "";') < syncBody.indexOf('state.uidStatus === "idle"'),
+    "清空缺失，或被排到了藏行之后（checking 状态漏）"
   );
   // 取不到昵称有四种原因，界面必须分别说清是哪一种 —— 混起来就是骗人（与 self_reported 同理）
   check(
