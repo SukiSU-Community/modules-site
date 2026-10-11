@@ -438,6 +438,16 @@ async function main() {
       !formHtml.includes("spec__row") &&
       (formHtml.match(/id="spec-max"/g) || []).length === 1
   );
+  // 窄屏保持两列是用户明确要的（四条硬条件要一眼看完），代价改由字号承担。
+  const panelCss = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../public/styles/panel.css"),
+    "utf8"
+  );
+  check(
+    "任何屏宽下 .spec 都是两列（窄屏只收字号内边距，不许退回 1fr）",
+    /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/.test(panelCss) &&
+      !/\.spec\s*\{[^}]*grid-template-columns:\s*1fr/.test(panelCss)
+  );
   check(
     "昵称那一行排在 UID 输入框之后（用户只填 UID，结果跟在后面）",
     formHtml.indexOf('data-k="coolapkUid"') > 0 &&

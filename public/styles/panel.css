@@ -517,6 +517,8 @@ h1 .hi::after {
 .spec__v b {
   color: var(--amber);
   font-weight: 600;
+  /* 窄屏宁可整词换行，也不能把 module.prop 拆成 module.pr / op 教人抄错 */
+  white-space: nowrap;
 }
 
 h2 {
@@ -1729,10 +1731,22 @@ mark {
   }
 }
 
-/* 窄屏：四格退回一列，宽度仍然跟下面的栏目矩形对齐 */
+/* 窄屏也保持 2×2：这四条是要一眼看完的硬条件，退成一列就得靠滚动来对比。
+   代价是每格变窄，所以收字号与内边距，而不是收列数。 */
 @media (max-width: 620px) {
   .spec {
-    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+  .spec__cell {
+    gap: 3px;
+    padding: 9px 10px;
+  }
+  .spec__k {
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+  }
+  .spec__v {
+    font-size: 12px;
   }
 }
 
