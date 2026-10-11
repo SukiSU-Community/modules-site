@@ -310,6 +310,15 @@ async function main() {
         /prop\.id !== id/.test(worker) &&
         /prop\.versionCode && Number\(prop\.versionCode\) !== versionCode/.test(worker),
     );
+    // ⑤-e：下架 / 拉黑的 intake 那道。前端不判台账（台账在索引仓库，前端也不该有第二份判据），
+    // 所以这里钉两件事：后端真的在判，以及它的失效方向必须是**放行** ——
+    // 取不到台账就拒投稿，等于 raw 抖一下所有人都投不了稿。
+    check(
+      "后端在提交阶段核对处置台账（⑤-e），且取不到台账时放行而不是挡",
+      /loadDispositions\(env, deps\)/.test(worker) &&
+        /matchAny\(ledger, \{ id, versionCode, sha256, coolapkUid \}\)/.test(worker) &&
+        /if \(!res\.ok\) return null;/.test(worker),
+    );
   }
 
   const summary = `${fail === 0 ? "全部通过" : "有失败项"}：${pass} passed, ${fail} failed`;
