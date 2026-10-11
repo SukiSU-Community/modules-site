@@ -525,6 +525,51 @@ async function main() {
     }
   }
 
+  /* ------------------------------------------------ P4：申诉入口与双签文案
+     公示页那段「不服去哪儿说话」把审核端的标记原样抄给了用户。用户照抄的那串字符必须
+     就是 assertMergeApproved 认的那串 —— 文案漂了不会有任何报错，只会让人写一条没人读的评论，
+     而他已经等在那儿了。 */
+  const html = readFileSync(resolve(here, "../public/index.html"), "utf8");
+  check(
+    "公示页的申诉段存在，地址由脚本从 config 填",
+    html.includes('id="inc-appeal-where"') && /renderIncAppeal\(\)/.test(appSrc) && /CONFIG\.ISSUES_URL/.test(appSrc)
+  );
+  check(
+    "申诉地址没配置时写的是「还没配置」，不给假链接",
+    /还没配置索引仓库的 issue 地址/.test(appSrc)
+  );
+  check(
+    "config 里的申诉地址要么为空、要么是一条 https 的 issues 列表",
+    CONFIG.ISSUES_URL.trim() === "" || /^https:\/\/[^\s]+\/issues\/?$/.test(CONFIG.ISSUES_URL.trim()),
+    CONFIG.ISSUES_URL
+  );
+
+  const pubCandidates = [
+    process.env.REPO_PUBLISH_SRC,
+    "../../sukisu/contrib/repo/scripts/publish-from-main.mjs",
+    "../contrib/repo/scripts/publish-from-main.mjs",
+  ].filter(Boolean);
+  const pubPath = pubCandidates.map((p) => resolve(here, p)).find((p) => existsSync(p));
+  if (!pubPath) {
+    const msg = `找不到索引仓库的盖章脚本（试过：${pubCandidates.join(" / ")}）`;
+    if (REQUIRE_BACKEND) check("索引仓库盖章脚本必须存在（--require-backend）", false, msg);
+    else skip("双签文案与审核端一致性校验", msg);
+  } else {
+    console.log(`  双签契约另一端：${pubPath}`);
+    const pub = await import(pathToFileURL(pubPath).href);
+    check(
+      "文案里让用户写的标记就是审核端认的那个",
+      html.includes(pub.HUMAN_APPROVAL_MARKER),
+      pub.HUMAN_APPROVAL_MARKER
+    );
+    const CN_NUM = { 1: "一", 2: "两", 3: "三", 4: "四", 5: "五" };
+    check(
+      "文案里的人数就是当前要求的签数",
+      html.includes(`${CN_NUM[pub.REQUIRED_SIGNERS] ?? pub.REQUIRED_SIGNERS}个不同的人`),
+      `REQUIRED_SIGNERS=${pub.REQUIRED_SIGNERS}`
+    );
+  }
+
   const summary = `${fail === 0 ? "全部通过" : "有失败项"}：${pass} passed, ${fail} failed`;
   console.log(`\n${skipped ? `${summary}，跳过 ${skipped} 组` : summary}`);
   if (skipped && !REQUIRE_BACKEND) {

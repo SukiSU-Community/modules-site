@@ -38,6 +38,15 @@ export const CONFIG = {
   //   例：'https://cdn.jsdelivr.net/gh/你的用户名/你的仓库@main/json/dispositions.json'
   DISPOSITIONS_URL: "",
 
+  // --- 申诉与治理入口（索引仓库的 issue 列表）--------------------------------
+  // 处置公示页（#/incidents）末尾那段「不服去哪儿说话」用的就是这个地址。
+  // 为什么单独填、不从台账里某条 by 指针反推：一条处置的证据可以指向**别的**仓库的
+  // issue（处置记录本来就允许引用别的讨论），拿它当「本仓库申诉入口」是猜的；
+  // 而台账为空时更是根本无从反推。申诉入口是一个决定，不是一个派生值。
+  // 留空时那一段会明说「地址还没配置」，并把每条自己的「证据」链接指回可查的地方。
+  //   例：'https://github.com/你的用户名/你的仓库/issues'
+  ISSUES_URL: "https://github.com/SukiSU-Community/modules-repo/issues",
+
   // --- 待填 ③：Cloudflare Turnstile -----------------------------------------
   // 后端目前无鉴权限流，这里只做「预留接入位」：
   //   TURNSTILE_SITEKEY 留空 → 界面显示一行「反机器人校验待接入」的说明，

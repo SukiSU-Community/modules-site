@@ -1181,6 +1181,30 @@ function incLabeled(label, value, q, cls) {
   return wrap;
 }
 
+function renderIncAppeal() {
+  const host = $("#inc-appeal-where");
+  // 和图例一样只填一次：这一段是静态文案，只有地址来自 config。
+  if (!host || host.childElementCount) return;
+  const u = (CONFIG.ISSUES_URL || "").trim();
+  host.append(node("span", "inc__k", "去哪儿说："));
+  if (!u) {
+    // 不假装有一条走不通的路。每条记录自己的「证据」链接仍然点得开，所以不配也不瞎。
+    host.append(
+      node(
+        "span",
+        "inc-appeal__unset",
+        "这个站还没配置索引仓库的 issue 地址 —— 先按上面那条记录的「证据」链接回到它自己的讨论。"
+      )
+    );
+    return;
+  }
+  const a = node("a", "inc-appeal__link", u);
+  a.href = u;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  host.append(a);
+}
+
 function renderIncLegend() {
   const host = $("#inc-legend");
   if (!host || host.childElementCount) return;
@@ -1205,6 +1229,7 @@ function renderIncidents() {
   const readout = $("#inc-readout");
   const count = $("#inc-count");
   renderIncLegend();
+  renderIncAppeal();
 
   const clear = () => {
     list.textContent = "";

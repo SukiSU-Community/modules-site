@@ -332,6 +332,25 @@
         <div id="inc-groups"></div>
         <div class="empty" id="inc-state" hidden></div>
 
+        <div class="panel rise doc inc-appeal">
+          <h3><span>APPEAL</span>不服某条处置，去哪儿说话</h3>
+          <p>
+            唯一正式渠道是<strong>索引仓库的 issue</strong>。被下架的：在那条处置「证据」指向的 issue
+            下面回帖；被审核判红、没进索引的：在自己的投稿 PR 里说明。
+          </p>
+          <p>
+            要让一个判红的模块进来，得由<strong>两个不同的人</strong>各在 PR 里留一条以
+            <code>#human-approved</code> 开头的评论，再由有权限的人点合并 ——
+            说服一个人不够，这是刻意的。
+          </p>
+          <p class="inc-appeal__where" id="inc-appeal-where"></p>
+          <p class="inc-appeal__note">
+            这里没有时限承诺，也没有「一定回复」。能承诺的是：每一次放行或下架都留下可以复验的名字和证据，
+            所以「谁决定的」这个问题永远有答案。站内聊天可以说话，但<strong>结论只认 issue</strong>
+            —— 帖子会删、评论会折叠，那些都不构成可复验的记录。
+          </p>
+        </div>
+
         <div class="panel rise doc inc-how">
           <h3><span>LEGEND</span>这些字段是什么意思</h3>
           <ul class="inc-legend" id="inc-legend"></ul>

@@ -1483,6 +1483,32 @@ mark {
   line-height: 1.75;
   color: var(--ink-3);
 }
+/* 申诉入口：文字是死的，只有仓库地址来自 config，所以这一行由脚本填。 */
+.inc-appeal {
+  margin-top: 4px;
+}
+.inc-appeal__where {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.inc-appeal__link {
+  color: var(--amber);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--amber-line);
+  overflow-wrap: anywhere;
+}
+.inc-appeal__link:hover {
+  background: var(--amber-wash);
+}
+.inc-appeal__unset {
+  color: var(--ink-3);
+}
+.inc-appeal__note {
+  color: var(--ink-3);
+  font-size: 13px;
+}
 
 /* ==========================================================================
    说明区
