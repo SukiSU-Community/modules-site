@@ -7,6 +7,9 @@ dist/
 # Qoder Sites 本地描述符：每次部署都变，且内嵌整份 index.html
 *.qoder.site
 
+# 头脑风暴的 mockup 与预览服务状态，本机草稿
+.superpowers/
+
 # 依赖与系统/编辑器噪音
 node_modules/
 *.log
