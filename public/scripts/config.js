@@ -17,14 +17,18 @@ export const CONFIG = {
   // 「已收录模块」页直接 fetch 这个 URL。填 GitHub raw / jsDelivr / 自有 CDN 都行。
   //   例：'https://raw.githubusercontent.com/你的仓库/main/index.json'
   //   例：'https://cdn.jsdelivr.net/gh/你的用户名/你的仓库@main/index.json'
-  // 注意：浏览器直连 raw.githubusercontent.com 在大陆不稳定，优先给 jsDelivr 这类镜像。
+  // 注意：浏览器直连 raw.githubusercontent.com 在大陆不稳定，别把它当订阅地址。
   // 留空时浏览页显示「索引地址待配置」，不影响投稿功能。
   //
-  // 这里填的是 jsDelivr，代价是**它有缓存**：下架之后源站立刻空了，CDN 上还能发出旧索引
-  // 几十分钟。这条已经由索引仓库补掉了 —— merge-index 合并之后会跑 scripts/purge-cdn.mjs
-  // 清这一个地址（见 contrib/repo/README.md 的「合并之后：CDN 必须失效」）。
-  // 换成别的 CDN 之前先想清楚：那条链上没有自动清缓存的人。
-  INDEX_URL: "https://cdn.jsdelivr.net/gh/SukiSU-Community/modules-repo@main/json/modules.json",
+  // 这里填的是**自家 Worker 的镜像端点**，不是 jsDelivr。理由是一条实测：jsDelivr 对
+  // `@分支` 形式的地址回 `Cache-Control: public, max-age=604800`（七天），源站清完边缘缓存之后，
+  // 已经取过索引的浏览器 / 管理器里那份旧的还能留七天 —— 而「这个模块被下架了」恰恰是最不能
+  // 拿旧数据回答的问题。镜像端点把头交回我们手里（`max-age=60` + 弱 ETag，回源由索引仓库
+  // 合并后那次 purge 之外的另一条路径保证新鲜）。
+  // jsDelivr 那条地址仍然可用，当作 Worker 挂掉时的备用订阅地址：
+  //   'https://cdn.jsdelivr.net/gh/SukiSU-Community/modules-repo@main/json/modules.json'
+  // 台账不用单独填：公示页按同目录换文件名推导出 /dispositions.json，那个端点也存在。
+  INDEX_URL: "https://sukisu-module-submit.lyfsearch.workers.dev/index.json",
 
   // --- 处置台账（下架 / 拉黑）地址 -------------------------------------------
   // 这里是**留空**用的：留空就从 INDEX_URL 换文件名的到 —— 在索引仓库里

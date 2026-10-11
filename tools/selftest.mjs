@@ -427,7 +427,7 @@ async function main() {
     if (REQUIRE_BACKEND) {
       check("后端源码必须存在（--require-backend）", false, msg);
     } else {
-      skip("6 条跨仓库契约校验", msg);
+      skip("后端源码那组跨仓库契约校验", msg);
     }
   } else {
     console.log(`  后端契约另一端：${workerPath}`);
@@ -454,6 +454,19 @@ async function main() {
         /matchAny\(ledger, \{ id, versionCode, sha256, coolapkUid \}\)/.test(worker) &&
         /if \(!res\.ok\) return null;/.test(worker),
     );
+    // INDEX_URL 现在指着后端的镜像端点。这条钉的是「那个端点真的在，而且头是短的」——
+    // 它一旦被删掉或把 max-age 抄回别人 CDN 的七天，浏览页与公示页就会静默吃到过期索引。
+    check(
+      "后端提供 /index.json 与 /dispositions.json 镜像，且公开缓存头与内部 TTL 同源",
+      /'\/index\.json': indexRawUrl/.test(worker) &&
+        /'\/dispositions\.json': dispositionsRawUrl/.test(worker) &&
+        /`public, max-age=\$\{MIRROR_MAX_AGE_S\}`/.test(worker) &&
+        /deps\.now\(\) - entry\.at >= MIRROR_MAX_AGE_S \* 1000/.test(worker),
+    );
+    check(
+      "镜像在上游失败时绝不发 200 错误体（MMRL 客户端会把 body 当索引进食）",
+      /status: 502/.test(worker) && /'cache-control': 'no-store'/.test(worker),
+    );
   }
 
   /* ------------------------------------------- 处置台账词汇与索引仓库对齐
@@ -468,7 +481,7 @@ async function main() {
   if (!dispPath) {
     const msg = `找不到索引仓库的台账判据（试过：${dispCandidates.join(" / ")}）`;
     if (REQUIRE_BACKEND) check("索引仓库台账模块必须存在（--require-backend）", false, msg);
-    else skip("6 条处置台账词汇与指针校验", msg);
+    else skip("处置台账词汇与指针那组跨仓库校验", msg);
   } else {
     console.log(`  台账契约另一端：${dispPath}`);
     const repo = await import(pathToFileURL(dispPath).href);

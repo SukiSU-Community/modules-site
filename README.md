@@ -13,15 +13,18 @@
 
 | 待填 | 位置 | 说明 |
 |---|---|---|
-| **后端地址** | `config.js:14` `API_BASE` | Worker 根地址，结尾不带斜杠，例 `https://module-submit.xxx.workers.dev`。前端只请求 `${API_BASE}/check`、`${API_BASE}/submit`（以及下面第 4 项的核实端点）。**留空时投稿功能会被拦下并明确提示，不会静默失败。** |
-| 公开索引地址 | `config.js:22` `INDEX_URL` | 「已收录模块」页直接 fetch 这个 MMRL JSON。不填则浏览页显示「索引地址待配置」，投稿功能不受影响。 |
-| 处置台账地址 | `config.js:30` `DISPOSITIONS_URL` | **留空就按 `INDEX_URL` 同目录换文件名推导**（索引仓库里 `json/modules.json` 与 `json/dispositions.json` 是一对）。只有把台账放去了别处才显式填。公示页（`#/incidents`）读它。 |
-| **反机器人校验** | `config.js:38-39` `TURNSTILE_SITEKEY` / `TURNSTILE_FIELD` | 留空 = 界面显示「待接入」说明，提交时只随表带一个空的 token 字段。填入 sitekey 后自动加载 Turnstile 脚本并渲染部件，token 用 `TURNSTILE_FIELD` 的字段名发出（后端字段名不同就只改这一行）。 |
-| **酷安 UID 字段名** | `config.js:47` `COOLAPK_UID_FIELD` | 投稿人身份发两个字段：`uploader` = 昵称（索引里公开显示），`coolapkUid` = 酷安 UID 数字。后端约定的名字不同就改这一行。 |
-| **酷安核实端点** | `config.js:64-65` `COOLAPK_USER_PATH` / `COOLAPK_VERIFY_REQUIRED` | 见下面第 2 节。路径留空 = 不核实，界面显示「未经核实」，投稿照常能提。`COOLAPK_VERIFY_REQUIRED: true` 则必须核实通过才放行。**四种状态**：`verified`（真反查到昵称）/ `self_reported`（后端只回显，这次没核实）/ `not_found`（拦住）/ `unavailable`（想核实但没核实成，只提示）。前两种在界面上文案不同，不许混。 |
-| 一键加源 scheme | `config.js:78` `SCHEME_ADD_SOURCE` | 例 `kernelsu://mmrl?url=<你的 INDEX_URL>`，说明页会用它渲染加源按钮。 |
-| **大小上限** | `config.js:73` `MAX_UPLOAD_BYTES` | **这里不是上限的定义处，只是问不到时的兜底值。** 真实上限由 Worker 通过 `GET ${API_BASE}/` 的 `maxBytes` 字段自报，页面启动时问一次（`api.js` 的 `fetchServiceLimits()`），问到就重画拖放区提示、投稿规格与说明页状态。以前在这里抄一份的结果是抄出 8MB、后端实际 2MB：用户按页面写的数字传到一半被 400 拒，而页面还写着允许 8MB。 |
-| 站名 | `config.js:81-82` | 只影响标题、导航铭牌与 `<title>`。 |
+| **后端地址** | `config.js` `API_BASE` | Worker 根地址，结尾不带斜杠。前端会请求 `${API_BASE}/check`、`/user`、`/index.json`、`/dispositions.json`、`/submit`，并在启动时问一次 `${API_BASE}/` 拿真实上限。**留空时投稿功能会被拦下并明确提示，不会静默失败。** |
+| 公开索引地址 | `config.js` `INDEX_URL` | 「已收录模块」页直接 fetch 这个 MMRL JSON，同时也是**给管理器用的订阅地址**。这里填的是 Worker 的镜像端点 `/index.json`，不是 jsDelivr —— 因为 jsDelivr 对 `@分支` 地址回 `max-age=604800`（七天），下架之后用户手里那份旧的还能留七天；镜像把头交回我们手里（`max-age=60` + 弱 ETag）。不填则浏览页显示「索引地址待配置」，投稿功能不受影响。 |
+| 处置台账地址 | `config.js` `DISPOSITIONS_URL` | **留空就按 `INDEX_URL` 同目录换文件名推导**（索引仓库里 `json/modules.json` 与 `json/dispositions.json` 是一对，Worker 的两个镜像端点也是一对）。只有把台账放去了别处才显式填。公示页（`#/incidents`）读它。 |
+| **反机器人校验** | `config.js` `TURNSTILE_SITEKEY` / `TURNSTILE_FIELD` | 留空 = 界面显示「待接入」说明，提交时只随表带一个空的 token 字段。填入 sitekey 后自动加载 Turnstile 脚本并渲染部件，token 用 `TURNSTILE_FIELD` 的字段名发出（后端字段名不同就只改这一行）。 |
+| **酷安 UID 字段名** | `config.js` `COOLAPK_UID_FIELD` | 投稿人身份发两个字段：`uploader` = 昵称（索引里公开显示），`coolapkUid` = 酷安 UID 数字。后端约定的名字不同就改这一行。 |
+| **酷安核实端点** | `config.js` `COOLAPK_USER_PATH` / `COOLAPK_VERIFY_REQUIRED` | 见下面第 2 节。路径留空 = 不核实，界面显示「未经核实」，投稿照常能提。`COOLAPK_VERIFY_REQUIRED: true` 则必须核实通过才放行。**四种状态**：`verified`（真反查到昵称）/ `self_reported`（后端只回显，这次没核实）/ `not_found`（拦住）/ `unavailable`（想核实但没核实成，只提示）。前两种在界面上文案不同，不许混。 |
+| 一键加源 scheme | `config.js` `SCHEME_ADD_SOURCE` | 例 `kernelsu://mmrl?url=<编码后的 INDEX_URL>`，说明页会用它渲染加源按钮。⚠️ 这条**没在真机管理器上验过**（编码形式是按惯例写的），所以别照着它宣传「一键加源」。 |
+| **大小上限** | `config.js` `MAX_UPLOAD_BYTES` | **这里不是上限的定义处，只是问不到时的兜底值。** 真实上限由 Worker 通过 `GET ${API_BASE}/` 的 `maxBytes` 字段自报，页面启动时问一次（`api.js` 的 `fetchServiceLimits()`），问到就重画拖放区提示、投稿规格与说明页状态。以前在这里抄一份的结果是抄出 8MB、后端实际 2MB：用户按页面写的数字传到一半被 400 拒，而页面还写着允许 8MB。 |
+| 站名 | `config.js` `SITE_NAME` / `SITE_SUBTITLE` | 只影响标题、导航铭牌与 `<title>`。 |
+
+> 这张表以前还带 `config.js:22` 这样的行号，已经去掉：每改一次 config.js 就要重数一遍，
+> 而数错的行号比没有行号更坏 —— 它会指着另一项的注释让你以为那一项没配。按字段名 grep 就行。
 
 说明页（`#/about`）最后有一块「这个站自己的状态」，会把上面几项的实际接线情况显示出来 —— 你自己或别人打开就能看出哪里还没配。
 
@@ -100,6 +103,24 @@ GET ${API_BASE}/user?uid=2781460
 逐条对齐：协议白名单、`URL` 解析后比主机名、拒 `coolapk.com.evil.tld` 与路径藏域名、漏协议补 `https://`）。
 前端校验只是省一次上传，真正拦人的是服务端 —— 直接打接口的人不受前端约束。
 
+### 索引与台账的镜像端点（已实现，`GET /index.json`、`GET /dispositions.json`）
+
+这条不是「前端要什么」，而是**下架到底多久到用户手里**：
+
+- jsDelivr 对 `@分支` 形式的地址回 `Cache-Control: public, max-age=604800` —— 七天。实测复现过：
+  源站清完边缘缓存之后，同一个页面里 `fetch(url)` 仍拿到 4 个已下架模块，
+  `fetch(url, { cache: 'reload' })` 拿到 0 个。差的就是客户端那一层，而订阅地址一旦被人抄走就改不动了。
+- 所以由 Worker 自己出镜像：内容**原样透传**（不改字段、不重排），头由我们发
+  `public, max-age=60` + 弱 ETag（每分钟一次条件请求，命中就 304 不带 body）。
+  `INDEX_URL` 指到这里之后，`DISPOSITIONS_URL` 留空推导出来的 `/dispositions.json` 也在同一个 Worker 上，
+  「同目录换文件名」这个约定两边都成立。
+- 失败方向：**上游取不到时绝不发 200 错误体** —— MMRL 客户端会把 200 的 body 当索引进食，
+  一个 `{"error":...}` 能把用户列表里的模块全冲掉。有旧副本就发旧副本（`x-mirror: stale(...)` +
+  `max-age=5` 明说它是旧的），一次都没成功过就 502，客户端会自己留着上一份好的。
+
+`contrib/repo` 那边合并索引后会 purge 一次 jsDelivr，那是给**别人手里那份 jsDelivr 地址**兜底的；
+我们自己的订阅地址走镜像，两件事不互相替代。
+
 ## 3. 功能对照
 
 | 需求 | 实现位置 |
@@ -143,8 +164,8 @@ deflate 与 stored 两种压缩、UTF-8 中文内容、`description` 里再出�
 把公示页的分类词表与它的封闭集合（`REASONS` / `KINDS` / `DISPOSITIONS_SCHEMA` / 选择器名）
 对一遍，并逐样本比对写入端与公示页对指针形状的判定 ——
 仓库新增一个分类而公示页没有对应标题、或两端对「什么样算链接」判法漂移时，这里就红。
-全跑 73 项断言；索引仓库那边还没合入指针规则时，跨仓库的指针那 2 项**显式跳过**并计入总结
-（71 项 + 跳过 1 组）—— 静默跳过的契约校验等于没有契约，而输出还写着全绿，比红更坏。
+（这里刻意不写「共 N 项断言」：那个数字每加一条检查就过期一次，而写着旧数字的 README
+比不写更坏。跑一遍就有数，跳过几组总结里会明说。）
 
 ## 5. 部署
 
