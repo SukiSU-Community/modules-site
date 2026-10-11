@@ -215,35 +215,6 @@ function bindTheme() {
   if (typeof mq.addEventListener === "function") mq.addEventListener("change", follow);
 }
 
-/* --------------------------------------------------------------- 开机读数 */
-
-function typeReadout() {
-  const bits = ["面板就绪"];
-  bits.push(IS_API_CONFIGURED ? `后端 ${CONFIG.API_BASE}` : "后端 API_BASE 未配置");
-  bits.push(IS_INDEX_CONFIGURED ? "索引地址已接" : "索引 INDEX_URL 未配置");
-  bits.push(`上限 ${Math.round(state.maxBytes / MB)} MB${state.maxBytesFrom === "backend" ? "" : "（后端未自报，用兜底值）"}`);
-  if (!canInflateRaw()) bits.push("本浏览器读不了 zip，元数据需手填");
-  const text = bits.join(" · ");
-  const el = $("#boot");
-  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  el.classList.toggle("bad", !IS_API_CONFIGURED);
-
-  if (reduce) {
-    el.textContent = text;
-    el.append(node("span", "cur"));
-    return;
-  }
-  el.textContent = "";
-  const out = node("span");
-  const cur = node("span", "cur");
-  el.append(out, cur);
-  let i = 0;
-  const timer = setInterval(() => {
-    out.textContent = text.slice(0, ++i);
-    if (i >= text.length) clearInterval(timer);
-  }, 16);
-}
-
 /* ------------------------------------------------------------ 01 文件与解包 */
 
 function termLines(lines) {
@@ -260,7 +231,6 @@ function clearFile() {
   $("#file").value = "";
   $("#term").hidden = true;
   $("#check").hidden = true;
-  $("#check-where").hidden = false;
   $("#meta-src").textContent = "手动填写";
   for (const key of PREFILL_KEYS) {
     const el = fieldEls[key];
@@ -433,11 +403,9 @@ const runCheck = debounce(async () => {
   if (!id || !/^\d+$/.test(code)) {
     state.checkStatus = null;
     $("#check").hidden = true;
-    $("#check-where").hidden = false;
     refreshGate();
     return;
   }
-  $("#check-where").hidden = true;
   showCheck("idle", "checking", "正在查重…", `检查 ${id} 是否已在公开索引里。`);
   try {
     const status = await checkModule(id, code);
@@ -527,7 +495,7 @@ function gateItems() {
       text: "模块 ID / 名称 / 版本 / 版本号 齐全（版本号为整数）",
     },
     { ok: !missing.includes("source") && !badSource, text: "模块出处是酷安站内链接" },
-    { ok: !missing.includes("uploader"), text: "投稿者署名已填" },
+    { ok: !missing.includes("uploader"), text: "投稿者酷安昵称已取得" },
     { ok: !missing.includes("coolapkUid") && !badUid, text: "酷安 UID 已填，且是 4-12 位纯数字" },
   ];
   if (IS_UID_VERIFY_ON) {
@@ -565,7 +533,7 @@ const FIELD_MSGS = {
   coolapkUid: (v) => (v ? "UID 应是 4-12 位纯数字，不带 https 和 /" : "请填写你的酷安 UID"),
   source: (v) =>
     v ? "必须是酷安站内链接，如 https://www.coolapk.com/feed/65432100" : "请填写模块出处",
-  uploader: (v) => (v ? "" : "请填写投稿者署名"),
+  uploader: (v) => (v ? "" : "这一项没取到昵称，请自己填一个署名"),
   id: (v) => (v ? "" : "请填写模块 ID"),
   name: (v) => (v ? "" : "请填写模块名称"),
   version: (v) => (v ? "" : "请填写版本字符串"),
@@ -616,30 +584,33 @@ function showUid(tone, chip, title, desc, avatar) {
   $("#uid-d").textContent = desc;
 }
 
-// 署名的正常来源是「按 UID 反查酷安」，不是投稿人自己敲：取到了就填上并锁住（想改署名只能改 UID），
-// 取不到才放开。放开这一条不是省事 —— Worker 那边 uploader 空着会 400，而酷安抖动、核实被运维关掉
-// 都不该把真人挡在投稿之外；这时界面必须写明它是「你自己报的」，因为能被任何人复核的锚点
-// 从来是 UID，不是这个随便能起的昵称。
+// 昵称不是要填的字段，是按 UID 反查回来的结果，所以整行默认藏起来：取到了才出现、只读显示，
+// 想改署名只能改 UID —— 这样「UID 是 A、署名写 B」这种组合根本进不了索引。
+// 只有一种情况例外：这次没取到昵称。Worker 那边 uploader 空着直接 400，而酷安抖动、核实被运维
+// 关掉都不该把真人挡在投稿之外，所以这时把同一行放开成可填，并写明是哪一种原因 ——
+// 能被任何人复核的锚点从来是 UID，不是这个随便能起的昵称。
 const UPLOADER_FALLBACK = {
-  not_found: "这个 UID 在酷安查不到，所以取不到昵称。改对 UID 会自动带出；急着提交也可以先自己填署名。",
-  unavailable: "这次没从酷安取到昵称（接口没响应或被风控）。署名先自己填 —— 出问题时按「你自己报的」处理。",
-  self_reported: "后端当前没有核实这个 UID，昵称取不到。署名先自己填 —— 它会按「你自己报的」处理。",
-  off: "后端还没接核实，昵称取不到。署名先自己填 —— 它会按「你自己报的」处理。",
+  not_found: "这个 UID 在酷安查不到，所以取不到昵称。改对 UID 会自动带出；急着提交也可以先自己填一个署名。",
+  unavailable: "这次没从酷安取到昵称（接口没响应或被风控）。先自己填一个 —— 出问题时按「你自己报的」处理。",
+  self_reported: "后端当前没有核实这个 UID，昵称取不到。先自己填一个 —— 它会按「你自己报的」处理。",
+  off: "后端还没接核实，昵称取不到。先自己填一个 —— 它会按「你自己报的」处理。",
 };
 
 function syncUploaderField() {
   const el = fieldEls.uploader;
   if (!el) return;
   const field = el.closest(".field");
+  const row = $("#nick-field");
   const tag = $("#uploader-tag");
   const help = $("#uploader-help");
   const nickname = state.uidStatus === "verified" && state.uidInfo ? state.uidInfo.nickname : "";
 
   if (nickname) {
-    el.value = nickname; // 以反查结果为准：不让「UID 是 A、署名写 B」这种组合进索引
+    el.value = nickname; // 以反查结果为准
     el.dataset.auto = "1";
     el.readOnly = true;
     field.classList.add("is-pre");
+    if (row) row.hidden = false;
     if (tag) tag.textContent = "已按 UID 取到";
     if (help) help.textContent = "已从酷安取回这个 UID 对应的昵称并锁定 —— 想改署名，只能改 UID。";
     return;
@@ -647,14 +618,15 @@ function syncUploaderField() {
 
   el.readOnly = false;
   field.classList.remove("is-pre");
-  if (state.uidStatus === "checking") return; // 等回包时不闪文案，也不动你填过的东西
-  delete el.dataset.auto;
-  if (tag) tag.textContent = "按 UID 自动取";
-  if (help) {
-    help.textContent =
-      UPLOADER_FALLBACK[state.uidStatus] ||
-      "填完下面的酷安 UID 会自动带出昵称并锁上；取不到时才需要你在这里自己填。";
+  // 还没填 / 正在查 / 形状不对：这一行没有可说的，别占位
+  if (state.uidStatus === "idle" || state.uidStatus === "checking" || state.uidStatus === "invalid") {
+    if (row) row.hidden = true;
+    return;
   }
+  if (row) row.hidden = false;
+  delete el.dataset.auto;
+  if (tag) tag.textContent = "需要你填";
+  if (help) help.textContent = UPLOADER_FALLBACK[state.uidStatus] || "这次没从酷安取到昵称，请自己填一个署名。";
 }
 
 const runUidCheck = debounce(async () => {
@@ -717,7 +689,7 @@ function openConfirm() {
     ["版本", `${fieldValue("version")} · versionCode ${fieldValue("versionCode")}`],
     ["作者", fieldValue("author") || "未填"],
     ["出处", fieldValue("source")],
-    ["署名", fieldValue("uploader")],
+    ["投稿者酷安昵称", fieldValue("uploader")],
     ["酷安 UID", uidLine()],
   ];
   for (const [k, v] of rows) {
@@ -1543,8 +1515,6 @@ async function syncLimits() {
   if (!changed) return;
   paintLimit();
   renderAbout();
-  // 开机读数那段是打字机动画，只在数字真的变了时重打一次，否则白白打断阅读
-  typeReadout();
 }
 
 function init() {
@@ -1573,7 +1543,6 @@ function init() {
   bindTheme();
   renderAbout();
   renderRoute();
-  typeReadout();
 
   $("#form").addEventListener("submit", (e) => e.preventDefault());
 }

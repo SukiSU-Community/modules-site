@@ -87,7 +87,6 @@
                 这里就是给这些模块开的投稿入口：把 zip 传上来、写清出处，服务端把它存成长期可用的下载地址，
                 审核通过后进入公开索引，所有人就能在管理器里搜到并一键安装。
               </p>
-              <p class="readout" id="boot" aria-live="polite"></p>
             </div>
             <div class="spec" aria-label="投稿硬性条件">
               <div class="spec__row">
@@ -190,10 +189,6 @@
                 <p class="status__d" id="check-d"></p>
               </div>
             </div>
-            <p class="field__help" id="check-where">
-              还没确认过是否已收录 —— 填完模块 ID 与版本号会自动查一次，免得白传一个已经有人投过的包。
-              <a href="#/index">或直接翻已收录列表</a>
-            </p>
           </section>
 
           <!-- 03 出处与身份 -->
@@ -216,29 +211,26 @@
               </p>
               <p class="field__err" data-err="source">请填写酷安站内链接</p>
             </div>
-            <div class="grid2">
-              <div class="field">
-                <div class="field__lab">
-                  <label for="f-uploader">投稿者署名</label>
-                  <span class="auto" id="uploader-tag">按 UID 自动取</span>
-                </div>
-                <input type="text" id="f-uploader" data-k="uploader" placeholder="填好下面的酷安 UID 就会自动带出" autocomplete="nickname" />
-                <p class="field__help" id="uploader-help">
-                  这一项<b>不用你填</b>：填完酷安 UID，后端按 UID 反查酷安，把昵称填在这里并锁上。
-                  只有这次没取到昵称（核实没开 / 酷安不可达）时才放开让你自己填，那时它属于「你自己报的」。
-                </p>
-                <p class="field__err" data-err="uploader">请填写投稿者署名</p>
+            <div class="field">
+              <div class="field__lab"><label for="f-uid">酷安 UID<span class="req">*</span></label></div>
+              <input class="mono" type="text" id="f-uid" data-k="coolapkUid" placeholder="2781460" inputmode="numeric" autocomplete="off" spellcheck="false" required />
+              <p class="field__help">
+                酷安 App「我的」→ <b>点头像进个人主页</b> → 右上角<b>三点</b> →
+                「查看我的资料」里的 <b>用户 UID</b>。
+              </p>
+              <p class="field__err" data-err="coolapkUid">UID 应是 4-12 位纯数字</p>
+            </div>
+            <!-- 昵称不是要填的字段，是按上面那个 UID 反查回来的结果，所以整行默认不出现：
+                 取到了只读显示；取不到（核实没开 / 酷安不可达 / UID 查无此人）才放开让你自己填 ——
+                 Worker 那边 uploader 空着直接 400，不能让酷安抖动把真人挡在投稿之外。 -->
+            <div class="field" id="nick-field" hidden>
+              <div class="field__lab">
+                <label for="f-uploader">投稿者酷安昵称</label>
+                <span class="auto" id="uploader-tag">按 UID 自动取</span>
               </div>
-              <div class="field">
-                <div class="field__lab"><label for="f-uid">酷安 UID<span class="req">*</span></label></div>
-                <input class="mono" type="text" id="f-uid" data-k="coolapkUid" placeholder="2781460" inputmode="numeric" autocomplete="off" spellcheck="false" required />
-                <p class="field__help">
-                  酷安 App「我的」→ <b>点头像进个人主页</b> → 右上角<b>三点</b> →
-                  「查看我的资料」里的 <b>用户 UID</b>。
-                  <a href="https://www.coolapk.com/u/2781460" target="_blank" rel="noopener noreferrer">举个例子</a>
-                </p>
-                <p class="field__err" data-err="coolapkUid">UID 应是 4-12 位纯数字</p>
-              </div>
+              <input type="text" id="f-uploader" data-k="uploader" placeholder="这次没取到昵称，请自己填一个" autocomplete="nickname" />
+              <p class="field__help" id="uploader-help"></p>
+              <p class="field__err" data-err="uploader">这一项没取到昵称，请自己填一个署名</p>
             </div>
             <div class="status" id="uid-check" hidden aria-live="polite">
               <img class="uid__avatar" id="uid-avatar" alt="" hidden />

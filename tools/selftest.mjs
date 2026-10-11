@@ -412,18 +412,23 @@ async function main() {
     Boolean(USER_STATUS.self_reported) && USER_STATUS.self_reported.tone !== "ok"
   );
 
-  /* ------------------------------------------------------- 投稿者署名的来源
-     署名不是投稿人自己敲的，而是后端按酷安 UID 反查回来的昵称 —— 这条改了就不是文案问题：
-     它决定「UID 是 A、署名写 B」这种组合能不能进索引。所以锁与退路都要钉住。 */
+  /* ------------------------------------------------------- 投稿者昵称的来源
+     昵称不是投稿人自己敲的，而是后端按酷安 UID 反查回来的结果 —— 这条改了就不是文案问题：
+     它决定「UID 是 A、署名写 B」这种组合能不能进索引。所以显隐、锁定、退路三样都要钉住。 */
   const formHtml = readFileSync(
     resolve(dirname(fileURLToPath(import.meta.url)), "../public/index.html"),
     "utf8"
   );
   check(
-    "署名不再是手填必填项（label 不带 *，改由脚本给状态标签与说明）",
-    /<label for="f-uploader">投稿者署名<\/label>/.test(formHtml) &&
-      /id="uploader-tag"/.test(formHtml) &&
-      /id="uploader-help"/.test(formHtml)
+    "昵称整行默认不出现，出现时叫「投稿者酷安昵称」且不挂必填星号",
+    /id="nick-field" hidden/.test(formHtml) &&
+      /<label for="f-uploader">投稿者酷安昵称<\/label>/.test(formHtml) &&
+      !/for="f-uploader">投稿者酷安昵称<span class="req">/.test(formHtml)
+  );
+  check(
+    "昵称那一行排在 UID 输入框之后（用户只填 UID，结果跟在后面）",
+    formHtml.indexOf('data-k="coolapkUid"') > 0 &&
+      formHtml.indexOf('id="nick-field"') > formHtml.indexOf('data-k="coolapkUid"')
   );
   check(
     "取到昵称时锁定输入框，取不到时才放开（两条都在）",
@@ -432,7 +437,12 @@ async function main() {
       /el\.readOnly = false;/.test(appSrc)
   );
   check(
-    "署名以反查结果为准：verified 时直接把昵称写进字段",
+    "还没填 / 正在查 / UID 形状不对时，这一行继续藏着（不占位也不误导）",
+    /state\.uidStatus === "idle" \|\| state\.uidStatus === "checking" \|\| state\.uidStatus === "invalid"/.test(appSrc) &&
+      /row\.hidden = true;/.test(appSrc)
+  );
+  check(
+    "昵称以反查结果为准：verified 时直接把昵称写进字段",
     /state\.uidStatus === "verified" && state\.uidInfo \? state\.uidInfo\.nickname : ""/.test(appSrc) &&
       /el\.value = nickname;/.test(appSrc)
   );
@@ -443,7 +453,7 @@ async function main() {
     "UPLOADER_FALLBACK 少了状态"
   );
   check(
-    "runUidCheck 的两个出口都会同步署名状态（早退时不留下一个锁着的空框）",
+    "runUidCheck 的两个出口都会同步昵称状态（早退时不留下一个锁着的空框）",
     (appSrc.match(/^\s+syncUploaderField\(\);/gm) || []).length >= 3,
     `出现 ${(appSrc.match(/syncUploaderField\(\);/g) || []).length} 次`
   );
@@ -452,6 +462,11 @@ async function main() {
     !formHtml.includes("抄自谁的帖子就写谁") &&
       /查看我的资料/.test(formHtml) &&
       /用户 UID/.test(formHtml)
+  );
+  // 删 DOM 节点必须连脚本引用一起删：留一个 $("#boot") 就是开机直接抛异常、整页不初始化
+  check(
+    "删掉的三处（查重提示、开机读数、举个例子）在标记与脚本里都没有残留",
+    ["check-where", "boot", "举个例子"].every((k) => !formHtml.includes(k) && !appSrc.includes(k))
   );
 
   // 后端仓库在同一台机器上时，直接把它的源码当契约的另一端来读。

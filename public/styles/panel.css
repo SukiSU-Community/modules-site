@@ -472,20 +472,6 @@ h1 .hi::after {
   content: "> ";
   color: var(--ink-3);
 }
-.readout .cur {
-  display: inline-block;
-  width: 7px;
-  height: 13px;
-  vertical-align: -2px;
-  margin-left: 3px;
-  background: var(--mint);
-  animation: blink 1.05s steps(2, start) infinite;
-}
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
-}
 .readout.bad {
   color: var(--amber);
 }
