@@ -4,6 +4,7 @@
 // 用法：node tools/selftest.mjs [--require-backend]
 //   --require-backend 把「找不到后端源码」从跳过升级为失败，CI 用这个。
 import zlib from "node:zlib";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -16,6 +17,7 @@ import {
   inspectEntries,
 } from "../public/scripts/zipread.js";
 import { parseModuleProp, missingRequired } from "../public/scripts/moduleprop.js";
+import { sha256Hex, proofPrefixForId, buildProofString, makeNonce } from "../public/scripts/proof.js";
 
 const REQUIRE_BACKEND = process.argv.includes("--require-backend");
 
@@ -589,6 +591,89 @@ async function main() {
     ["check-where", "boot", "举个例子"].every((k) => !formHtml.includes(k) && !appSrc.includes(k))
   );
 
+  /* ------------------------------------------------------- 所有权口令（P0）
+     公示页要指向人，前提是投稿人控制着他填的那个 UID。这条链子上有三个地方会静默断掉，
+     而且断掉时都不会报错，只会让口令看起来照常生成：
+     ① 前后端两份算法漂移（Worker 复核时把每个真口令判成假的）；
+     ② 展示的字符串与模块 id 脱钩（改了 id 还显示旧口令，用户抄进签名的那串就废了）；
+     ③ 那条「能关掉安全闸」的配置开关被人加回来（能关的闸不是闸）。 */
+  const configSrc = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../public/scripts/config.js"),
+    "utf8"
+  );
+  // 自己的 WebCrypto 实现不配自证：拿 node:crypto 当独立 oracle 对一次整条哈希。
+  // 这条钉的是摘要本身（十六进制补零、UTF-8 编码），下面那条钉的才是截断与拼接。
+  check(
+    "口令算法与 node:crypto 一致（不信任自己的实现）",
+    (await sha256Hex("sukisu_proof_vector_1")) ===
+      createHash("sha256").update("sukisu_proof_vector_1", "utf8").digest("hex")
+  );
+  // 形状是 Worker 那边的判据之一（它拿 id 重算整串再去签名里找），所以 8 位前缀、那个连字符、
+  // 6 位随机段一个都不能漂；整串 15 字符也是设计上限（酷安签名实测 60 的一半以下）。
+  const proofSample = await buildProofString("any", "ab12cd");
+  check(
+    "整串口令 15 字符，形状固定：8 位十六进制 + '-' + 6 位小写字母数字",
+    /^[0-9a-f]{8}-[a-z0-9]{6}$/.test(proofSample) && proofSample.length === 15,
+    proofSample
+  );
+  // 口令是一次性的：makeNonce 退化成定值就等于全站共用一个 nonce，重放窗口重新打开，
+  // 而这在界面上完全看不出来 —— 只有跨模块 id 的签名会撞车。
+  const nonceSamples = new Set();
+  for (let i = 0; i < 200; i++) nonceSamples.add(makeNonce());
+  check(
+    "makeNonce 产出合法形状且不是定值",
+    [...nonceSamples].every((n) => /^[a-z0-9]{6}$/.test(n)) && nonceSamples.size > 150,
+    `${nonceSamples.size}/200 个不同，首个 ${[...nonceSamples][0]}`
+  );
+  // 派生值一旦进 state，就和来源脱钩了：改了 id 还缓存着旧口令。只准缓存随机段。
+  // 反例写成 state.proof 的前缀匹配（不带 \b）：state.proofText / state.proofString 一样是缓存派生串。
+  check(
+    "前端只缓存随机部分：口令文本由 (id, nonce) 现算",
+    /state\.nonce/.test(appSrc) && /buildProofString\(id, state\.nonce\)/.test(appSrc) && !/state\.proof/.test(appSrc)
+  );
+  // 载荷里没这两项时后端只能把「没承诺」判成「承诺过」——静默放行，前端界面还一切正常。
+  // 引号样式不管：钉的是「这两个字段真的进了 FormData」，不是钉 api.js 怎么写字符串。
+  check(
+    "提交载荷带上 pledge 与 nonce",
+    /form\.append\(\s*["']pledge["']/.test(apiSrc) && /form\.append\(\s*["']nonce["']/.test(apiSrc)
+  );
+  // 四条勾选是「逐条知情」的载体，而解锁按钮数的是真的 checkbox 元素（app.js 里
+  // $$("#layer-confirm input[type=checkbox]")）：勾少一条，04 那条承诺就再没人被要过，
+  // 按钮却照常亮 —— 这是静默的一半对，界面看着还是四条文字。
+  // 反过来 <label for> 指着不存在的 input 时，那条勾点不动，文字还在但收不到确认，所以两条分开钉。
+  const ticks = [...formHtml.matchAll(/<label[^>]*class="tick"[^>]*for="(ck\d)">([\s\S]*?)<\/label>/g)].map(
+    (m) => ({ id: m[1], body: m[2] })
+  );
+  // checkbox 那侧按标签整取，不写死属性顺序与自闭合写法：钉的是「有四条点得动的勾」，不是钉我排版。
+  const tickInputs = new Set(
+    [...formHtml.matchAll(/<input\b[^>]*>/g)]
+      .map((m) => m[0])
+      .filter((tag) => /type="checkbox"/.test(tag))
+      .map((tag) => /\bid="(ck\d)"/.exec(tag)?.[1])
+      .filter(Boolean)
+  );
+  check(
+    "确认弹窗是四条勾选（label 与 checkbox 都是四条），最后一条是 04 / MALICE 的承诺",
+    ticks.length === 4 &&
+      tickInputs.size === 4 &&
+      /04 \/ MALICE/.test(ticks[3].body) &&
+      /不含恶意代码/.test(ticks[3].body),
+    `label ${ticks.length} 条 / checkbox ${tickInputs.size} 个`
+  );
+  check(
+    "每条勾选的 label 与 checkbox 成对（孤儿 label 那条勾点不动）",
+    ticks.every((t) => tickInputs.has(t.id)) && tickInputs.size === ticks.length,
+    `label ${ticks.map((t) => t.id).join(",")} / input ${[...tickInputs].join(",")}`
+  );
+  check("「三项」这种旧文案没有残留（第四勾加上了）", !formHtml.includes("三项") && !appSrc.includes("三项") && !formHtml.includes("三道"));
+  check(
+    "COOLAPK_VERIFY_REQUIRED 被彻底删除 —— 能关掉安全闸的开关本身就是洞",
+    !configSrc.includes("COOLAPK_VERIFY_REQUIRED") &&
+      !appSrc.includes("COOLAPK_VERIFY_REQUIRED") &&
+      !apiSrc.includes("COOLAPK_VERIFY_REQUIRED") &&
+      !readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../README.md"), "utf8").includes("COOLAPK_VERIFY_REQUIRED")
+  );
+
   // 后端仓库在同一台机器上时，直接把它的源码当契约的另一端来读。
   // 路径靠猜迟早会像 contrib 从 H:\刷机包 搬到 H:\sukisu 那样一次搬家就全哑掉，
   // 所以显式环境变量优先：WORKER_SRC=/path/to/worker/src/index.ts npm test
@@ -644,6 +729,65 @@ async function main() {
       "镜像在上游失败时绝不发 200 错误体（MMRL 客户端会把 body 当索引进食）",
       /status: 502/.test(worker) && /'cache-control': 'no-store'/.test(worker),
     );
+  }
+
+  /* ------------------------------------------------ 所有权口令：两份实现的同值（跨仓库）
+     public/scripts/proof.js 与 worker/src/proof.ts 是同一个算法的两份拷贝，这是故意的：
+     前端要拿它显示，Worker 要拿它复核，而 Worker 那份不能被浏览器读到。故意的东西不会自己
+     保持一致 —— 一边改了另一边不报错，只在真投稿时把每个口令判成假的，而界面上一切正常。
+     所以这里不比对文本、不数正则，直接把两边各跑一遍逐条对：能调代码就调代码，grep 源码的
+     「同值」钉的只是字符串长得像。proof.ts 就放在 index.ts 同目录，路径从上面那条已经解析
+     成功的 workerPath 推 —— 再抄一遍候选列表，等于再埋一次「contrib 一搬家就全哑」。 */
+  const workerProofPath = workerPath ? resolve(dirname(workerPath), "proof.ts") : "";
+  if (!workerProofPath || !existsSync(workerProofPath)) {
+    const msg = workerProofPath ? `找不到 ${workerProofPath}` : "后端源码整组不可用（见上一条跳过 / 失败）";
+    if (REQUIRE_BACKEND) {
+      check("后端那份口令实现必须存在（--require-backend）", false, msg);
+    } else {
+      skip("前后端口令算法同值那组跨仓库校验", msg);
+    }
+  } else {
+    console.log(`  口令契约另一端：${workerProofPath}`);
+    // proof.ts 只有可擦除的 TS 语法、没有 import，Node ≥ 22.6 的类型擦除直接跑得起。
+    // 读不动就是运行时太老，不是契约破了 —— 按这个文件既有的规矩报成 skip（总结里看得见，
+    // --require-backend 把它升级成失败），绝不退化成 grep 源码：那钉的只是字符串长得像。
+    let wp = null;
+    let loadErr = "";
+    try {
+      wp = await import(pathToFileURL(workerProofPath).href);
+    } catch (err) {
+      loadErr = err && err.message ? err.message : String(err);
+    }
+    if (typeof wp?.proofPrefixForId !== "function") {
+      const msg = `这个运行时加载不了 ${workerProofPath}（需要 Node ≥ 22.6 的类型擦除）—— ${loadErr}`;
+      if (REQUIRE_BACKEND) check("后端那份口令实现必须可加载（--require-backend）", false, msg);
+      else skip("前后端口令算法同值那组跨仓库校验", msg);
+    } else {
+      // 四个向量挑的是两边最容易各写各的：纯 ASCII、上面那条已知答案串、非 ASCII（UTF-8 字节序）、
+      // 以及 200 字节的长 id。任一条漂了都算漂移，不是「抽样看着一样」。
+      const drift = [];
+      const nonce = "ab12cd";
+      for (const id of ["demo", "sukisu_proof_vector_1", "含中文的模块id", "a".repeat(200)]) {
+        const prefixWeb = await proofPrefixForId(id);
+        const prefixWorker = await wp.proofPrefixForId(id);
+        if (prefixWeb !== prefixWorker) drift.push(`${id.slice(0, 12)}: web=${prefixWeb} worker=${prefixWorker}`);
+        const fullWeb = await buildProofString(id, nonce);
+        const fullWorker = await wp.buildProofString(id, nonce);
+        if (fullWeb !== fullWorker) drift.push(`${id.slice(0, 12)}: 整串 web=${fullWeb} worker=${fullWorker}`);
+      }
+      check("前后端算出的口令前缀逐条相同（两份实现必须锁在一起）", drift.length === 0, drift.join(" | "));
+      // 承诺版本的字面值从前端源码里取，不在这儿抄一份：前端发的必须是 Worker 认账的集合里的一个。
+      // 取不到字面值（比如改成了常量引用）也算红 —— 这条宁可得罪人，不要静默放过。
+      const pledgeSent = /pledge:\s*["']([^"']+)["']/.exec(appSrc)?.[1] ?? "";
+      check(
+        "前端发的承诺版本在 Worker 承认的集合里，且等级下限没被调低（写死的 2）",
+        pledgeSent !== "" && wp.PLEDGE_VERSIONS.includes(pledgeSent) && wp.MIN_COOLAPK_LEVEL === 2,
+        `pledge=${JSON.stringify(pledgeSent)} 后端集合=${JSON.stringify([...wp.PLEDGE_VERSIONS])} 下限=${wp.MIN_COOLAPK_LEVEL}`
+      );
+      // 随机段的字母表也是契约：前端换成大写或符号，Worker 的 PROOF_NONCE_RE 会把每条口令判非法。
+      const badNonce = Array.from({ length: 60 }, () => makeNonce()).find((n) => !wp.PROOF_NONCE_RE.test(n));
+      check("前端生成的 nonce 过后端的形状校验（两边字母表同值）", !badNonce, badNonce);
+    }
   }
 
   /* ------------------------------------------- 处置台账词汇与索引仓库对齐
