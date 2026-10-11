@@ -555,7 +555,7 @@ async function main() {
       /rechecking \? "正在按新 UID 重查" : "需要你填"/.test(appSrc)
   );
   // 改了 UID 却没取到新昵称时，上一个 UID 的昵称必须消失 —— 而且要赶在「把这一行藏起来」
-  // 之前：COOLAPK_VERIFY_REQUIRED=false 时「正在查」也允许提交，清空晚一步就漏进索引。
+  // 之前：核实没接 / 酷安抖动时「正在查」也允许提交，清空晚一步就漏进索引。
   const syncBody = appSrc.slice(
     appSrc.indexOf("function syncUploaderField()"),
     appSrc.indexOf("\n}", appSrc.indexOf("function syncUploaderField()"))

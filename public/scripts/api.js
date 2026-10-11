@@ -98,6 +98,10 @@ export function submitModule(fields, { onProgress } = {}) {
   form.append("uploader", fields.uploader);
   // 署名昵称与酷安 UID 分两个字段：前者给人看，后者是唯一可追责的标识。
   form.append(CONFIG.COOLAPK_UID_FIELD, fields.coolapkUid);
+  // 所有权口令：只发随机段 nonce 与承诺版本，派生串由 Worker 拿 id 自己重算 ——
+  // 前端算出来的那份只用来显示，发过去就等于让前端替后端定结论。
+  form.append("pledge", fields.pledge ?? "");
+  form.append("nonce", fields.nonce ?? "");
   // Turnstile 预留位：没接入时也是发空字符串，不做任何前端假验证码。
   form.append(CONFIG.TURNSTILE_FIELD, IS_TURNSTILE_CONFIGURED ? fields.turnstile || "" : "");
 

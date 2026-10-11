@@ -21,7 +21,7 @@
 | 处置台账地址 | `config.js` `DISPOSITIONS_URL` | **留空就按 `INDEX_URL` 同目录换文件名推导**（索引仓库里 `json/modules.json` 与 `json/dispositions.json` 是一对，Worker 的两个镜像端点也是一对）。只有把台账放去了别处才显式填。公示页（`#/incidents`）读它。 |
 | **反机器人校验** | `config.js` `TURNSTILE_SITEKEY` / `TURNSTILE_FIELD` | 留空 = 界面显示「待接入」说明，提交时只随表带一个空的 token 字段。填入 sitekey 后自动加载 Turnstile 脚本并渲染部件，token 用 `TURNSTILE_FIELD` 的字段名发出（后端字段名不同就只改这一行）。 |
 | **酷安 UID 字段名** | `config.js` `COOLAPK_UID_FIELD` | 投稿人身份发两个字段：`uploader` = 昵称（索引里公开显示），`coolapkUid` = 酷安 UID 数字。后端约定的名字不同就改这一行。 |
-| **酷安核实端点** | `config.js` `COOLAPK_USER_PATH` / `COOLAPK_VERIFY_REQUIRED` | 见下面第 2 节。路径留空 = 不核实，界面显示「未经核实」，投稿照常能提。`COOLAPK_VERIFY_REQUIRED: true` 则必须核实通过才放行。**四种状态**：`verified`（真反查到昵称）/ `self_reported`（后端只回显，这次没核实）/ `not_found`（拦住）/ `unavailable`（想核实但没核实成，只提示）。前两种在界面上文案不同，不许混。 |
+| **酷安核实端点** | `config.js` `COOLAPK_USER_PATH` | 见下面第 2 节。路径留空 = 不核实，界面显示「未经核实」，投稿照常能提 —— 核实这条**没有前端开关**：能在浏览器里改到的开关就能被绕过，判定在 Worker。**四种状态**：`verified`（真反查到昵称）/ `self_reported`（后端只回显，这次没核实）/ `not_found`（拦住）/ `unavailable`（想核实但没核实成，只提示）。前两种在界面上文案不同，不许混。 |
 | 一键加源 scheme | `config.js` `SCHEME_ADD_SOURCE` | 例 `kernelsu://mmrl?url=<编码后的 INDEX_URL>`，说明页会用它渲染加源按钮。⚠️ 这条**没在真机管理器上验过**（编码形式是按惯例写的），所以别照着它宣传「一键加源」。 |
 | **大小上限** | `config.js` `MAX_UPLOAD_BYTES` | **这里不是上限的定义处，只是问不到时的兜底值。** 真实上限由 Worker 通过 `GET ${API_BASE}/` 的 `maxBytes` 字段自报，页面启动时问一次（`api.js` 的 `fetchServiceLimits()`），问到就重画拖放区提示、投稿规格与说明页状态。以前在这里抄一份的结果是抄出 8MB、后端实际 2MB：用户按页面写的数字传到一半被 400 拒，而页面还写着允许 8MB。 |
 | 站名 | `config.js` `SITE_NAME` / `SITE_SUBTITLE` | 只影响标题、导航铭牌与 `<title>`。 |
@@ -96,7 +96,9 @@ GET ${API_BASE}/user?uid=99999999
 前端行为（`api.js` 的 `lookupCoolapkUser` + `app.js` 的 `runUidCheck`）：UID 输入停止 500ms 后自动查，
 核实通过才让「投稿人酷安昵称」这一栏出现，值是反查回来的昵称且锁死（改署名只能改 UID），旁边显示头像与 UID；
 `not_found` 会挡住提交按钮；UID 一改动，上一个 UID 的昵称当场清空，不留到核实回来之后。
-端点没接或不可达时只标「未经核实」，不把人拦在外面（`COOLAPK_VERIFY_REQUIRED: true` 可改成硬拦）。
+端点没接或不可达时只标「未经核实」，不把人拦在外面 —— 前端拦人的只有「查无此人」与「UID 形状不对」两种。
+这个选择没有开关：能在浏览器里改到的闸拦不住任何真想提交的人，而「这个账号是不是本人、签名里有没有口令」
+本来就一律由 Worker 判。
 
 ### 出处现在只收酷安站内链接
 
@@ -133,7 +135,7 @@ GET ${API_BASE}/user?uid=99999999
 | 填完 ID 与版本号自动查重、实时显示 | `app.js:runCheck()`（防抖 420ms），结果显示在 02 面板下方 |
 | 出处 / 署名必填 + 明确说明为什么要填 | 面板 03「出处与身份」：出处限酷安站内链接、署名与酷安 UID 双字段；说明页 D 节解释为什么必须是 UID |
 | 酷安 UID 核实（含端点未接入时的降级） | `api.js:lookupCoolapkUser()` + `app.js:runUidCheck()`，四种状态 verified / not_found / unavailable / off，通过后自动填昵称并显示头像 |
-| 上传前三项确认，未勾完不能提交 | `#layer-confirm`，仿 Bootloader 解锁警告；三项勾选全中才解锁「上传」 |
+| 上传前四项确认，未勾完不能提交 | `#layer-confirm`，仿 Bootloader 解锁警告；四项勾选全中才解锁「上传」 |
 | 成功给 PR 链接 | `app.js:showSuccess()`，含「点进去看审核进度」与后续流程说明 |
 | 失败显示中文原因且能重试 | `app.js:showFailure()`：表单内容与已选文件都留着，「重试提交」直接复用 |
 | 已收录模块浏览页（MMRL） | `#view-index` + `api.js:fetchIndex()/normalizeIndex()`，搜索按 ID/名称/作者/描述过滤并高亮 |

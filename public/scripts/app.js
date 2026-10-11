@@ -25,6 +25,7 @@ import {
 } from "./api.js";
 import { canInflateRaw, listEntries, readEntry, inspectEntries } from "./zipread.js";
 import { parseModuleProp } from "./moduleprop.js";
+import { buildProofString, makeNonce } from "./proof.js";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -39,6 +40,7 @@ const state = {
   checkStatus: null,
   uidStatus: "idle", // idle | checking | off | verified | not_found | unavailable | self_reported | invalid
   uidInfo: null, // { uid, nickname, avatar }
+  nonce: "", // 所有权口令的随机部分；口令文本由 buildProofString(id, nonce) 现算，不缓存
   // 上限由后端自报（api.js 的 fetchServiceLimits）；config.js 那份只是问不到时的兜底。
   maxBytes: CONFIG.MAX_UPLOAD_BYTES,
   maxBytesFrom: "config", // config | backend | unreachable | no-field
@@ -332,6 +334,7 @@ async function intake(file) {
   termLines(out);
   refreshGate();
   runCheck();
+  renderProof(); // module.prop 把 id 预填进来的这一下不触发 input 事件，口令得自己重算一次
 }
 
 function applyProp(prop) {
@@ -433,6 +436,15 @@ function bindCheck() {
   for (const key of ["id", "versionCode"]) {
     fieldEls[key].addEventListener("input", runCheck);
   }
+  // 口令文本是 (id, nonce) 的派生值，id 一动就得重算 —— 与 runCheck 同一个触发点。
+  fieldEls.id.addEventListener("input", renderProof);
+  $("#proof-copy").addEventListener("click", async () => {
+    const t = $("#proof-text").textContent;
+    if (!t || t === "…") return;
+    await navigator.clipboard.writeText(t);
+    $("#proof-copy").textContent = "已复制";
+    setTimeout(() => ($("#proof-copy").textContent = "复制"), 1500);
+  });
   fieldEls.coolapkUid.addEventListener("input", () => {
     // 「这个昵称属于上一串 UID」在按键那一刻就已经成立，等不到 debounce 后的核实结果
     syncUploaderField();
@@ -485,7 +497,9 @@ function collect() {
 function uidBlocked() {
   if (!IS_UID_VERIFY_ON) return false;
   if (state.uidStatus === "not_found" || state.uidStatus === "invalid") return true;
-  return Boolean(CONFIG.COOLAPK_VERIFY_REQUIRED) && state.uidStatus !== "verified";
+  // 只有「查无此人」和「UID 形状不对」算不是本人。核实没接上 / 酷安抖动是「平台没核实成」，
+  // 不是「你不是本人」，所以放行 —— 口令成不成由 Worker 判，前端不加第二道闸。
+  return false;
 }
 
 function gateItems() {
@@ -511,6 +525,7 @@ function gateItems() {
         : "酷安用户核实（接口不可用时不拦你）";
     items.push({ ok: !uidBlocked(), text: label });
   }
+  items.push({ ok: Boolean(state.nonce), text: "投稿口令已生成（填进酷安签名）" });
   items.push({ ok: IS_API_CONFIGURED, text: "后端 API_BASE 已配置" });
   return items;
 }
@@ -527,8 +542,8 @@ function refreshGate() {
   $$("[data-open-confirm]").forEach((btn) => (btn.disabled = !ready));
   const firstBad = items.find((i) => !i.ok);
   $("#dock-t").textContent = firstBad ? firstBad.text : "全部就绪，可以确认";
-  $("#dock-s").textContent = firstBad ? "还差这一步" : "点「去确认」勾完三项";
-  $("#gate-note").textContent = ready ? "三项上传前确认还没勾" : "先把上面几项填齐";
+  $("#dock-s").textContent = firstBad ? "还差这一步" : "点「去确认」勾完四项";
+  $("#gate-note").textContent = ready ? "四项上传前确认还没勾" : "先把上面几项填齐";
   if (state.attempted) paintFieldErrors();
 }
 
@@ -631,7 +646,7 @@ function syncUploaderField() {
   el.readOnly = false;
   field.classList.remove("is-pre");
   // 只要现在没有反查到的昵称，上一个 UID 带出来的那份就必须消失 —— 放在藏行之前，
-  // 因为 COOLAPK_VERIFY_REQUIRED=false 时「正在查」也能提交，晚一步就漏进索引。手填的不动。
+  // 因为「正在查」的时候也能提交（核实没接 / 酷安抖动都不该拦人），清空晚一步就漏进索引。手填的不动。
   if (el.dataset.auto === "1") {
     el.value = "";
     delete el.dataset.auto;
@@ -647,6 +662,22 @@ function syncUploaderField() {
     help.textContent = rechecking
       ? "UID 改过了，上一个 UID 的昵称不能沿用 —— 等新结果回来。"
       : UPLOADER_FALLBACK[state.uidStatus] || "这次没从酷安取到昵称，请自己填一个署名。";
+}
+
+// 派生显示：口令 = sha256(当前 id) 前 8 位 + "-" + state.nonce，每次都在这里现算，
+// 界面上那份字符串永远跟着输入框里的 id —— 缓存派生值迟早和来源脱钩。
+async function renderProof() {
+  const box = $("#proof-field");
+  const id = fieldValue("id");
+  if (!state.nonce || !id) {
+    box.hidden = true;
+    return;
+  }
+  const text = await buildProofString(id, state.nonce);
+  // 连打 id 时先发的请求可能后到（runUidCheck 里同一类竞态已经踩过一次），旧结果别贴上去。
+  if (fieldValue("id") !== id) return;
+  $("#proof-text").textContent = text;
+  box.hidden = false;
 }
 
 const runUidCheck = debounce(async () => {
@@ -667,6 +698,7 @@ const runUidCheck = debounce(async () => {
   // 用户在你等回包的时候又改了 UID，就别把旧结果贴上去
   if (fieldValue("coolapkUid") !== uid) return;
   state.uidStatus = result.status;
+  if (result.status === "verified" && !state.nonce) state.nonce = makeNonce();
   state.uidInfo = result.status === "verified" ? result : null;
   const meta = USER_STATUS[result.status] || USER_STATUS.unavailable;
   const desc =
@@ -682,6 +714,7 @@ const runUidCheck = debounce(async () => {
   );
 
   syncUploaderField();
+  renderProof(); // 第一次核实通过才生成 nonce，口令行到这一步才有东西可显示
   refreshGate();
 }, 500);
 
@@ -776,6 +809,10 @@ function currentFields() {
     source: normalizeCoolapkUrl(fieldValue("source")) || fieldValue("source"),
     uploader: fieldValue("uploader"),
     coolapkUid: fieldValue("coolapkUid"),
+    // 承诺文本的版本号 + 口令的随机部分。派生串不在这里算 —— 后端拿 id 与 nonce 自己重算，
+    // 前端算出来的那份只用来显示。
+    pledge: "pledge-v1",
+    nonce: state.nonce,
     turnstile: state.turnstileToken,
   };
 }
@@ -953,7 +990,9 @@ function resetForm() {
   state.attempted = false;
   state.uidStatus = "idle";
   state.uidInfo = null;
+  state.nonce = "";
   $("#uid-check").hidden = true;
+  renderProof(); // nonce 清空后这一行跟着收起，别留一串还能提交的旧口令在屏幕上
   syncUploaderField(); // 顺手把 readOnly / 标签 / 说明一起还原，别留一个锁着的空框
   $$(".field").forEach((f) => f.classList.remove("is-bad", "is-pre"));
   refreshGate();

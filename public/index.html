@@ -266,6 +266,18 @@
                 <p class="status__d" id="uid-d"></p>
               </div>
             </div>
+            <div class="field" id="proof-field" hidden>
+              <span class="field__lab">投稿口令<span class="req">*</span></span>
+              <div class="proof">
+                <code class="mono" id="proof-text">…</code>
+                <button type="button" class="btn btn--ghost btn--sm" id="proof-copy">复制</button>
+              </div>
+              <p class="field__help">
+                打开酷安「我的 → 编辑资料 → 签名」，把上面这串填进去并保存，再回来提交。
+                这是为了证明这个账号归你 —— 公示与追责只认这个锚点。
+                换模块 ID 这串会跟着变；提交成功后可以把签名改回去。
+              </p>
+            </div>
           </section>
 
           <!-- 04 确认与上传 -->
@@ -276,7 +288,7 @@
               <span class="panel__tag">irreversible</span>
             </div>
             <p class="panel__note">
-              上传是<b style="color: var(--amber)">公开且长期保留</b>的动作，所以下面三项确认要逐条勾过，一条都不能跳。
+              上传是<b style="color: var(--amber)">公开且长期保留</b>的动作，所以下面四项确认要逐条勾过，一条都不能跳。
             </p>
 
             <ul class="gate" id="gate" aria-label="提交前自检"></ul>
@@ -327,7 +339,7 @@
           <h1 id="h-incidents">处置<span class="hi">公示</span></h1>
           <p class="hero__lede">
             模块拿到的是 root 权限，一个坏包毁掉的是整台设备。所以这里不私下处理：每一次下架与拒收都逐条公开，带上可核对的凭据（模块 ID / 包体 sha256 / 投稿人酷安 UID），随 git 历史长期留档。
-            对制作、传播恶意模块或冒充他人作品的行为，我们保留向公安机关报案、<span class="hl">依法追究法律责任</span>的权利。
+            对制作、传播恶意模块或二改他人作品夹带私货的行为，我们保留向公安机关报案、<span class="hl">依法追究法律责任</span>的权利。
           </p>
           <p class="readout" id="inc-readout" aria-live="polite"></p>
         </div>
@@ -455,11 +467,11 @@
 
     <!-- 移动端常驻操作条 -->
     <div class="dock" id="dock">
-      <span class="dock__txt"><b id="dock-t">待填：模块 zip</b><span id="dock-s">四项必填 + 三项上传前确认</span></span>
+      <span class="dock__txt"><b id="dock-t">待填：模块 zip</b><span id="dock-s">四项必填 + 四项上传前确认</span></span>
       <button type="button" class="btn btn--go btn--sm" data-open-confirm disabled>去确认</button>
     </div>
 
-    <!-- 上传前确认（仿 Bootloader 解锁警告）：三道勾全中才解锁「上传」 -->
+    <!-- 上传前确认（仿 Bootloader 解锁警告）：四道勾全中才解锁「上传」 -->
     <div class="layer" id="layer-confirm" role="dialog" aria-modal="true" aria-labelledby="warn-ttl" hidden>
       <div class="warn">
         <div class="warn__hazard" aria-hidden="true"></div>
@@ -471,7 +483,7 @@
           </svg>
           <div>
             <div class="warn__ttl" id="warn-ttl">Confirm Upload</div>
-            <p class="warn__sub">三项全部勾上，「上传」按钮才会亮 —— 少一项都传不出去。</p>
+            <p class="warn__sub">四项全部勾上，「上传」按钮才会亮 —— 少一项都传不出去。</p>
           </div>
         </div>
         <div class="warn__body">
@@ -495,6 +507,12 @@
               <span class="tick__txt"><span class="no">03 / REVIEW</span>
                 我知道投稿后<b>需要审核才会进公开索引，不是提交就立刻上线</b>；
                 已收录模块的版本更新一律人工审核，可能等更久。</span>
+            </label></li>
+            <li><label class="tick" for="ck4">
+              <input type="checkbox" id="ck4" />
+              <span class="tick__txt"><span class="no">04 / MALICE</span>
+                我承诺这个包里<b>不含恶意代码</b>：不窃取凭据、不静默联网回传、不破坏系统。
+                违反将被公开处置并可能被追究责任 —— 本条承诺会随包体一起存档。</span>
             </label></li>
           </ul>
           <div class="warn__sum" id="warn-sum"></div>
