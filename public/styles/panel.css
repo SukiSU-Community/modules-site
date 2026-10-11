@@ -482,13 +482,25 @@ h1 .hi::after {
   max-width: 54ch;
   color: var(--ink-2);
 }
-/* 导语里只划一处重点，用琥珀下划线而不是加粗：加粗在中文里几乎看不出来。 */
+/* 同一套「琥珀底 + 实下划线」标记：标题与导语共用一份声明，
+   分两处写迟早长歪。尺寸全用 em，所以跟着各自字号缩放。 */
+h1 .hi,
 .hero__lede .hl {
-  color: var(--ink);
-  text-decoration: underline;
-  text-decoration-color: var(--amber);
-  text-decoration-thickness: 2px;
-  text-underline-offset: 3px;
+  position: relative;
+  z-index: 0;
+  white-space: nowrap;
+}
+h1 .hi::after,
+.hero__lede .hl::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: -3px;
+  right: -3px;
+  bottom: 0.08em;
+  height: 0.38em;
+  background: linear-gradient(90deg, var(--amber-wash), var(--amber-edge));
+  border-bottom: 2px solid var(--amber);
 }
 .readout {
   font: 500 12.5px/1.9 var(--mono);
@@ -1764,14 +1776,22 @@ mark {
 @media (max-width: 620px) {
   .spec__cell {
     gap: 3px;
-    padding: 9px 10px;
+    padding: 9px 8px;
   }
   .spec__k {
     font-size: 9.5px;
     letter-spacing: 0.06em;
   }
   .spec__v {
-    font-size: 12px;
+    font-size: 11.5px;
+  }
+}
+
+/* 380 以下再让一档字号：四格是「同一份规格的四项」，第二行换行而第一行不换，
+   读起来就像两行不是一回事 —— 宁可字小半号。 */
+@media (max-width: 380px) {
+  .spec__v {
+    font-size: 11px;
   }
 }
 

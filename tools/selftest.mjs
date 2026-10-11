@@ -461,6 +461,13 @@ async function main() {
       /\.spec__cell:nth-child\(2n\)\s*\{\s*\n\s*border-right: 0;/.test(panelCss) &&
       /\.spec__cell:nth-child\(n \+ 3\)\s*\{\s*\n\s*border-bottom: 0;/.test(panelCss)
   );
+  // 标题与导语的重点标记共用一份声明：分两处写，改一处忘一处就是迟早的事。
+  check(
+    "导语的「搜到并一键安装」与标题的「好模块」是同一套下划线标记",
+    /h1 \.hi,\s*\n\.hero__lede \.hl \{/.test(panelCss) &&
+      /h1 \.hi::after,\s*\n\.hero__lede \.hl::after \{/.test(panelCss) &&
+      !/\.hero__lede \.hl \{[^}]*text-decoration/.test(panelCss)
+  );
   // 顶栏与标语各踩过一次「窄屏另有硬编码，clamp 白写」：这两条钉的就是那两个坑。
   check(
     "顶栏窄屏不换行（.bezel__in 用 nowrap 覆盖默认的 wrap）",
