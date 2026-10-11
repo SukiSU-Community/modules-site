@@ -238,9 +238,9 @@ async function main() {
   console.log("\n[8] 酷安 UID 与出处规则");
   const { isCoolapkUid, normalizeCoolapkUrl, lookupCoolapkUser, USER_STATUS, fetchServiceLimits } =
     await import("../public/scripts/api.js");
-  check("1234567 是合法 UID", isCoolapkUid("1234567") === true);
-  check("带空格也认", isCoolapkUid("  1234567 ") === true);
-  check("拒绝带链接前缀", isCoolapkUid("https://www.coolapk.com/u/1234567") === false);
+  check("99999999 是合法 UID", isCoolapkUid("99999999") === true);
+  check("带空格也认", isCoolapkUid("  99999999 ") === true);
+  check("拒绝带链接前缀", isCoolapkUid("https://www.coolapk.com/u/99999999") === false);
   check("拒绝非数字", isCoolapkUid("27a1460") === false);
   check("拒绝过短/过长", isCoolapkUid("123") === false && isCoolapkUid("1".repeat(13)) === false);
 
@@ -311,7 +311,7 @@ async function main() {
         reason: "malware",
         by: "gh:mod@example.com",
         at: "2026-10-12T00:00:00+08:00",
-        coolapkUid: "1234567",
+        coolapkUid: "99999999",
         id: "bad.module",
         versionCode: 3,
       },
@@ -670,7 +670,7 @@ async function main() {
     // 选择器集合从仓库那份的**归一化输出**里取，不抄常量：它才是「台账里可能出现哪些命中条件」的定义。
     const norm = repo.parseDispositions({
       schema: repo.DISPOSITIONS_SCHEMA,
-      dispositions: [{ kind: "revoke", reason: "other", by: "b", at: "2026-10-11T00:00:00Z", id: "a", versionCode: 1, sha256: "f".repeat(64), coolapkUid: "1234567" }],
+      dispositions: [{ kind: "revoke", reason: "other", by: "b", at: "2026-10-11T00:00:00Z", id: "a", versionCode: 1, sha256: "f".repeat(64), coolapkUid: "99999999" }],
     })[0];
     const repoSel = ["id", "versionCode", "sha256", "coolapkUid", "kind", "reason", "by", "at", "note", "verify"].filter((k) => k in norm);
     const frontSel = SELECTOR_KEYS.filter((k) => repoSel.includes(k));

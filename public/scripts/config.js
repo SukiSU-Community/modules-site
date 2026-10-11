@@ -73,8 +73,8 @@ export const CONFIG = {
   // 真实性核实必须由后端做：api.coolapk.com 不给浏览器开放跨域，而且 X-App-Token
   // 要 native 签名算法，前端拿不到。前端只是调你 Worker 上的这个路径。
   //   期望契约（照 /check 的风格：任何情况都回 HTTP 200，只读 status）：
-  //     GET ${API_BASE}/user?uid=1234567
-  //     → {"status":"verified","uid":"1234567","nickname":"…","avatar":"…"}
+  //     GET ${API_BASE}/user?uid=99999999
+  //     → {"status":"verified","uid":"99999999","nickname":"…","avatar":"…"}
   //       只有真的反查过酷安、确认昵称与 UID 对应，才允许回这个值
   //     → {"status":"self_reported","uid":"…"}
   //       后端只是原样回显，这次没核实（核实开关被运维关掉，或 UID 形状不对）
