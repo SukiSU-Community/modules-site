@@ -616,12 +616,54 @@ function showUid(tone, chip, title, desc, avatar) {
   $("#uid-d").textContent = desc;
 }
 
+// 署名的正常来源是「按 UID 反查酷安」，不是投稿人自己敲：取到了就填上并锁住（想改署名只能改 UID），
+// 取不到才放开。放开这一条不是省事 —— Worker 那边 uploader 空着会 400，而酷安抖动、核实被运维关掉
+// 都不该把真人挡在投稿之外；这时界面必须写明它是「你自己报的」，因为能被任何人复核的锚点
+// 从来是 UID，不是这个随便能起的昵称。
+const UPLOADER_FALLBACK = {
+  not_found: "这个 UID 在酷安查不到，所以取不到昵称。改对 UID 会自动带出；急着提交也可以先自己填署名。",
+  unavailable: "这次没从酷安取到昵称（接口没响应或被风控）。署名先自己填 —— 出问题时按「你自己报的」处理。",
+  self_reported: "后端当前没有核实这个 UID，昵称取不到。署名先自己填 —— 它会按「你自己报的」处理。",
+  off: "后端还没接核实，昵称取不到。署名先自己填 —— 它会按「你自己报的」处理。",
+};
+
+function syncUploaderField() {
+  const el = fieldEls.uploader;
+  if (!el) return;
+  const field = el.closest(".field");
+  const tag = $("#uploader-tag");
+  const help = $("#uploader-help");
+  const nickname = state.uidStatus === "verified" && state.uidInfo ? state.uidInfo.nickname : "";
+
+  if (nickname) {
+    el.value = nickname; // 以反查结果为准：不让「UID 是 A、署名写 B」这种组合进索引
+    el.dataset.auto = "1";
+    el.readOnly = true;
+    field.classList.add("is-pre");
+    if (tag) tag.textContent = "已按 UID 取到";
+    if (help) help.textContent = "已从酷安取回这个 UID 对应的昵称并锁定 —— 想改署名，只能改 UID。";
+    return;
+  }
+
+  el.readOnly = false;
+  field.classList.remove("is-pre");
+  if (state.uidStatus === "checking") return; // 等回包时不闪文案，也不动你填过的东西
+  delete el.dataset.auto;
+  if (tag) tag.textContent = "按 UID 自动取";
+  if (help) {
+    help.textContent =
+      UPLOADER_FALLBACK[state.uidStatus] ||
+      "填完下面的酷安 UID 会自动带出昵称并锁上；取不到时才需要你在这里自己填。";
+  }
+}
+
 const runUidCheck = debounce(async () => {
   const uid = fieldValue("coolapkUid");
   if (!uid || !isCoolapkUid(uid)) {
     state.uidStatus = uid ? "invalid" : "idle";
     state.uidInfo = null;
     $("#uid-check").hidden = true;
+    syncUploaderField();
     refreshGate();
     return;
   }
@@ -647,14 +689,7 @@ const runUidCheck = debounce(async () => {
     result.avatar
   );
 
-  if (result.status === "verified" && result.nickname) {
-    const el = fieldEls.uploader;
-    if (el && (!el.value.trim() || el.dataset.auto === "1")) {
-      el.value = result.nickname;
-      el.dataset.auto = "1";
-      el.closest(".field").classList.add("is-pre");
-    }
-  }
+  syncUploaderField();
   refreshGate();
 }, 500);
 
@@ -927,12 +962,7 @@ function resetForm() {
   state.uidStatus = "idle";
   state.uidInfo = null;
   $("#uid-check").hidden = true;
-  const up = fieldEls.uploader;
-  if (up.dataset.auto === "1") {
-    up.value = "";
-    delete up.dataset.auto;
-    up.closest(".field").classList.remove("is-pre");
-  }
+  syncUploaderField(); // 顺手把 readOnly / 标签 / 说明一起还原，别留一个锁着的空框
   $$(".field").forEach((f) => f.classList.remove("is-bad", "is-pre"));
   refreshGate();
   location.hash = "#/submit";

@@ -412,6 +412,48 @@ async function main() {
     Boolean(USER_STATUS.self_reported) && USER_STATUS.self_reported.tone !== "ok"
   );
 
+  /* ------------------------------------------------------- 投稿者署名的来源
+     署名不是投稿人自己敲的，而是后端按酷安 UID 反查回来的昵称 —— 这条改了就不是文案问题：
+     它决定「UID 是 A、署名写 B」这种组合能不能进索引。所以锁与退路都要钉住。 */
+  const formHtml = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../public/index.html"),
+    "utf8"
+  );
+  check(
+    "署名不再是手填必填项（label 不带 *，改由脚本给状态标签与说明）",
+    /<label for="f-uploader">投稿者署名<\/label>/.test(formHtml) &&
+      /id="uploader-tag"/.test(formHtml) &&
+      /id="uploader-help"/.test(formHtml)
+  );
+  check(
+    "取到昵称时锁定输入框，取不到时才放开（两条都在）",
+    /function syncUploaderField\(\)/.test(appSrc) &&
+      /el\.readOnly = true;/.test(appSrc) &&
+      /el\.readOnly = false;/.test(appSrc)
+  );
+  check(
+    "署名以反查结果为准：verified 时直接把昵称写进字段",
+    /state\.uidStatus === "verified" && state\.uidInfo \? state\.uidInfo\.nickname : ""/.test(appSrc) &&
+      /el\.value = nickname;/.test(appSrc)
+  );
+  // 取不到昵称有四种原因，界面必须分别说清是哪一种 —— 混起来就是骗人（与 self_reported 同理）
+  check(
+    "取不到昵称的四种状态各有自己的文案",
+    ["not_found", "unavailable", "self_reported", "off"].every((k) => new RegExp(`^  ${k}: "`, "m").test(appSrc)),
+    "UPLOADER_FALLBACK 少了状态"
+  );
+  check(
+    "runUidCheck 的两个出口都会同步署名状态（早退时不留下一个锁着的空框）",
+    (appSrc.match(/^\s+syncUploaderField\(\);/gm) || []).length >= 3,
+    `出现 ${(appSrc.match(/syncUploaderField\(\);/g) || []).length} 次`
+  );
+  check(
+    "「抄自谁的帖子就写谁」这句已删，UID 路径写的是 App 内的实际点法",
+    !formHtml.includes("抄自谁的帖子就写谁") &&
+      /查看我的资料/.test(formHtml) &&
+      /用户 UID/.test(formHtml)
+  );
+
   // 后端仓库在同一台机器上时，直接把它的源码当契约的另一端来读。
   // 路径靠猜迟早会像 contrib 从 H:\刷机包 搬到 H:\sukisu 那样一次搬家就全哑掉，
   // 所以显式环境变量优先：WORKER_SRC=/path/to/worker/src/index.ts npm test

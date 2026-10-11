@@ -208,7 +208,7 @@ export const USER_STATUS = {
     tone: "bad",
     label: "not_found",
     title: "酷安查不到这个 UID",
-    hint: "打开酷安 App「我的」，主页链接末尾那串数字才是 UID。填对的再提交。",
+    hint: "在酷安 App「我的」→ 点头像进个人主页 → 右上角三点 → 「查看我的资料」里找用户 UID。填对的再提交。",
   },
   unavailable: {
     tone: "warn",

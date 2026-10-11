@@ -175,7 +175,7 @@
               <div class="field span2">
                 <div class="field__lab"><label for="f-author">模块作者<span class="opt">选填</span></label></div>
                 <input type="text" id="f-author" data-k="author" placeholder="原作者的署名或酷安昵称" autocomplete="off" />
-                <p class="field__help">写<b>原作者</b>，不是投稿人。抄自谁的帖子就写谁。</p>
+                <p class="field__help">写<b>原作者</b>，不是投稿人。</p>
               </div>
               <div class="field span2">
                 <div class="field__lab"><label for="f-description">描述<span class="opt">选填</span></label></div>
@@ -218,16 +218,23 @@
             </div>
             <div class="grid2">
               <div class="field">
-                <div class="field__lab"><label for="f-uploader">投稿者署名<span class="req">*</span></label></div>
-                <input type="text" id="f-uploader" data-k="uploader" placeholder="你在酷安的昵称" autocomplete="nickname" required />
-                <p class="field__help">会<b>公开展示在索引里</b>。核实通过后这里会自动填上你的酷安昵称。</p>
+                <div class="field__lab">
+                  <label for="f-uploader">投稿者署名</label>
+                  <span class="auto" id="uploader-tag">按 UID 自动取</span>
+                </div>
+                <input type="text" id="f-uploader" data-k="uploader" placeholder="填好下面的酷安 UID 就会自动带出" autocomplete="nickname" />
+                <p class="field__help" id="uploader-help">
+                  这一项<b>不用你填</b>：填完酷安 UID，后端按 UID 反查酷安，把昵称填在这里并锁上。
+                  只有这次没取到昵称（核实没开 / 酷安不可达）时才放开让你自己填，那时它属于「你自己报的」。
+                </p>
                 <p class="field__err" data-err="uploader">请填写投稿者署名</p>
               </div>
               <div class="field">
                 <div class="field__lab"><label for="f-uid">酷安 UID<span class="req">*</span></label></div>
                 <input class="mono" type="text" id="f-uid" data-k="coolapkUid" placeholder="2781460" inputmode="numeric" autocomplete="off" spellcheck="false" required />
                 <p class="field__help">
-                  酷安「我的 → 个人主页」链接 <code>coolapk.com/u/</code><b>末尾那串数字</b>就是。
+                  酷安 App「我的」→ <b>点头像进个人主页</b> → 右上角<b>三点</b> →
+                  「查看我的资料」里的 <b>用户 UID</b>。
                   <a href="https://www.coolapk.com/u/2781460" target="_blank" rel="noopener noreferrer">举个例子</a>
                 </p>
                 <p class="field__err" data-err="coolapkUid">UID 应是 4-12 位纯数字</p>

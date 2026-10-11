@@ -628,6 +628,18 @@ h2 {
   font-size: 9.5px;
   letter-spacing: 0.06em;
 }
+/* 署名这一项是「按 UID 反查酷安」带出来的，不是必填项 —— 用 * 会教人去敲一个本来该由系统给的值。 */
+.field__lab .auto {
+  color: var(--amber);
+  border: 1px solid var(--amber-line);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+}
+.field.is-pre input[readonly] {
+  cursor: default;
+}
 .field__help {
   margin: 5px 0 0;
   font-size: 12.5px;
