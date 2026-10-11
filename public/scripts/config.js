@@ -21,6 +21,14 @@ export const CONFIG = {
   // 留空时浏览页显示「索引地址待配置」，不影响投稿功能。
   INDEX_URL: "",
 
+  // --- 处置台账（下架 / 拉黑）地址 -------------------------------------------
+  // 这里是**留空**用的：留空就从 INDEX_URL 换文件名的到 —— 在索引仓库里
+  // json/modules.json 与 json/dispositions.json 是同一目录下的两个文件，
+  // 抄一整条 URL 只会多出一个会漂移的定义处。
+  // 只有把台账放去了别处（另一个 CDN、另一个仓库）才需要显式填。
+  //   例：'https://cdn.jsdelivr.net/gh/你的用户名/你的仓库@main/json/dispositions.json'
+  DISPOSITIONS_URL: "",
+
   // --- 待填 ③：Cloudflare Turnstile -----------------------------------------
   // 后端目前无鉴权限流，这里只做「预留接入位」：
   //   TURNSTILE_SITEKEY 留空 → 界面显示一行「反机器人校验待接入」的说明，

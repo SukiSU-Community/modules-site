@@ -13,6 +13,11 @@ import {
   submitModule,
   fetchIndex,
   fetchServiceLimits,
+  fetchDispositions,
+  dispositionsUrl,
+  KIND_LABELS,
+  REASON_LABELS,
+  SELECTOR_LABELS,
   lookupCoolapkUser,
   isCoolapkUid,
   normalizeCoolapkUrl,
@@ -38,6 +43,13 @@ const state = {
   maxBytesFrom: "config", // config | backend | unreachable | no-field
   index: null,
   indexError: null,
+  // 处置台账。ledgerTried 只用于「浏览页搜不到时顺手查一次台账」这条懒路径，
+  // 避免每次搜不到都去发一次请求。
+  ledger: null,
+  ledgerError: null,
+  ledgerLoading: false,
+  ledgerTried: false,
+  incQuery: "",
   attempted: false,
   uploading: false,
   lastFields: null,
@@ -117,6 +129,7 @@ const fieldValue = (key) => (fieldEls[key] ? fieldEls[key].value.trim() : "");
 const VIEWS = {
   submit: { el: "#view-submit", label: "投稿台" },
   index: { el: "#view-index", label: "已收录" },
+  incidents: { el: "#view-incidents", label: "处置公示" },
   about: { el: "#view-about", label: "说明" },
 };
 
@@ -144,8 +157,12 @@ function renderRoute() {
   if (params.has("q")) {
     state.query = params.get("q") || "";
     $("#q").value = state.query;
+    // 从投稿页/浏览页跳到公示页时带的是同一个词，两个过滤框都按它起头
+    state.incQuery = state.query;
+    $("#q-inc").value = state.query;
   }
   if (name === "index") renderIndex();
+  if (name === "incidents") renderIncidents();
   window.scrollTo({ top: 0, behavior: "auto" });
 }
 
@@ -995,10 +1012,28 @@ function renderIndex() {
     shell.hidden = false;
     shell.textContent = "";
     shell.append(node("div", "empty__t", `索引里没有匹配「${q}」的模块`));
+    const hit = ledgerHitFor(q);
+    if (hit) {
+      shell.append(
+        node(
+          "p",
+          null,
+          `这个查询命中了一条处置记录：${incTitle(hit)}（${KIND_LABELS[hit.kind] || hit.kind || "处置"}）` +
+            ` —— ${REASON_LABELS[hit.reason] || hit.reason || "理由见条目"}。` +
+            "它不是没被投过，是被下架或拒收了，所以不会出现在索引里。"
+        )
+      );
+      const why = node("a", "btn btn--ghost btn--sm", "去看这条处置");
+      why.href = `#/incidents?q=${encodeURIComponent(q)}`;
+      shell.append(why);
+      return;
+    }
     shell.append(node("p", null, "没找到不等于没被投过 —— 查重以模块 ID 为准。确认自己手上的包还没收录的话，可以直接投稿。"));
     const go = node("a", "btn btn--go btn--sm", "去投稿");
     go.href = "#/submit";
     shell.append(go);
+    // 台账没查过才去查一次：查回来之后这条空态可能升级成「命中了一条处置」。
+    if (!state.ledgerTried) loadLedger();
     return;
   }
   list.hidden = false;
@@ -1068,12 +1103,276 @@ function bindSearch() {
   input.addEventListener("input", apply);
 }
 
+function bindIncSearch() {
+  const input = $("#q-inc");
+  const apply = debounce(() => {
+    state.incQuery = input.value;
+    if (parseHash().name === "incidents") renderIncidents();
+  }, 140);
+  input.addEventListener("input", apply);
+}
+
+/* ------------------------------------------------------------- 处置公示 */
+
+// kind / reason / 选择器三张表在 api.js（仓库侧那份的键由 selftest 对），
+// 这里只留一条注释说明它们为什么不在这里：公示页和读取层要同一套词。
+
+/** 一条处置命中的主体，拿来当行标题。 */
+function incTitle(item) {
+  const sel = Object.fromEntries(item.selectors);
+  if (sel.id) return sel.id;
+  if (sel.coolapkUid) return `酷安 UID ${sel.coolapkUid}`;
+  if (sel.sha256) return `${sel.sha256.slice(0, 16)}…`;
+  return "（这条没写命中条件）";
+}
+
+function incSelText(item) {
+  if (!item.selectors.length) return "没有命中条件";
+  return item.selectors.map(([k, v]) => `${SELECTOR_LABELS[k] || k}=${v}`).join(" · ");
+}
+
+function incRow(item, q) {
+  const li = node("li", "mod");
+  const hd = node("div", "mod__hd");
+  hd.append(node("span", "mod__nm", KIND_LABELS[item.kind] || item.kind || "处置"));
+  if (!KIND_LABELS[item.kind]) hd.append(node("span", "chip chip--warn", "未知的处置种类"));
+  const idEl = node("span", "mod__id");
+  highlight(idEl, incTitle(item), q);
+  hd.append(idEl);
+  li.append(hd);
+
+  const ds = node("p", "mod__ds");
+  highlight(ds, incSelText(item), q);
+  li.append(ds);
+  if (item.note) {
+    const noteEl = node("p", "mod__ds");
+    highlight(noteEl, item.note, q);
+    li.append(noteEl);
+  }
+
+  const ft = node("div", "mod__ft");
+  ft.append(node("span", null, item.atMs === null ? `时间：${item.at || "没写"}` : `时间：${fmtDate(item.atMs)}`));
+  // 标签与值分开两个节点：highlight 是清空容器再写的，标签和值在同一个节点里会被它抹掉。
+  ft.append(incLabeled("处置人：", item.by || "没写", q, "inc__by"));
+  if (item.verify) ft.append(incLabeled("复核：", item.verify, q, "inc__by"));
+  li.append(ft);
+  return li;
+}
+
+function incLabeled(label, value, q, cls) {
+  const wrap = node("span", cls);
+  wrap.append(node("span", "inc__k", label));
+  const val = node("span");
+  highlight(val, value, q);
+  wrap.append(val);
+  return wrap;
+}
+
+function renderIncLegend() {
+  const host = $("#inc-legend");
+  if (!host || host.childElementCount) return;
+  const rows = [
+    ["下架 / 拒收", "下架挡住的是这一段内容（按模块 ID、ID+versionCode 或包的 sha256 命中）；拒收挡住的是一个人或一个 ID 未来投来的任何包。"],
+    ["命中条件", "同一条里的多个条件是「且」的关系，不是「或」——写了 ID 又写 versionCode，就只命中那一个版本。"],
+    ["处置人（by）", "指向公开可查的证据，不是自动生成的名字。这一页显示的就是台账原文，判定发生在索引推导与 CI 里，前端不另判一份。"],
+    ["复核（verify）", "有这一项时任何人都能自己跑一遍确认这条处置成立，而不是只能相信页面上写的。"],
+    ["时间", "带时区的那一刻，不是「大概哪天」。"],
+  ];
+  for (const [k, v] of rows) {
+    const li = node("li");
+    li.append(node("span", "nm", k));
+    li.append(node("span", "val", v));
+    host.append(li);
+  }
+}
+
+function renderIncidents() {
+  const list = $("#inc-groups");
+  const shell = $("#inc-state");
+  const readout = $("#inc-readout");
+  const count = $("#inc-count");
+  renderIncLegend();
+
+  const clear = () => {
+    list.textContent = "";
+    count.textContent = "";
+  };
+
+  if (!dispositionsUrl()) {
+    clear();
+    readout.textContent = "台账地址还没确定 · 公示页暂时读不到数据";
+    readout.classList.add("bad");
+    shell.hidden = false;
+    shell.textContent = "";
+    shell.append(node("div", "empty__t", "处置台账的地址来自公开索引地址"));
+    shell.append(
+      node(
+        "p",
+        null,
+        "这一页直接读索引仓库里的 json/dispositions.json，路径按 config.js 的 INDEX_URL 同目录推导。索引地址填好之后这里就有内容；台账为空时它会明说「目前没有任何处置记录」。"
+      )
+    );
+    const go = node("a", "btn btn--ghost btn--sm", "看看这个站现在接了什么");
+    go.href = "#/about";
+    shell.append(go);
+    return;
+  }
+
+  if (state.ledgerError) {
+    clear();
+    readout.textContent = "处置台账读取失败";
+    readout.classList.add("bad");
+    shell.hidden = false;
+    shell.textContent = "";
+    shell.append(node("div", "empty__t", "拉不到处置台账"));
+    shell.append(node("p", null, state.ledgerError));
+    const retry = node("button", "btn btn--ghost btn--sm", "重试");
+    retry.type = "button";
+    retry.addEventListener("click", () => {
+      state.ledgerLoading = false;
+      loadLedger();
+    });
+    shell.append(retry);
+    return;
+  }
+
+  if (!state.ledger) {
+    clear();
+    readout.classList.remove("bad");
+    readout.textContent = state.ledgerLoading ? "正在读取处置台账…" : "正在读取处置台账…";
+    shell.hidden = false;
+    shell.textContent = "";
+    shell.append(node("div", "empty__t", "读取中"));
+    loadLedger();
+    return;
+  }
+
+  shell.hidden = true;
+  const { items, lastUpdate, schemaKnown } = state.ledger;
+  readout.classList.remove("bad");
+  readout.textContent =
+    `${items.length} 条处置记录` +
+    (lastUpdate ? ` · 台账更新 ${fmtDate(lastUpdate)}` : "") +
+    (schemaKnown ? "" : " · 这份台账的 schema 标记本页不认识，按原文列出");
+
+  const q = state.incQuery;
+  const low = q.trim().toLowerCase();
+  const shown = low
+    ? items.filter((it) =>
+        [incTitle(it), incSelText(it), it.note, it.by, it.verify, it.reason, it.kind].some((v) =>
+          String(v).toLowerCase().includes(low)
+        )
+      )
+    : items;
+
+  count.textContent = "";
+  // 空台账时「0 条 / 共 0」是噪声，下面那句空态说得更清楚
+  if (items.length) {
+    const c = count;
+    c.append(node("b", null, shown.length));
+    c.append(` 条 / 共 ${items.length}`);
+  }
+
+  if (!shown.length) {
+    list.hidden = true;
+    shell.hidden = false;
+    shell.textContent = "";
+    if (!items.length) {
+      shell.append(node("div", "empty__t", "目前没有任何处置记录"));
+      shell.append(
+        node(
+          "p",
+          null,
+          "空的台账是正常状态：还没有内容被下架或拒收过。这一页存在的意义是「处置必须留痕且公开」，所以它什么时候有东西，取决于什么时候真的出过事。"
+        )
+      );
+      return;
+    }
+    shell.append(node("div", "empty__t", `台账里没有匹配「${q}」的记录`));
+    shell.append(node("p", null, "查不到这条处置，不等于它没被收录过 —— 处置只写被挡掉的那些。"));
+    return;
+  }
+
+  const order = Object.keys(REASON_LABELS);
+  const orderOf = (r) => {
+    const i = order.indexOf(r);
+    return i < 0 ? order.length : i;
+  };
+  const groups = new Map();
+  for (const it of shown) {
+    if (!groups.has(it.reason)) groups.set(it.reason, []);
+    groups.get(it.reason).push(it);
+  }
+  const keys = [...groups.keys()].sort(
+    (a, b) => orderOf(a) - orderOf(b) || String(a).localeCompare(String(b))
+  );
+
+  list.hidden = false;
+  list.textContent = "";
+  for (const key of keys) {
+    const box = node("div", "inc__grp");
+    const hd = node("div", "inc__hd");
+    hd.append(node("span", "inc__hd-t", REASON_LABELS[key] || key || "没写理由分类"));
+    if (!REASON_LABELS[key]) hd.append(node("span", "chip chip--warn", "台账里有本页不认识的分类"));
+    hd.append(node("span", "inc__hd-n", `${groups.get(key).length} 条`));
+    box.append(hd);
+    const ul = node("ul", "mods");
+    // 新的处置排前面：这一页是拿来查「刚下了什么」的，按时间倒序比按字母有用。
+    for (const it of [...groups.get(key)].sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0))) {
+      ul.append(incRow(it, q));
+    }
+    box.append(ul);
+    list.append(box);
+  }
+}
+
+async function loadLedger() {
+  if (state.ledgerLoading) return;
+  state.ledgerLoading = true;
+  state.ledgerTried = true;
+  state.ledgerError = null;
+  try {
+    state.ledger = await fetchDispositions();
+  } catch (err) {
+    state.ledgerError =
+      err instanceof BackendError ? err.message : "处置台账读取失败，可能是网络或格式问题。";
+  }
+  state.ledgerLoading = false;
+  if (parseHash().name === "incidents") renderIncidents();
+  // 浏览页那句「搜不到但台账里有」依赖台账，到货后重画一次
+  if (parseHash().name === "index") renderIndex();
+  if (parseHash().name === "about") renderAbout();
+}
+
+/**
+ * 浏览页搜不到时，看看这个查询是不是撞在了一条处置上。
+ * 只按命中条件精确匹配 —— 这里是给「我的模块怎么不见了」一个确定答案的地方，
+ * 模糊匹配会把无关条目说成是被下架，那就成了诬告。
+ */
+function ledgerHitFor(q) {
+  if (!state.ledger) return null;
+  const low = String(q).trim().toLowerCase();
+  if (!low) return null;
+  return (
+    state.ledger.items.find((it) =>
+      it.selectors.some(([k, v]) => (k === "id" || k === "coolapkUid" || k === "sha256") && v.toLowerCase() === low)
+    ) || null
+  );
+}
+
 /* ---------------------------------------------------------------- 说明页 */
 
 function renderAbout() {
   const checks = [
     { k: "API_BASE", v: CONFIG.API_BASE || "未配置", ok: IS_API_CONFIGURED },
     { k: "INDEX_URL", v: CONFIG.INDEX_URL || "未配置", ok: IS_INDEX_CONFIGURED },
+    {
+      k: "处置台账（公示页数据源）",
+      v: dispositionsUrl()
+        ? `${dispositionsUrl()}${CONFIG.DISPOSITIONS_URL.trim() ? "" : "（由 INDEX_URL 同目录推导）"}`
+        : "INDEX_URL 与 DISPOSITIONS_URL 都是空的，公示页没有数据来源",
+      ok: Boolean(dispositionsUrl()),
+    },
     {
       k: "TURNSTILE_SITEKEY",
       v: IS_TURNSTILE_CONFIGURED ? "已配置" : "未配置（提交时只带空 token 字段）",
@@ -1202,6 +1501,7 @@ function init() {
   bindCheck();
   bindConfirm();
   bindSearch();
+  bindIncSearch();
   bindTheme();
   renderAbout();
   renderRoute();

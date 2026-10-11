@@ -56,7 +56,8 @@
         <nav class="nav" aria-label="站点分区">
           <a href="#/submit"><i>01</i>投稿台</a>
           <a href="#/index"><i>02</i>已收录</a>
-          <a href="#/about"><i>03</i>说明</a>
+          <a href="#/incidents"><i>03</i>处置公示</a>
+          <a href="#/about"><i>04</i>说明</a>
         </nav>
         <button class="theme" id="theme" type="button" title="切换显示模式">
           <svg class="theme__ico theme__ico--moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -298,7 +299,46 @@
         <div class="empty" id="index-state" hidden></div>
       </section>
 
-      <!-- ====================== 03 说明 ====================== -->
+      <!-- ====================== 03 处置公示 ====================== -->
+      <section class="view" id="view-incidents" aria-labelledby="h-incidents">
+        <div class="hero rise">
+          <h1 id="h-incidents">处置<span class="hi">公示</span></h1>
+          <p class="hero__lede">
+            被下架、被拒收的内容全部记在这里，一条一条公开：命中了什么、什么理由、谁做的、什么时候。
+            索引里没有的模块不等于没被投过 —— 这一页就是那个「为什么」。
+          </p>
+          <p class="readout" id="inc-readout" aria-live="polite"></p>
+        </div>
+
+        <div class="tools rise">
+          <div class="search">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6.5" />
+              <path d="M15.5 15.5 21 21" />
+            </svg>
+            <input
+              type="text"
+              id="q-inc"
+              class="mono"
+              placeholder="按模块 ID / 酷安 UID / sha256 过滤"
+              aria-label="过滤处置记录"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <span class="count" id="inc-count"></span>
+        </div>
+
+        <div id="inc-groups"></div>
+        <div class="empty" id="inc-state" hidden></div>
+
+        <div class="panel rise doc inc-how">
+          <h3><span>LEGEND</span>这些字段是什么意思</h3>
+          <ul class="inc-legend" id="inc-legend"></ul>
+        </div>
+      </section>
+
+      <!-- ====================== 04 说明 ====================== -->
       <section class="view" id="view-about" aria-labelledby="h-about">
         <div class="hero rise">
           <h1 id="h-about">为什么要<span class="hi">人人共建</span></h1>

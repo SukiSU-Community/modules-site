@@ -1415,6 +1415,67 @@ mark {
 }
 
 /* ==========================================================================
+   处置公示（台账）
+   ========================================================================== */
+
+/* 行本身复用 .mod 那套；这里只补分组标题和指针换行。 */
+.inc__grp + .inc__grp {
+  margin-top: 20px;
+}
+.inc__hd {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+.inc__hd-t {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.inc__hd-n {
+  margin-left: auto;
+  font: 500 11.5px/1.6 var(--mono);
+  color: var(--ink-3);
+}
+/* by 是一串 gh:xxx@issuecomment-123… 这种长指针，不换个地方就会把版面顶开。 */
+.inc__by {
+  overflow-wrap: anywhere;
+}
+.inc__k {
+  color: var(--ink-2);
+}
+.inc-legend {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.inc-legend li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--void-2);
+}
+.inc-legend .nm {
+  font: 600 11.5px/1.8 var(--mono);
+  color: var(--ink-2);
+  min-width: 132px;
+}
+.inc-legend .val {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--ink-3);
+}
+
+/* ==========================================================================
    说明区
    ========================================================================== */
 

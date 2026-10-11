@@ -361,3 +361,131 @@ export function normalizeIndex(json) {
     }),
   };
 }
+
+/* ---------------------------------------------------------- 处置台账（公示） */
+
+/** 台账的 schema 标识。与 contrib/repo/scripts/dispositions.mjs 的 DISPOSITIONS_SCHEMA 同值。 */
+export const LEDGER_SCHEMA = "sukisu-dispositions-v1";
+
+/**
+ * 台账的读取地址：显式填的优先，没填就从 INDEX_URL 换掉文件名。
+ *
+ * 为什么可以换文件名：索引和台账在索引仓库里就是同目录下的两个 json，只有 CDN 前缀
+ * 会不同。把这个约定写成第二份完整 URL，就等于再造一个会和第一份漂移的定义处 ——
+ * 后端 Worker 的 dispositionsRawUrl 是同一个理由、同一个做法。
+ * 索引地址上挂的 query 原样保留：有些 CDN 靠它鉴权，去掉就变成拉不到。
+ */
+export function dispositionsUrl() {
+  const direct = CONFIG.DISPOSITIONS_URL.trim();
+  if (direct) return direct;
+  const index = CONFIG.INDEX_URL.trim();
+  if (!index) return "";
+  let u;
+  try {
+    u = new URL(index);
+  } catch {
+    return "";
+  }
+  const segs = u.pathname.split("/");
+  segs[segs.length - 1] = "dispositions.json";
+  u.pathname = segs.join("/");
+  u.hash = "";
+  return u.href;
+}
+
+/** 台账条目上可能出现的命中条件。与仓库侧选择器同名同集合。 */
+export const SELECTOR_KEYS = ["id", "versionCode", "sha256", "coolapkUid"];
+
+/**
+ * 三张说人话的表。集合本身（有哪些 kind / reason / 选择器）是索引仓库定义的，
+ * 这里只负责中文措辞与分组顺序，所以 tools/selftest.mjs 会拿仓库那份把键对一遍 ——
+ * 仓库新增一个 reason 而这里没有，公示页就会把它归到「不认识的分类」，那不该发生。
+ */
+export const SELECTOR_LABELS = {
+  id: "模块 ID",
+  versionCode: "versionCode",
+  sha256: "包 sha256",
+  coolapkUid: "酷安 UID",
+};
+
+export const KIND_LABELS = { revoke: "下架", deny: "拒收" };
+
+/** 键的顺序就是分组顺序。 */
+export const REASON_LABELS = {
+  "test-probe": "流水线验证留下的探针包",
+  malware: "恶意行为",
+  policy: "违反本站收录规则",
+  copyright: "版权 / 授权争议",
+  impersonation: "冒充他人或既有模块",
+  security: "会损坏设备或系统",
+  abandoned: "作者要求下架或长期无人维护且有害",
+  other: "其他（理由写在每条的说明里）",
+};
+
+/**
+ * 归一化一份台账用于公示。
+ *
+ * 这里的失效方向和 CI 那份**相反**，而且是故意的：仓库侧读不懂就抛错、整次推导停住，
+ * 因为那里「跳过一条坏条目」等于让被下架的模块复活。这里只是给浏览器读的一份展示，
+ * 停住整页没有意义，所以未知 schema / 未知 kind / 缺字段都保留原样标出来，一条都不丢。
+ * 「这条我看不懂」必须显示出来 —— 悄悄丢掉就等于公示漏了一项处置。
+ */
+export function normalizeDispositions(json) {
+  if (!json || typeof json !== "object") {
+    throw new BackendError("bad-response", "处置台账不是 JSON 对象。");
+  }
+  if (!Array.isArray(json.dispositions)) {
+    throw new BackendError("bad-response", "处置台账里没有 dispositions 数组，格式不对。");
+  }
+  const items = json.dispositions.map((d) => {
+    const raw = d && typeof d === "object" ? d : {};
+    const at = typeof raw.at === "string" ? Date.parse(raw.at) : NaN;
+    return {
+      kind: String(raw.kind || ""),
+      reason: String(raw.reason || ""),
+      by: String(raw.by || ""),
+      at: String(raw.at || ""),
+      note: String(raw.note || ""),
+      // 复核命令：任何人可以照着跑一遍来自己确认这条处置成立。公示页把它显示出来，
+      // 否则「可复验」只写在 by 那个指针里，普通人手上没有仓库就复验不了。
+      verify: String(raw.verify || ""),
+      atMs: Number.isFinite(at) ? at : null,
+      // 选择器按固定顺序取，缺的不显示；一个都没有的条目也照样列出来（它是台账的一条）
+      selectors: SELECTOR_KEYS.filter((k) => raw[k] !== undefined && raw[k] !== null && raw[k] !== "")
+        .map((k) => [k, String(raw[k])]),
+    };
+  });
+  return {
+    schema: typeof json.schema === "string" ? json.schema : "",
+    schemaKnown: json.schema === LEDGER_SCHEMA,
+    lastUpdate: typeof json.lastUpdate === "number" ? json.lastUpdate : null,
+    items,
+  };
+}
+
+export async function fetchDispositions() {
+  const target = dispositionsUrl();
+  if (!target) {
+    throw new BackendError(
+      "not-configured",
+      "处置台账地址还没确定：请在 config.js 填入 INDEX_URL（台账按同目录推导）或 DISPOSITIONS_URL。"
+    );
+  }
+  let res;
+  try {
+    res = await fetch(target, { method: "GET" });
+  } catch {
+    throw new BackendError(
+      "network",
+      "拉不到处置台账。可能是地址写错、该主机不允许浏览器跨域读取，或网络不通。"
+    );
+  }
+  if (!res.ok) throw new BackendError("bad-response", `处置台账返回 HTTP ${res.status}。`);
+  let json;
+  try {
+    json = await res.json();
+  } catch {
+    throw new BackendError("bad-response", "处置台账不是合法 JSON，没法解析。");
+  }
+  return normalizeDispositions(json);
+}

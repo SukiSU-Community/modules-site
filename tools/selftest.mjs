@@ -6,7 +6,7 @@
 import zlib from "node:zlib";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { CONFIG } from "../public/scripts/config.js";
 import {
   ZipError,
@@ -261,8 +261,85 @@ async function main() {
   const off = await lookupCoolapkUser("2781460");
   check("后端未接线时核实返回 off 而不是抛错", off.status === "off", JSON.stringify(off));
 
-  /* ------------------------------------------------ 与后端的字段名/契约对齐
-     这一节防的是「两边各自改了常量，直到线上报错才发现」。曾经前端发 turnstile、
+  console.log("\n[9] 处置台账公示（下架 / 拉黑）");
+  const {
+    normalizeDispositions,
+    dispositionsUrl,
+    LEDGER_SCHEMA,
+    KIND_LABELS,
+    REASON_LABELS,
+    SELECTOR_KEYS,
+  } = await import("../public/scripts/api.js");
+
+  const ledger = normalizeDispositions({
+    schema: LEDGER_SCHEMA,
+    lastUpdate: 1791687753247,
+    dispositions: [
+      {
+        kind: "revoke",
+        reason: "test-probe",
+        by: "gh:yufeng-liang@issuecomment-6104846280",
+        at: "2026-10-11T03:02:31.612Z",
+        note: "流水线验证留下的探针包",
+        id: "e2e_probe_loop2",
+      },
+      {
+        kind: "deny",
+        reason: "malware",
+        by: "gh:mod@example.com",
+        at: "2026-10-12T00:00:00+08:00",
+        coolapkUid: "2781460",
+        id: "bad.module",
+        versionCode: 3,
+      },
+    ],
+  });
+  check("台账条数读出", ledger.items.length === 2);
+  check("schema 认得", ledger.schemaKnown === true);
+  check("带时区偏移的 at 解析成同一个时刻", Number.isFinite(ledger.items[1].atMs) && ledger.items[1].atMs === Date.parse("2026-10-11T16:00:00Z"), String(ledger.items[1].atMs));
+  check("选择器按固定顺序取出，id+versionCode 是一条而不是两条", ledger.items[1].selectors.map(([k]) => k).join(",") === "id,versionCode,coolapkUid", JSON.stringify(ledger.items[1].selectors));
+  check("缺 note 不炸", ledger.items[1].note === "");
+
+  // 读取层的失效方向和 CI 那份相反，这条必须钉住：这里丢掉一条台账 == 公示漏一项处置。
+  const weird = normalizeDispositions({
+    schema: "sukisu-dispositions-v2",
+    dispositions: [
+      { kind: "quarantine", reason: "brand-new-case", at: "不是时间", id: "x" },
+      { kind: "revoke", reason: "malware", by: "b", at: "2026-10-11T00:00:00Z", id: "y" },
+      "不是对象",
+    ],
+  });
+  check("未知 schema 标出来而不是当空台账", weird.schemaKnown === false);
+  check("未知 kind / reason / 坏时间 / 非对象条目一条都不丢", weird.items.length === 3 && weird.items[0].atMs === null && (weird.items[2]?.selectors.length ?? -1) === 0, `${weird.items.length} 条`);
+  let ledErr = null;
+  try {
+    normalizeDispositions({ schema: LEDGER_SCHEMA });
+  } catch (e) {
+    ledErr = e;
+  }
+  check("没有 dispositions 数组时报错而不是显示空公示", ledErr instanceof BackendError, String(ledErr && ledErr.name));
+
+  // 公示页的数据源只有一个定义处：INDEX_URL。显式 DISPOSITIONS_URL 才覆盖它。
+  CONFIG.DISPOSITIONS_URL = "";
+  CONFIG.INDEX_URL = "";
+  check("两个地址都没填时不猜地址", dispositionsUrl() === "");
+  CONFIG.INDEX_URL = "https://cdn.jsdelivr.net/gh/o/r@main/json/modules.json";
+  check("按 INDEX_URL 同目录推导台账地址", dispositionsUrl() === "https://cdn.jsdelivr.net/gh/o/r@main/json/dispositions.json", dispositionsUrl());
+  CONFIG.INDEX_URL = "https://raw.githubusercontent.com/o/r/main/json/modules.json?v=3";
+  check("索引地址上的 query 保留（有些 CDN 靠它鉴权）", dispositionsUrl().endsWith("/json/dispositions.json?v=3"), dispositionsUrl());
+  CONFIG.DISPOSITIONS_URL = "https://mirror.example.com/d.json";
+  check("显式配置优先于推导", dispositionsUrl() === "https://mirror.example.com/d.json");
+  CONFIG.DISPOSITIONS_URL = "";
+  CONFIG.INDEX_URL = "";
+
+  // 前端不判台账（判据在仓库那份），所以这里只钉两件事：视图接上了，
+  // 以及浏览页搜不到时会去问台账 —— 那条「不是没被投过，是被下架了」是本页的意义。
+  const appSrc = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../public/scripts/app.js"), "utf8");
+  check("公示页接进了路由", /incidents: \{ el: "#view-incidents"/.test(appSrc));
+  check("浏览页搜不到时会去查台账，命中就说明是被处置了", /ledgerHitFor\(q\)/.test(appSrc) && /它不是没被投过，是被下架或拒收了/.test(appSrc));
+  check("by 指针原样显示，不猜成链接", !/href = .*by/.test(appSrc));
+
+  /* ------------------------------------------------ 与后端的字段名/契约对齐     这一节防的是「两边各自改了常量，直到线上报错才发现」。曾经前端发 turnstile、
      后端读 cf-turnstile-response；前端写 8MB、后端实际 2MB。两个都是静默失效。 */
 
   check(
@@ -319,6 +396,37 @@ async function main() {
         /matchAny\(ledger, \{ id, versionCode, sha256, coolapkUid \}\)/.test(worker) &&
         /if \(!res\.ok\) return null;/.test(worker),
     );
+  }
+
+  /* ------------------------------------------- 处置台账词汇与索引仓库对齐
+     公示页的分类词表必须跟索引仓库那份封闭集合一致。仓库新增一个 reason 而这里没有，
+     公示页就会把那一组标成「不认识的分类」——公示还在，但没人看得懂，这是静默的一半对。 */
+  const dispCandidates = [
+    process.env.REPO_DISPOSITIONS_SRC,
+    "../../sukisu/contrib/repo/scripts/dispositions.mjs",
+    "../contrib/repo/scripts/dispositions.mjs",
+  ].filter(Boolean);
+  const dispPath = dispCandidates.map((p) => resolve(here, p)).find((p) => existsSync(p));
+  if (!dispPath) {
+    const msg = `找不到索引仓库的台账判据（试过：${dispCandidates.join(" / ")}）`;
+    if (REQUIRE_BACKEND) check("索引仓库台账模块必须存在（--require-backend）", false, msg);
+    else skip("4 条处置台账词汇校验", msg);
+  } else {
+    console.log(`  台账契约另一端：${dispPath}`);
+    const repo = await import(pathToFileURL(dispPath).href);
+    const missReason = repo.REASONS.filter((r) => !(r in REASON_LABELS));
+    const missKind = repo.KINDS.filter((k) => !(k in KIND_LABELS));
+    check("仓库的每个 reason 在公示页都有人话标题", missReason.length === 0, missReason.join(","));
+    check("仓库的每个 kind 在公示页都有人话标题", missKind.length === 0, missKind.join(","));
+    check("schema 标识两边同值", repo.DISPOSITIONS_SCHEMA === LEDGER_SCHEMA, `${repo.DISPOSITIONS_SCHEMA} / ${LEDGER_SCHEMA}`);
+    // 选择器集合从仓库那份的**归一化输出**里取，不抄常量：它才是「台账里可能出现哪些命中条件」的定义。
+    const norm = repo.parseDispositions({
+      schema: repo.DISPOSITIONS_SCHEMA,
+      dispositions: [{ kind: "revoke", reason: "other", by: "b", at: "2026-10-11T00:00:00Z", id: "a", versionCode: 1, sha256: "f".repeat(64), coolapkUid: "2781460" }],
+    })[0];
+    const repoSel = ["id", "versionCode", "sha256", "coolapkUid", "kind", "reason", "by", "at", "note", "verify"].filter((k) => k in norm);
+    const frontSel = SELECTOR_KEYS.filter((k) => repoSel.includes(k));
+    check("公示页取的选择器与仓库那份归一化结果同名同集合", frontSel.length === SELECTOR_KEYS.length && SELECTOR_KEYS.every((k) => repoSel.includes(k)), repoSel.join(","));
   }
 
   const summary = `${fail === 0 ? "全部通过" : "有失败项"}：${pass} passed, ${fail} failed`;
