@@ -461,29 +461,15 @@ h1 {
   line-height: 1.1;
   letter-spacing: -0.02em;
 }
-h1 .hi {
-  position: relative;
-  z-index: 0;
-  white-space: nowrap;
-}
-h1 .hi::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  left: -3px;
-  right: -3px;
-  bottom: 0.08em;
-  height: 0.38em;
-  background: linear-gradient(90deg, var(--amber-wash), var(--amber-edge));
-  border-bottom: 2px solid var(--amber);
-}
 .hero__lede {
   margin: 0 0 14px;
   max-width: 54ch;
   color: var(--ink-2);
 }
 /* 同一套「琥珀底 + 实下划线」标记：标题与导语共用一份声明，
-   分两处写迟早长歪。尺寸全用 em，所以跟着各自字号缩放。 */
+   分两处写迟早长歪。尺寸全用 em，所以跟着各自字号缩放。
+   往右投影靠 skewX 把这条带子斜切 —— 单改渐变角度没用：带子是 10:1 的长条，
+   105deg 与 90deg 的上下差只有 0.01 透明度，肉眼读不出「斜」。 */
 h1 .hi,
 .hero__lede .hl {
   position: relative;
@@ -496,11 +482,12 @@ h1 .hi::after,
   position: absolute;
   z-index: -1;
   left: -3px;
-  right: -3px;
+  right: -6px;
   bottom: 0.08em;
   height: 0.38em;
-  background: linear-gradient(90deg, var(--amber-wash), var(--amber-edge));
+  background: linear-gradient(105deg, var(--amber-wash), var(--amber-edge));
   border-bottom: 2px solid var(--amber);
+  transform: skewX(-12deg);
 }
 .readout {
   font: 500 12.5px/1.9 var(--mono);

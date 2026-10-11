@@ -468,6 +468,18 @@ async function main() {
       /h1 \.hi::after,\s*\n\.hero__lede \.hl::after \{/.test(panelCss) &&
       !/\.hero__lede \.hl \{[^}]*text-decoration/.test(panelCss)
   );
+  // 上一轮把 .hl 并进来时，旧的 h1 .hi::after 没删干净 —— 两份一模一样的声明并排，
+  // 改其中一份就分叉。所以钉「只有一份」，而不只是钉「共用的那份在」。
+  // 禁 90deg 只禁 wash→edge 这一对（标记的签名）：别处还有 wash→transparent 的横向淡出，
+  // 那是装饰，不该被这条误伤。
+  check(
+    "琥珀标记只有一份声明，且底是 105deg + skewX(-12deg) 往右斜投影",
+    (panelCss.match(/h1 \.hi::after/g) || []).length === 1 &&
+      (panelCss.match(/linear-gradient\(105deg, var\(--amber-wash\), var\(--amber-edge\)\)/g) || []).length ===
+        1 &&
+      !panelCss.includes("linear-gradient(90deg, var(--amber-wash), var(--amber-edge))") &&
+      (panelCss.match(/transform: skewX\(-12deg\);/g) || []).length === 1
+  );
   // 顶栏与标语各踩过一次「窄屏另有硬编码，clamp 白写」：这两条钉的就是那两个坑。
   check(
     "顶栏窄屏不换行（.bezel__in 用 nowrap 覆盖默认的 wrap）",
