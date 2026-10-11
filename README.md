@@ -1,7 +1,10 @@
-# 模块投稿台（MODULE·PANEL）
+# 酷模（COOL MODULE）
 
 给中文 KernelSU / Magisk 玩机社区用的**纯静态投稿站**：在浏览器里把 zip 投进「人人共建的模块索引」，
-同时作为这个索引的对外门面。直连你现有的 Cloudflare Worker，本站不带任何服务端。
+同时作为这个索引的对外门面。直连后端的 Cloudflare Pages 网关，本站不带任何服务端。
+
+名字取「酷模」，寓意是这里收的主要就是从**酷安**来的模块。中文名在上、英文名在下：
+`config.js` 的 `SITE_NAME` / `SITE_NAME_EN` 两行就是它的唯一定义处。
 
 界面全中文，窄屏可用（手机与电脑同一个地址同一个界面）。
 
@@ -13,7 +16,7 @@
 
 | 待填 | 位置 | 说明 |
 |---|---|---|
-| **后端地址** | `config.js` `API_BASE` | Worker 根地址，结尾不带斜杠。前端会请求 `${API_BASE}/check`、`/user`、`/index.json`、`/dispositions.json`、`/submit`，并在启动时问一次 `${API_BASE}/` 拿真实上限。**留空时投稿功能会被拦下并明确提示，不会静默失败。** |
+| **后端地址** | `config.js` `API_BASE` | 后端根地址（当前是 Cloudflare Pages 网关，转发到 Worker），结尾不带斜杠。前端会请求 `${API_BASE}/check`、`/user`、`/index.json`、`/dispositions.json`、`/submit`，并在启动时问一次 `${API_BASE}/` 拿真实上限。**别填 Worker 自己的 `*.workers.dev`**：那个后缀在国内被 DNS 投毒 + TLS SNI 阻断，浏览器侧会表现为查重与身份核实全部失败（见 `contrib/worker/gateway/README.md`）。**留空时投稿功能会被拦下并明确提示，不会静默失败。** |
 | 公开索引地址 | `config.js` `INDEX_URL` | 「已收录模块」页直接 fetch 这个 MMRL JSON，同时也是**给管理器用的订阅地址**。这里填的是 Worker 的镜像端点 `/index.json`，不是 jsDelivr —— 因为 jsDelivr 对 `@分支` 地址回 `max-age=604800`（七天），下架之后用户手里那份旧的还能留七天；镜像把头交回我们手里（`max-age=60` + 弱 ETag）。不填则浏览页显示「索引地址待配置」，投稿功能不受影响。 |
 | 处置台账地址 | `config.js` `DISPOSITIONS_URL` | **留空就按 `INDEX_URL` 同目录换文件名推导**（索引仓库里 `json/modules.json` 与 `json/dispositions.json` 是一对，Worker 的两个镜像端点也是一对）。只有把台账放去了别处才显式填。公示页（`#/incidents`）读它。 |
 | **反机器人校验** | `config.js` `TURNSTILE_SITEKEY` / `TURNSTILE_FIELD` | 留空 = 界面显示「待接入」说明，提交时只随表带一个空的 token 字段。填入 sitekey 后自动加载 Turnstile 脚本并渲染部件，token 用 `TURNSTILE_FIELD` 的字段名发出（后端字段名不同就只改这一行）。 |

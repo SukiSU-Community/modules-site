@@ -4,14 +4,19 @@
 // ===========================================================================
 
 export const CONFIG = {
-  // --- 待填 ①：投稿后端（Cloudflare Worker）地址 -----------------------------
-  // 填法：Worker 的根地址，结尾不要带斜杠。
-  //   例：'https://module-submit.xxxxx.workers.dev'
+  // --- 待填 ①：投稿后端地址（Cloudflare Pages 网关）---------------------------
+  // 填法：根地址，结尾不要带斜杠。
+  //   例：'https://你的网关项目.pages.dev'
   //   例：'https://api.你的域名.com'
   // 前端会请求 `${API_BASE}/check`、`${API_BASE}/user` 与 `${API_BASE}/submit`
   // （另外启动时问一次 `${API_BASE}/` 拿真实大小上限）。
   // 留空字符串时投稿页仍可正常填写，但 /check 与提交会被拦下并明确提示未配置。
-  API_BASE: "https://sukisu-module-submit.lyfsearch.workers.dev",
+  //
+  // 这里填的是 **Pages 网关**，不是 Worker 自己的 `*.workers.dev`：那个后缀在国内被
+  // DNS 投毒 + TLS SNI 双重阻断（实测四路解析器给出的都是 Facebook / Twitter / Dropbox
+  // 的 IP，手工喂真实 CF 边缘 IP 后握手仍被 RST），浏览器侧的表现是查重与身份核实
+  // 全部失败。网关只做转发，业务逻辑与凭据仍在 Worker 上。
+  API_BASE: "https://sukisu-module-api.pages.dev",
 
   // --- 待填 ②：公开索引（MMRL JSON）地址 -------------------------------------
   // 「已收录模块」页直接 fetch 这个 URL。填 GitHub raw / jsDelivr / 自有 CDN 都行。
@@ -20,15 +25,15 @@ export const CONFIG = {
   // 注意：浏览器直连 raw.githubusercontent.com 在大陆不稳定，别把它当订阅地址。
   // 留空时浏览页显示「索引地址待配置」，不影响投稿功能。
   //
-  // 这里填的是**自家 Worker 的镜像端点**，不是 jsDelivr。理由是一条实测：jsDelivr 对
-  // `@分支` 形式的地址回 `Cache-Control: public, max-age=604800`（七天），源站清完边缘缓存之后，
-  // 已经取过索引的浏览器 / 管理器里那份旧的还能留七天 —— 而「这个模块被下架了」恰恰是最不能
-  // 拿旧数据回答的问题。镜像端点把头交回我们手里（`max-age=60` + 弱 ETag，回源由索引仓库
-  // 合并后那次 purge 之外的另一条路径保证新鲜）。
-  // jsDelivr 那条地址仍然可用，当作 Worker 挂掉时的备用订阅地址：
+  // 这里填的是**自家后端（Pages 网关 → Worker）的镜像端点**，不是 jsDelivr。理由是一条实测：
+  // jsDelivr 对 `@分支` 形式的地址回 `Cache-Control: public, max-age=604800`（七天），
+  // 源站清完边缘缓存之后，已经取过索引的浏览器 / 管理器里那份旧的还能留七天 ——
+  // 而「这个模块被下架了」恰恰是最不能拿旧数据回答的问题。镜像端点把头交回我们手里
+  // （`max-age=60` + 弱 ETag，回源由索引仓库合并后那次 purge 之外的另一条路径保证新鲜）。
+  // jsDelivr 那条地址仍然可用，当作后端挂掉时的备用订阅地址：
   //   'https://cdn.jsdelivr.net/gh/SukiSU-Community/modules-repo@main/json/modules.json'
   // 台账不用单独填：公示页按同目录换文件名推导出 /dispositions.json，那个端点也存在。
-  INDEX_URL: "https://sukisu-module-submit.lyfsearch.workers.dev/index.json",
+  INDEX_URL: "https://sukisu-module-api.pages.dev/index.json",
 
   // --- 处置台账（下架 / 拉黑）地址 -------------------------------------------
   // 这里是**留空**用的：留空就从 INDEX_URL 换文件名的到 —— 在索引仓库里
@@ -100,7 +105,10 @@ export const CONFIG = {
     "kernelsu://mmrl?url=https%3A%2F%2Fcdn.jsdelivr.net%2Fgh%2FSukiSU-Community%2Fmodules-repo%40main%2Fjson%2Fmodules.json",
 
   // --- 站点名称（只影响标题、导航与页脚铭牌）--------------------------------
-  SITE_NAME: "模块投稿台",
+  // 中文名在上、英文名在下。中文是主名（更亮更大），英文只作副行。
+  // 取名「酷模」的寓意：这个索引主要收的就是从酷安来的模块。
+  SITE_NAME: "酷模",
+  SITE_NAME_EN: "COOL MODULE",
   SITE_SUBTITLE: "人人共建的 KernelSU / Magisk 模块索引",
 };
 
