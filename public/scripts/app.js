@@ -527,8 +527,8 @@ function refreshGate() {
   $$("[data-open-confirm]").forEach((btn) => (btn.disabled = !ready));
   const firstBad = items.find((i) => !i.ok);
   $("#dock-t").textContent = firstBad ? firstBad.text : "全部就绪，可以确认";
-  $("#dock-s").textContent = firstBad ? "还差这一步" : "三道确认跳不过去";
-  $("#gate-note").textContent = ready ? "确认屏里还有三道勾" : "先把上面几项填齐";
+  $("#dock-s").textContent = firstBad ? "还差这一步" : "点「去确认」勾完三项";
+  $("#gate-note").textContent = ready ? "三项上传前确认还没勾" : "先把上面几项填齐";
   if (state.attempted) paintFieldErrors();
 }
 
@@ -685,7 +685,7 @@ const runUidCheck = debounce(async () => {
   refreshGate();
 }, 500);
 
-/* ------------------------------------------------------------- 确认屏逻辑 */
+/* --------------------------------------------------------- 上传前确认逻辑 */
 
 let lastFocus = null;
 

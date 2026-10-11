@@ -482,6 +482,14 @@ async function main() {
   );
   // 顶栏与标语各踩过一次「窄屏另有硬编码，clamp 白写」：这两条钉的就是那两个坑。
   check(
+    "铭牌每段都不从中间断行；「确认屏」这个说法已整体换成「上传前确认」",
+    /\.nameplate span \{\s*\n\s*white-space: nowrap;/.test(panelCss) &&
+      !formHtml.includes("确认屏") &&
+      !appSrc.includes("确认屏") &&
+      formHtml.includes("上传前确认")
+  );
+
+  check(
     "顶栏窄屏不换行（.bezel__in 用 nowrap 覆盖默认的 wrap）",
     /\.bezel__in\s*\{[^}]*flex-wrap: nowrap/.test(panelCss)
   );

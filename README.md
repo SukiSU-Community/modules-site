@@ -133,7 +133,7 @@ GET ${API_BASE}/user?uid=1234567
 | 填完 ID 与版本号自动查重、实时显示 | `app.js:runCheck()`（防抖 420ms），结果显示在 02 面板下方 |
 | 出处 / 署名必填 + 明确说明为什么要填 | 面板 03「出处与身份」：出处限酷安站内链接、署名与酷安 UID 双字段；说明页 D 节解释为什么必须是 UID |
 | 酷安 UID 核实（含端点未接入时的降级） | `api.js:lookupCoolapkUser()` + `app.js:runUidCheck()`，四种状态 verified / not_found / unavailable / off，通过后自动填昵称并显示头像 |
-| 不可跳过的一屏确认，未勾选不能提交 | `#layer-confirm`，仿 Bootloader 解锁警告屏；三条勾选全中才解锁按钮 |
+| 上传前三项确认，未勾完不能提交 | `#layer-confirm`，仿 Bootloader 解锁警告；三项勾选全中才解锁「上传」 |
 | 成功给 PR 链接 | `app.js:showSuccess()`，含「点进去看审核进度」与后续流程说明 |
 | 失败显示中文原因且能重试 | `app.js:showFailure()`：表单内容与已选文件都留着，「重试提交」直接复用 |
 | 已收录模块浏览页（MMRL） | `#view-index` + `api.js:fetchIndex()/normalizeIndex()`，搜索按 ID/名称/作者/描述过滤并高亮 |
@@ -143,7 +143,7 @@ GET ${API_BASE}/user?uid=1234567
 | 包内 `module.prop` 与表单一致性 | **服务端判**（`contrib/worker/src/index.ts` 的 ⑤-a）：`id` 必须一致，包内写了 `versionCode` 也必须一致；不一致 → 400 并把两边的值都打出来。前端不做同一条检查 —— 它已经解析过 module.prop，再判一次就是第二处规则，迟早和后端漂移（本站的做法是让前端问后端，不抄第二份，见「上限自报」）；服务端的原因原样显示在失败屏（`api.js:readReason`） |
 
 关于「版本更新需人工审核」这条，界面在三个地方如实说明了：查重结果 `version_update` 的提示、
-确认屏第三条勾选、以及说明页的流程管线里把「人工审核」单独高亮。没有把投稿写成「提交即上线」。
+上传前确认的第三条勾选、以及说明页的流程管线里把「人工审核」单独高亮。没有把投稿写成「提交即上线」。
 
 ## 4. 本地预览 / 自检
 

@@ -276,7 +276,7 @@
               <span class="panel__tag">irreversible</span>
             </div>
             <p class="panel__note">
-              上传是<b style="color: var(--amber)">公开且长期保留</b>的动作，所以下面三道确认一屏都跳不过去。
+              上传是<b style="color: var(--amber)">公开且长期保留</b>的动作，所以下面三项确认要逐条勾过，一条都不能跳。
             </p>
 
             <ul class="gate" id="gate" aria-label="提交前自检"></ul>
@@ -284,7 +284,7 @@
             <div id="turnstile-slot" class="callout" hidden></div>
 
             <div class="btn-row cta-inline">
-              <button type="button" class="btn btn--go" data-open-confirm disabled>打开确认屏</button>
+              <button type="button" class="btn btn--go" data-open-confirm disabled>上传前确认</button>
               <span class="count hide-sm" id="gate-note">先把上面几项填齐</span>
             </div>
           </section>
@@ -458,11 +458,11 @@
 
     <!-- 移动端常驻操作条 -->
     <div class="dock" id="dock">
-      <span class="dock__txt"><b id="dock-t">待填：模块 zip</b><span id="dock-s">四项必填 + 三道确认</span></span>
-      <button type="button" class="btn btn--go btn--sm" data-open-confirm disabled>确认屏</button>
+      <span class="dock__txt"><b id="dock-t">待填：模块 zip</b><span id="dock-s">四项必填 + 三项上传前确认</span></span>
+      <button type="button" class="btn btn--go btn--sm" data-open-confirm disabled>去确认</button>
     </div>
 
-    <!-- 确认屏：仿 Bootloader 解锁警告 -->
+    <!-- 上传前确认（仿 Bootloader 解锁警告）：三道勾全中才解锁「上传」 -->
     <div class="layer" id="layer-confirm" role="dialog" aria-modal="true" aria-labelledby="warn-ttl" hidden>
       <div class="warn">
         <div class="warn__hazard" aria-hidden="true"></div>
@@ -474,7 +474,7 @@
           </svg>
           <div>
             <div class="warn__ttl" id="warn-ttl">Confirm Upload</div>
-            <p class="warn__sub">这一屏跳不过去。三道确认全勾上，上传按钮才会亮。</p>
+            <p class="warn__sub">三项全部勾上，「上传」按钮才会亮 —— 少一项都传不出去。</p>
           </div>
         </div>
         <div class="warn__body">
