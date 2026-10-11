@@ -1,6 +1,9 @@
 # 构建产物：node tools/build.mjs 由 public/ 复制生成
 dist/
 
+# wrangler 的本地状态（部署缓存/账号缓存），跟构建产物一样不该进仓库
+.wrangler/
+
 # Qoder Sites 本地描述符：每次部署都变，且内嵌整份 index.html
 *.qoder.site
 

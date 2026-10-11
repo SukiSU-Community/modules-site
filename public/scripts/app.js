@@ -1540,7 +1540,18 @@ async function syncLimits() {
 function init() {
   $("#brand-zh").textContent = CONFIG.SITE_NAME;
   // 英文名可选：老配置里没有这个字段时保留 HTML 里的兜底文案，不要写成 undefined。
-  if (CONFIG.SITE_NAME_EN) $("#brand-lat").textContent = CONFIG.SITE_NAME_EN;
+  // 它要两端分别贴住 logo 左边和中文名右边，所以按词拆进两个槽位：第一个词靠左，
+  // 其余全归右边那个；只有一个词时也放得下（右槽留空，仍然左对齐）。
+  if (CONFIG.SITE_NAME_EN) {
+    const words = CONFIG.SITE_NAME_EN.trim().split(/\s+/);
+    const slots = $$("#brand-lat [data-w]");
+    if (slots.length >= 2) {
+      slots[0].textContent = words[0] || "";
+      slots[1].textContent = words.slice(1).join(" ");
+    } else {
+      $("#brand-lat").textContent = CONFIG.SITE_NAME_EN;
+    }
+  }
   document.title = `${CONFIG.SITE_NAME} · ${CONFIG.SITE_SUBTITLE}`;
   paintLimit();
   syncLimits();

@@ -31,9 +31,12 @@
           .setAttribute("content", mode === "light" ? "#F5F3EE" : "#07080B");
       })();
     </script>
+    <!-- favicon 与页头同一套形状（圆角方块里刻 M），但 M 直接填实色 --amber-ink：
+         图标会被贴到标签栏、书签列表、桌面、分享卡各种底上，刻穿在浅底上会糊掉。
+         也不铺底色矩形，圆角外面留透明，免得在浅色标签栏上出现一个深色方块。 -->
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2307080b'/%3E%3Cpath d='M4 4h18l6 6v18H10l-6-6z' fill='none' stroke='%23ffb020' stroke-width='3'/%3E%3Crect x='12' y='13' width='9' height='9' fill='%23ffb020'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23ffb020'/%3E%3Cpath d='M7 25V7L16 18.4L25 7V25' fill='none' stroke='%231a1000' stroke-width='3.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
     />
     <link rel="stylesheet" href="./fonts/fonts.css" />
     <link rel="stylesheet" href="./styles/panel.css" />
@@ -47,18 +50,33 @@
       <div class="bezel__rail" aria-hidden="true"></div>
       <div class="bezel__in">
         <div class="plate">
-          <!-- 标识：切角外框里放一块实心模块 —— 「一个模块被收进索引」，也就是这个站干的事。
-               与 favicon 同一套几何，所以图标不用另起一套。 -->
-          <span class="plate__mark" aria-hidden="true">
-            <svg viewBox="0 0 32 32">
-              <path class="plate__frame" d="M1.4 1.4H24.6L30.6 7.4V30.6H7.4L1.4 24.6Z" />
-              <path class="plate__core" d="M10 10H19.5L22 12.5V22H12.5L10 19.5Z" />
-            </svg>
-          </span>
-          <span class="plate__txt">
+          <!-- 标识：一块圆角矩形，里面刻出 M（酷模的首字母）。
+               M 是负形，显示的是背后的底色，所以深浅两个主题都成立。
+               favicon 用同一套形状，但 M 填实色 —— 图标会被贴到标签栏、桌面、
+               分享卡各种底上，刻穿在浅底上会糊掉。 -->
+          <span class="plate__top">
+            <span class="plate__mark" aria-hidden="true">
+              <svg viewBox="0 0 32 32">
+                <defs>
+                  <mask id="plate-mark-m">
+                    <rect width="32" height="32" fill="#fff" />
+                    <path
+                      d="M7 25V7L16 18.4L25 7V25"
+                      fill="none"
+                      stroke="#000"
+                      stroke-width="3.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </mask>
+                </defs>
+                <rect class="plate__disc" width="32" height="32" rx="6" mask="url(#plate-mark-m)" />
+              </svg>
+            </span>
             <span class="plate__zh" id="brand-zh">酷模</span>
-            <span class="plate__lat" id="brand-lat">COOL MODULE</span>
           </span>
+          <!-- 英文另起一行，两端分别贴住 logo 左边和中文名右边（对齐规则见 .plate__lat）。 -->
+          <span class="plate__lat" id="brand-lat"><span data-w>COOL</span><span data-w>MODULE</span></span>
         </div>
         <nav class="nav" aria-label="站点分区">
           <a href="#/submit"><i>01</i>投稿台</a>
