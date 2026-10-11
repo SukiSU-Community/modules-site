@@ -448,6 +448,14 @@ async function main() {
     /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/.test(panelCss) &&
       !/\.spec\s*\{[^}]*grid-template-columns:\s*1fr/.test(panelCss)
   );
+  // 四格之间是十字线，不是四张卡片：外框一条 + 中间一横一竖，缝里不许有 gap。
+  check(
+    "硬性条件用十字线分格：.spec 无 gap、格子无琥珀内描边、右/下两条线在 nth-child 处收口",
+    !/\.spec\s*\{[^}]*\bgap:/.test(panelCss) &&
+      !panelCss.includes("inset 2px 0 0 var(--amber-line)") &&
+      /\.spec__cell:nth-child\(2n\)\s*\{\s*\n\s*border-right: 0;/.test(panelCss) &&
+      /\.spec__cell:nth-child\(n \+ 3\)\s*\{\s*\n\s*border-bottom: 0;/.test(panelCss)
+  );
   // 顶栏与标语各踩过一次「窄屏另有硬编码，clamp 白写」：这两条钉的就是那两个坑。
   check(
     "顶栏窄屏不换行（.bezel__in 用 nowrap 覆盖默认的 wrap）",

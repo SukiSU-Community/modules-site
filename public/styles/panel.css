@@ -496,21 +496,29 @@ h1 .hi::after {
   color: var(--amber);
 }
 
-/* 规格铭牌：2×2 四格，整块与下面的 .panel 同宽（都在 main 的内容盒里） */
+/* 规格铭牌：2×2 一格一块，中间用十字线分开（不留空隙），整块与下面的 .panel 同宽 */
 .spec {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  overflow: hidden;
   margin-top: 22px;
 }
 .spec__cell {
   display: grid;
   gap: 4px;
   padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: linear-gradient(180deg, var(--panel-2), var(--panel));
-  box-shadow: inset 2px 0 0 var(--amber-line);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+/* 十字线：右与下各一条，最右列与最底行收掉，中间才正好成十字 */
+.spec__cell:nth-child(2n) {
+  border-right: 0;
+}
+.spec__cell:nth-child(n + 3) {
+  border-bottom: 0;
 }
 .spec__k {
   font: 500 10.5px/1.7 var(--mono);
@@ -1744,9 +1752,6 @@ mark {
 /* 窄屏也保持 2×2：这四条是要一眼看完的硬条件，退成一列就得靠滚动来对比。
    代价是每格变窄，所以收字号与内边距，而不是收列数。 */
 @media (max-width: 620px) {
-  .spec {
-    gap: 7px;
-  }
   .spec__cell {
     gap: 3px;
     padding: 9px 10px;
