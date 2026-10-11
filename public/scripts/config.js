@@ -11,7 +11,7 @@ export const CONFIG = {
   // 前端会请求 `${API_BASE}/check`、`${API_BASE}/user` 与 `${API_BASE}/submit`
   // （另外启动时问一次 `${API_BASE}/` 拿真实大小上限）。
   // 留空字符串时投稿页仍可正常填写，但 /check 与提交会被拦下并明确提示未配置。
-  API_BASE: "",
+  API_BASE: "https://sukisu-module-submit.lyfsearch.workers.dev",
 
   // --- 待填 ②：公开索引（MMRL JSON）地址 -------------------------------------
   // 「已收录模块」页直接 fetch 这个 URL。填 GitHub raw / jsDelivr / 自有 CDN 都行。
@@ -19,7 +19,12 @@ export const CONFIG = {
   //   例：'https://cdn.jsdelivr.net/gh/你的用户名/你的仓库@main/index.json'
   // 注意：浏览器直连 raw.githubusercontent.com 在大陆不稳定，优先给 jsDelivr 这类镜像。
   // 留空时浏览页显示「索引地址待配置」，不影响投稿功能。
-  INDEX_URL: "",
+  //
+  // 这里填的是 jsDelivr，代价是**它有缓存**：下架之后源站立刻空了，CDN 上还能发出旧索引
+  // 几十分钟。这条已经由索引仓库补掉了 —— merge-index 合并之后会跑 scripts/purge-cdn.mjs
+  // 清这一个地址（见 contrib/repo/README.md 的「合并之后：CDN 必须失效」）。
+  // 换成别的 CDN 之前先想清楚：那条链上没有自动清缓存的人。
+  INDEX_URL: "https://cdn.jsdelivr.net/gh/SukiSU-Community/modules-repo@main/json/modules.json",
 
   // --- 处置台账（下架 / 拉黑）地址 -------------------------------------------
   // 这里是**留空**用的：留空就从 INDEX_URL 换文件名的到 —— 在索引仓库里
@@ -75,7 +80,11 @@ export const CONFIG = {
   // --- 管理器加源地址 ---------------------------------------------------------
   // 说明页「怎么加源」用它生成一键加源链接；留空则只显示文字说明。
   //   KernelSU 形如：kernelsu://mmrl?url=<INDEX_URL>
-  SCHEME_ADD_SOURCE: "",
+  // 这里给 url 参数做了百分号编码（嵌套 URL 不编码，`//` 会被不少解析器吃掉）。
+  // ⚠️ 这一条**没在真机的管理器上验过**：编码形式是按惯例写的，装了 KernelSU 的人点一下
+  //    才知道加源对话框里拿到的是什么。没验过就当没验过，别照着它宣传「一键加源」。
+  SCHEME_ADD_SOURCE:
+    "kernelsu://mmrl?url=https%3A%2F%2Fcdn.jsdelivr.net%2Fgh%2FSukiSU-Community%2Fmodules-repo%40main%2Fjson%2Fmodules.json",
 
   // --- 站点名称（只影响标题、导航与页脚铭牌）--------------------------------
   SITE_NAME: "模块投稿台",

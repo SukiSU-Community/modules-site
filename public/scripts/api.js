@@ -313,13 +313,24 @@ function httpUrl(value) {
   }
 }
 
+/**
+ * 读索引与读台账都必须绕过本地缓存。
+ *
+ * 实测：jsDelivr 对 `@分支` 形式的地址回的是 `Cache-Control: public, max-age=604800`
+ * —— 七天。也就是说源站清完缓存之后，**浏览器/管理器里那份旧索引还能留七天**，
+ * 而「这个模块被下架了」恰恰是最不能拿旧数据回答的问题。`no-cache` 是「每次问服务器
+ * 要不要重取」，配合对方给的弱 ETag 通常只是一个 304，代价很小。
+ * 订阅端（管理器 App 自己发的那个请求）不归本站管，所以这一层只能把本站自己的页面钉住。
+ */
+const FRESH = { method: "GET", cache: "no-cache" };
+
 /** 拉公开索引（MMRL 格式）并归一化。 */export async function fetchIndex() {
   if (!CONFIG.INDEX_URL.trim()) {
     throw new BackendError("not-configured", "公开索引地址还没配置：请在 config.js 填入 INDEX_URL。");
   }
   let res;
   try {
-    res = await fetch(CONFIG.INDEX_URL, { method: "GET" });
+    res = await fetch(CONFIG.INDEX_URL, FRESH);
   } catch {
     throw new BackendError(
       "network",
@@ -485,7 +496,7 @@ export async function fetchDispositions() {
   }
   let res;
   try {
-    res = await fetch(target, { method: "GET" });
+    res = await fetch(target, FRESH);
   } catch {
     throw new BackendError(
       "network",

@@ -257,9 +257,31 @@ async function main() {
   check("网盘链接不算出处", normalizeCoolapkUrl("https://pan.baidu.com/s/abc") === "");
   check("空输入返回空", normalizeCoolapkUrl("   ") === "");
 
-  // API_BASE 未配置时不发任何请求，直接回 off —— 界面据此显示「未经核实」而不是报错卡死
-  const off = await lookupCoolapkUser("2781460");
-  check("后端未接线时核实返回 off 而不是抛错", off.status === "off", JSON.stringify(off));
+  // 「后端未接线时走 off」这条**测不出行为**了：IS_UID_VERIFY_ON 是 config.js 加载时算好的
+  // 派生值，而 API_BASE 现在填的是真地址 —— 测试进程里改 CONFIG 不会让它重算，硬调一次就是
+  // 真发一个网络请求（本仓库的测试规矩是不联网）。所以钉三件真能钉的：
+  // 派生规则、早退语句还在、以及形状不对时确实不发请求。
+  const { IS_UID_VERIFY_ON } = await import("../public/scripts/config.js");
+  check(
+    "核实开关的派生规则：API_BASE 与核实路径都非空才算开着",
+    IS_UID_VERIFY_ON === (CONFIG.API_BASE.trim() !== "" && CONFIG.COOLAPK_USER_PATH.trim() !== "")
+  );
+  const apiSrc = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../public/scripts/api.js"), "utf8");
+  check(
+    "未接线时核实走 off 而不是报错卡死（早退语句钉住）",
+    /if \(!IS_UID_VERIFY_ON\) return \{ status: "off" \};/.test(apiSrc)
+  );
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = () => {
+    throw new Error("这条测试不该发出任何请求");
+  };
+  let invalid;
+  try {
+    invalid = await lookupCoolapkUser("123"); // 位数不够，不是合法 UID
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  check("UID 形状不对时直接判 invalid，一个请求都不发", invalid.status === "invalid", JSON.stringify(invalid));
 
   console.log("\n[9] 处置台账公示（下架 / 拉黑）");
   const {
@@ -321,17 +343,24 @@ async function main() {
   check("没有 dispositions 数组时报错而不是显示空公示", ledErr instanceof BackendError, String(ledErr && ledErr.name));
 
   // 公示页的数据源只有一个定义处：INDEX_URL。显式 DISPOSITIONS_URL 才覆盖它。
-  CONFIG.DISPOSITIONS_URL = "";
-  CONFIG.INDEX_URL = "";
-  check("两个地址都没填时不猜地址", dispositionsUrl() === "");
-  CONFIG.INDEX_URL = "https://cdn.jsdelivr.net/gh/o/r@main/json/modules.json";
-  check("按 INDEX_URL 同目录推导台账地址", dispositionsUrl() === "https://cdn.jsdelivr.net/gh/o/r@main/json/dispositions.json", dispositionsUrl());
-  CONFIG.INDEX_URL = "https://raw.githubusercontent.com/o/r/main/json/modules.json?v=3";
-  check("索引地址上的 query 保留（有些 CDN 靠它鉴权）", dispositionsUrl().endsWith("/json/dispositions.json?v=3"), dispositionsUrl());
-  CONFIG.DISPOSITIONS_URL = "https://mirror.example.com/d.json";
-  check("显式配置优先于推导", dispositionsUrl() === "https://mirror.example.com/d.json");
-  CONFIG.DISPOSITIONS_URL = "";
-  CONFIG.INDEX_URL = "";
+  // 存回去而不是清成空：config.js 现在填的是真地址，测试把它抹了会让后面的检查
+  // 跑在一个「谁都没配置」的假现场上。
+  const savedIndex = CONFIG.INDEX_URL;
+  const savedDisp = CONFIG.DISPOSITIONS_URL;
+  try {
+    CONFIG.DISPOSITIONS_URL = "";
+    CONFIG.INDEX_URL = "";
+    check("两个地址都没填时不猜地址", dispositionsUrl() === "");
+    CONFIG.INDEX_URL = "https://cdn.jsdelivr.net/gh/o/r@main/json/modules.json";
+    check("按 INDEX_URL 同目录推导台账地址", dispositionsUrl() === "https://cdn.jsdelivr.net/gh/o/r@main/json/dispositions.json", dispositionsUrl());
+    CONFIG.INDEX_URL = "https://raw.githubusercontent.com/o/r/main/json/modules.json?v=3";
+    check("索引地址上的 query 保留（有些 CDN 靠它鉴权）", dispositionsUrl().endsWith("/json/dispositions.json?v=3"), dispositionsUrl());
+    CONFIG.DISPOSITIONS_URL = "https://mirror.example.com/d.json";
+    check("显式配置优先于推导", dispositionsUrl() === "https://mirror.example.com/d.json");
+  } finally {
+    CONFIG.INDEX_URL = savedIndex;
+    CONFIG.DISPOSITIONS_URL = savedDisp;
+  }
 
   // 指针只在形状确实是 GitHub 评论永久链接时才点得开；猜出来的链接等于公示页替一条
   // 它并不知道去向的证据背书。
@@ -358,6 +387,14 @@ async function main() {
   // 以及浏览页搜不到时会去问台账 —— 那条「不是没被投过，是被下架了」是本页的意义。
   const appSrc = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../public/scripts/app.js"), "utf8");
   check("公示页接进了路由", /incidents: \{ el: "#view-incidents"/.test(appSrc));
+  // 索引与台账两处读取都必须绕本地缓存：jsDelivr 对 @分支 回 max-age=604800（七天），
+  // 源站清完缓存之后浏览器里那份旧的还能留七天 —— 而「这个模块被下架了」最不能用旧数据答。
+  check(
+    "索引与台账两处读取都带 cache: no-cache（不吃那七天的本地缓存）",
+    /const FRESH = \{ method: "GET", cache: "no-cache" \};/.test(apiSrc) &&
+      /fetch\(CONFIG\.INDEX_URL, FRESH\)/.test(apiSrc) &&
+      /fetch\(target, FRESH\)/.test(apiSrc)
+  );
   check("浏览页搜不到时会去查台账，命中就说明是被处置了", /ledgerHitFor\(q\)/.test(appSrc) && /它不是没被投过，是被下架或拒收了/.test(appSrc));
 
   /* ------------------------------------------------ 与后端的字段名/契约对齐     这一节防的是「两边各自改了常量，直到线上报错才发现」。曾经前端发 turnstile、
@@ -452,10 +489,12 @@ async function main() {
     // 证据指针的形状：写入端（revoke.mjs）与展示端（byLink）必须判得完全一致。
     // 漂移的两种后果都不是红，而是台账里出现「写着像链接却点不开」或「能点却不给点」。
     const revokePath = resolve(dirname(dispPath), "revoke.mjs");
-    if (!existsSync(revokePath)) {
-      skip("指针形状两端一致", `找不到 ${revokePath}`);
+    const revoke = existsSync(revokePath) ? await import(pathToFileURL(revokePath).href) : null;
+    if (!revoke?.PROOF_URL_RE) {
+      // 写入端还没有这条规则 == contrib/repo 的工作树停在还没合入它的分支上。
+      // 跳过而不是放行：skip 会出现在总结里，而 --require-backend 会把它升级成失败。
+      skip("指针形状两端一致", "写入端 revoke.mjs 还没有导出 PROOF_URL_RE（索引仓库那边尚未合入）");
     } else {
-      const revoke = await import(pathToFileURL(revokePath).href);
       const PROOF = "https://github.com/o/r/issues/33#issuecomment-123456";
       check("写入端接受的证据链接，公示页一定点得开", revoke.PROOF_URL_RE.test(PROOF) && byLink(PROOF) === PROOF);
       const drift = [
