@@ -1446,6 +1446,15 @@ mark {
 .inc__k {
   color: var(--ink-2);
 }
+/* 证据链接是行内文本链接，不是按钮 —— 它跟在 mono 的一行元数据里。 */
+.inc__proof {
+  color: var(--amber);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--amber-line);
+}
+.inc__proof:hover {
+  background: var(--amber-wash);
+}
 .inc-legend {
   display: grid;
   gap: 6px;

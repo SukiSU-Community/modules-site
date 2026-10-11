@@ -463,6 +463,18 @@ export function normalizeDispositions(json) {
   };
 }
 
+/**
+ * 处置指针 → 能点的链接。
+ *
+ * 只有「GitHub 上某条 issue 评论的永久链接」这一种形状才给链接。其它一律原样显示成文本：
+ * 猜出来的链接比不链接更坏 —— 点进去是 404 或别人的讨论，等于公示页在替一条它并不知道的
+ * 证据背书。形状与索引仓库的写入端（scripts/revoke.mjs 的 PROOF_URL_RE）由 selftest 对一遍。
+ */
+export function byLink(value) {
+  const s = String(value || "").trim();
+  return /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+#issuecomment-\d+$/.test(s) ? s : "";
+}
+
 export async function fetchDispositions() {
   const target = dispositionsUrl();
   if (!target) {

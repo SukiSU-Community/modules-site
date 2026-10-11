@@ -15,6 +15,7 @@ import {
   fetchServiceLimits,
   fetchDispositions,
   dispositionsUrl,
+  byLink,
   KIND_LABELS,
   REASON_LABELS,
   SELECTOR_LABELS,
@@ -1153,7 +1154,19 @@ function incRow(item, q) {
   const ft = node("div", "mod__ft");
   ft.append(node("span", null, item.atMs === null ? `时间：${item.at || "没写"}` : `时间：${fmtDate(item.atMs)}`));
   // 标签与值分开两个节点：highlight 是清空容器再写的，标签和值在同一个节点里会被它抹掉。
-  ft.append(incLabeled("处置人：", item.by || "没写", q, "inc__by"));
+  const href = byLink(item.by);
+  if (href) {
+    const wrap = node("span", "inc__by");
+    wrap.append(node("span", "inc__k", "证据："));
+    const a = node("a", "inc__proof", href);
+    a.href = href;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    wrap.append(a);
+    ft.append(wrap);
+  } else {
+    ft.append(incLabeled("证据：", item.by || "没写", q, "inc__by"));
+  }
   if (item.verify) ft.append(incLabeled("复核：", item.verify, q, "inc__by"));
   li.append(ft);
   return li;
@@ -1174,7 +1187,7 @@ function renderIncLegend() {
   const rows = [
     ["下架 / 拒收", "下架挡住的是这一段内容（按模块 ID、ID+versionCode 或包的 sha256 命中）；拒收挡住的是一个人或一个 ID 未来投来的任何包。"],
     ["命中条件", "同一条里的多个条件是「且」的关系，不是「或」——写了 ID 又写 versionCode，就只命中那一个版本。"],
-    ["处置人（by）", "指向公开可查的证据，不是自动生成的名字。这一页显示的就是台账原文，判定发生在索引推导与 CI 里，前端不另判一份。"],
+    ["证据（by）", "指向一条公开可查的评论，谁下的处置看那条评论的作者 —— 名字不在台账里重复一份，因为那是个会过期的抄本。形状不对的指针原样显示成文本，不猜成链接。这一页显示的就是台账原文，判定发生在索引推导与 CI 里，前端不另判一份。"],
     ["复核（verify）", "有这一项时任何人都能自己跑一遍确认这条处置成立，而不是只能相信页面上写的。"],
     ["时间", "带时区的那一刻，不是「大概哪天」。"],
   ];

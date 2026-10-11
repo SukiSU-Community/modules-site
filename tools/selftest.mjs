@@ -265,6 +265,7 @@ async function main() {
   const {
     normalizeDispositions,
     dispositionsUrl,
+    byLink,
     LEDGER_SCHEMA,
     KIND_LABELS,
     REASON_LABELS,
@@ -332,12 +333,32 @@ async function main() {
   CONFIG.DISPOSITIONS_URL = "";
   CONFIG.INDEX_URL = "";
 
+  // 指针只在形状确实是 GitHub 评论永久链接时才点得开；猜出来的链接等于公示页替一条
+  // 它并不知道去向的证据背书。
+  const PROOF = "https://github.com/o/r/issues/33#issuecomment-123456";
+  check("永久链接形状的证据给链接", byLink(PROOF) === PROOF);
+  check("旧形状 / 缺评论锚点 / 明文 / 假域名 / 只换 host 的钓鱼地址都不给链接",
+    [
+      "gh:me@issuecomment-123456",
+      "https://github.com/o/r/issues/33",
+      "http://github.com/o/r/issues/33#issuecomment-1",
+      "https://github.com.evil.tld/o/r/issues/33#issuecomment-1",
+      "https://evil.example.com/o/r/issues/33#issuecomment-1",
+      "https://github.com/o/r/pull/33#issuecomment-1",
+      "",
+      undefined,
+    ].every((v) => byLink(v) === ""),
+    [
+      "https://github.com/o/r/pull/33#issuecomment-1",
+      "https://github.com.evil.tld/o/r/issues/33#issuecomment-1",
+    ].map((v) => `${v}->${byLink(v)}`).join(" ")
+  );
+
   // 前端不判台账（判据在仓库那份），所以这里只钉两件事：视图接上了，
   // 以及浏览页搜不到时会去问台账 —— 那条「不是没被投过，是被下架了」是本页的意义。
   const appSrc = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../public/scripts/app.js"), "utf8");
   check("公示页接进了路由", /incidents: \{ el: "#view-incidents"/.test(appSrc));
   check("浏览页搜不到时会去查台账，命中就说明是被处置了", /ledgerHitFor\(q\)/.test(appSrc) && /它不是没被投过，是被下架或拒收了/.test(appSrc));
-  check("by 指针原样显示，不猜成链接", !/href = .*by/.test(appSrc));
 
   /* ------------------------------------------------ 与后端的字段名/契约对齐     这一节防的是「两边各自改了常量，直到线上报错才发现」。曾经前端发 turnstile、
      后端读 cf-turnstile-response；前端写 8MB、后端实际 2MB。两个都是静默失效。 */
@@ -410,7 +431,7 @@ async function main() {
   if (!dispPath) {
     const msg = `找不到索引仓库的台账判据（试过：${dispCandidates.join(" / ")}）`;
     if (REQUIRE_BACKEND) check("索引仓库台账模块必须存在（--require-backend）", false, msg);
-    else skip("4 条处置台账词汇校验", msg);
+    else skip("6 条处置台账词汇与指针校验", msg);
   } else {
     console.log(`  台账契约另一端：${dispPath}`);
     const repo = await import(pathToFileURL(dispPath).href);
@@ -427,6 +448,29 @@ async function main() {
     const repoSel = ["id", "versionCode", "sha256", "coolapkUid", "kind", "reason", "by", "at", "note", "verify"].filter((k) => k in norm);
     const frontSel = SELECTOR_KEYS.filter((k) => repoSel.includes(k));
     check("公示页取的选择器与仓库那份归一化结果同名同集合", frontSel.length === SELECTOR_KEYS.length && SELECTOR_KEYS.every((k) => repoSel.includes(k)), repoSel.join(","));
+
+    // 证据指针的形状：写入端（revoke.mjs）与展示端（byLink）必须判得完全一致。
+    // 漂移的两种后果都不是红，而是台账里出现「写着像链接却点不开」或「能点却不给点」。
+    const revokePath = resolve(dirname(dispPath), "revoke.mjs");
+    if (!existsSync(revokePath)) {
+      skip("指针形状两端一致", `找不到 ${revokePath}`);
+    } else {
+      const revoke = await import(pathToFileURL(revokePath).href);
+      const PROOF = "https://github.com/o/r/issues/33#issuecomment-123456";
+      check("写入端接受的证据链接，公示页一定点得开", revoke.PROOF_URL_RE.test(PROOF) && byLink(PROOF) === PROOF);
+      const drift = [
+        PROOF,
+        "gh:me@issuecomment-123456",
+        "https://github.com/o/r/issues/33",
+        "https://github.com/o/r/issues/abc#issuecomment-1",
+        "http://github.com/o/r/issues/33#issuecomment-1",
+        "https://github.com.evil.tld/o/r/issues/33#issuecomment-1",
+        "https://evil.example.com/o/r/issues/33#issuecomment-1",
+        "https://github.com/o/r/pull/33#issuecomment-1",
+        "",
+      ].filter((s) => revoke.PROOF_URL_RE.test(s) !== Boolean(byLink(s)));
+      check("指针形状在写入端与公示页判得完全一致", drift.length === 0, drift.join(" | "));
+    }
   }
 
   const summary = `${fail === 0 ? "全部通过" : "有失败项"}：${pass} passed, ${fail} failed`;

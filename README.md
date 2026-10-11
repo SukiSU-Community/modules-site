@@ -112,7 +112,7 @@ GET ${API_BASE}/user?uid=2781460
 | 成功给 PR 链接 | `app.js:showSuccess()`，含「点进去看审核进度」与后续流程说明 |
 | 失败显示中文原因且能重试 | `app.js:showFailure()`：表单内容与已选文件都留着，「重试提交」直接复用 |
 | 已收录模块浏览页（MMRL） | `#view-index` + `api.js:fetchIndex()/normalizeIndex()`，搜索按 ID/名称/作者/描述过滤并高亮 |
-| 下架 / 拉黑的公示 | `#view-incidents` + `api.js:fetchDispositions()/normalizeDispositions()`，读索引仓库那份 `json/dispositions.json` 原文，按 reason 分组、时间倒序。**前端不判台账**：判据在 `contrib/repo/scripts/dispositions.mjs`（推导与 CI 用同一份），这里只负责公开。读取层故意**一条都不丢**（未知 schema / kind / reason / 坏时间都标出来继续显示）—— 公示页丢掉一条就等于公示漏一项处置，而它在 CI 那份的失效方向是「读不懂就停住」，两边反着是有意的。另外浏览页搜不到时会拿这个查询去台账里精确比一次命中条件，命中就写「它不是没被投过，是被下架了」并给跳转 |
+| 下架 / 拉黑的公示 | `#view-incidents` + `api.js:fetchDispositions()/normalizeDispositions()`，读索引仓库那份 `json/dispositions.json` 原文，按 reason 分组、时间倒序。**前端不判台账**：判据在 `contrib/repo/scripts/dispositions.mjs`（推导与 CI 用同一份），这里只负责公开。读取层故意**一条都不丢**（未知 schema / kind / reason / 坏时间都标出来继续显示）—— 公示页丢掉一条就等于公示漏一项处置，而它在 CI 那份的失效方向是「读不懂就停住」，两边反着是有意的。另外浏览页搜不到时会拿这个查询去台账里精确比一次命中条件，命中就写「它不是没被投过，是被下架了」并给跳转。`by` 指针只在形状是 GitHub 评论永久链接时才渲染成链接（`api.js:byLink`），其它一律文本 —— 猜出来的链接等于公示页替一条它不知道去向的证据背书；这个形状与写入端 `revoke.mjs` 的 `PROOF_URL_RE` 由 selftest 逐样本比对 |
 | 预留 Turnstile token 字段 | `api.js` 始终 append 该字段；`config.js:29` 控制是否渲染真部件 |
 | 上传大小 / zip 形态前端预检 | 超过上限、非 `.zip`、根目录无 `module.prop` 都在选文件那一刻就拒掉并把原因打出来 |
 | 包内 `module.prop` 与表单一致性 | **服务端判**（`contrib/worker/src/index.ts` 的 ⑤-a）：`id` 必须一致，包内写了 `versionCode` 也必须一致；不一致 → 400 并把两边的值都打出来。前端不做同一条检查 —— 它已经解析过 module.prop，再判一次就是第二处规则，迟早和后端漂移（本站的做法是让前端问后端，不抄第二份，见「上限自报」）；服务端的原因原样显示在失败屏（`api.js:readReason`） |
@@ -138,10 +138,11 @@ deflate 与 stored 两种压缩、UTF-8 中文内容、`description` 里再出�
 非 MMRL 结构报错）和酷安规则（UID 位数/非数字、假域名 `coolapk.com.evil.tld`、
 路径里藏域名、`javascript:` 协议、网盘链接不算出处、后端未接线时核实走 `off` 而不是抛错），
 以及处置台账公示（带时区的 `at` 解析、选择器取法、未知 schema/kind/reason 一条都不丢、
-台账地址按 INDEX_URL 同目录推导且保留 query）。
-跨仓库那几组还会直接 import 索引仓库的 `scripts/dispositions.mjs`，把公示页的分类词表
-与它的封闭集合（`REASONS` / `KINDS` / `DISPOSITIONS_SCHEMA` / 选择器名）对一遍 ——
-仓库新增一个分类而公示页没有对应标题时，这里就红。共 67 项断言。
+台账地址按 INDEX_URL 同目录推导且保留 query、`by` 指针只有永久链接才给链接）。
+跨仓库那几组还会直接 import 索引仓库的 `scripts/dispositions.mjs` 与 `scripts/revoke.mjs`，
+把公示页的分类词表与它的封闭集合（`REASONS` / `KINDS` / `DISPOSITIONS_SCHEMA` / 选择器名）
+对一遍，并逐样本比对写入端与公示页对指针形状的判定 ——
+仓库新增一个分类而公示页没有对应标题、或两端对「什么样算链接」判法漂移时，这里就红。共 70 项断言。
 
 ## 5. 部署
 
