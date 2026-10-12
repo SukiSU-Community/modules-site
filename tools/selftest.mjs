@@ -794,6 +794,50 @@ async function main() {
       !/disabled = !(ready && state\.zipSha)/.test(refreshBody)
   );
 
+  /* ------------------------ 派生值的来源一换，屏幕上那一串就得当场死（intake 那一路）
+     上面几条钉的是「说了什么」，这一组钉的是「什么时候死的」。两条都是顺序断言，不是抄整行字面量：
+     注释重排、引号换样式都不该让钉子悄悄松开，而把顺序挪回 await 之后必须当场红。
+     ① 上一轮的修复（换包那一刻同步归零 + 立刻重画）此前一条都没钉着——fix1 报告 §6 第 2 条要的就是它。
+     ② 这一轮的串行化：intake() 不串行，连着选 A、B 时两次解析重叠，而 state.zip 的赋值原先是无条件的；
+        A 的解析晚到就会让 state.zip 指回 A 而 state.file 已是 B，于是 A 的摘要还能通过 digest 那侧
+        的对象标识守卫贴到 B 上——同一类谎的另一条到达路径，钉「赋值之前有对 state.file 的比较」。 */
+  const intakeAt = appSrc.indexOf("async function intake(");
+  // intake() 里嵌套的 } 全部带缩进，第一个顶格的 } 就是函数结束（与上面 refreshBody 同一个取法）。
+  const intakeSrc = intakeAt === -1 ? "" : appSrc.slice(intakeAt, appSrc.indexOf("\n}", intakeAt));
+  const iAwait = intakeSrc.search(/\bawait\b/);
+  // 第一个 await 之前那一段是同步跑完的：这一段之外用户看得见中间状态，那一串就必须已经死了。
+  const intakeSync = iAwait > 0 ? intakeSrc.slice(0, iAwait) : "";
+  const iFileSet = intakeSync.indexOf("state.file = file");
+  const iShaClear = intakeSync.indexOf('state.zipSha = ""');
+  check(
+    "换包那一刻整包哈希当场归零：state.zipSha 的清空排在 state.file = file 之后、第一个 await 之前，且同一段里就重画口令行与门禁",
+    iFileSet !== -1 &&
+      iShaClear > iFileSet &&
+      intakeSync.includes("renderProof()") &&
+      intakeSync.includes("refreshGate()"),
+    intakeSync
+      ? `state.file=${iFileSet} / state.zipSha=${iShaClear} / await=${iAwait} / 同步段 ${intakeSync.length} 字符`
+      : "切不出 intake() 第一个 await 之前的那一段"
+  );
+  const iZipSet = intakeSrc.search(/\n\s*state\.zip\s*=\s*\{/);
+  const iFileGuard = intakeSrc.search(/(?:state\.file\s*!==\s*file|file\s*!==\s*state\.file)/);
+  check(
+    "解析回来那一步认 file 的对象身份：state.zip 的赋值之前有一道对 state.file 的比较，且它在第一个 await 之后",
+    iZipSet !== -1 && iFileGuard !== -1 && iFileGuard > iAwait && iFileGuard < iZipSet,
+    `await=${iAwait} / state.file 比较=${iFileGuard} / state.zip 赋值=${iZipSet}`
+  );
+  /* 这一轮修的是一句谎（屏幕上那串对不上要上传的字节），不是「前端该多拦一道」——判定在 Worker，
+     前端加闸会把判据挪回浏览器，而且它会伪装成「已经把诚实问题修好了」。所以反向再钉一条：
+     全站 .disabled 的赋值条件里不许出现口令的三个来源。length 先卡住，免得匹配不到任何东西时
+     every() 空集为真、这条绿得毫无意义。 */
+  const disabledRhs = [...appSrc.matchAll(/\.disabled\s*=\s*([^;\n]*)/g)].map((m) => m[1]);
+  check(
+    "归零与串行化没顺手变成第二道闸：任何 .disabled 的赋值条件里都没有整包哈希 / 随机段 / file / zip 这些前端状态",
+    disabledRhs.length >= 3 &&
+      disabledRhs.every((rhs) => !/zipSha|proofId|nonce|state\.file|state\.zip|buildProofString/.test(rhs)),
+    disabledRhs.join("  |  ")
+  );
+
   /* ----------------------------------------------- 口令烧掉的判据：码优先，文案兜底
      后端只改一句中文就能让前端静默停止重掷随机段（用户拿废串反复重试，永远撞同一句指控）。
      Worker 那边正在加 code: 'proof_used'；本机 contrib 还没这个字面量，所以这里钉的是

@@ -293,6 +293,13 @@ async function intake(file) {
     return;
   }
 
+  // 解析回来的这一刻可能已经晚了：intake() 不串行，连着换两个包时两次解析会重叠，而下面那句
+  // state.zip 赋值是无条件的。比的是**这一次开始时选中的那个 file 对象**（intake 顶部刚把它记进
+  // state.file），不是名字也不是大小：中途换过包、清过、或重开过投稿，就把这一次整条丢掉。
+  // 不丢的话 state.zip 会指回旧包而 state.file 已是新包，旧包的摘要随后还能通过下面那道对象
+  // 标识守卫贴到新包上 —— 屏幕上那一串就成了「新包的口令、旧包的字节」。
+  if (state.file !== file) return;
+
   let entries;
   try {
     entries = listEntries(arrayBuffer);
