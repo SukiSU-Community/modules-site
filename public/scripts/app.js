@@ -25,7 +25,7 @@ import {
 } from "./api.js";
 import { canInflateRaw, listEntries, readEntry, inspectEntries } from "./zipread.js";
 import { parseModuleProp } from "./moduleprop.js";
-import { buildProofString, makeNonce } from "./proof.js";
+import { buildProofString, makeNonce, sha256HexBytes } from "./proof.js";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -40,7 +40,11 @@ const state = {
   checkStatus: null,
   uidStatus: "idle", // idle | checking | off | verified | not_found | unavailable | self_reported | invalid
   uidInfo: null, // { uid, nickname, avatar }
-  nonce: "", // 所有权口令的随机部分；口令文本由 buildProofString(id, nonce) 现算，不缓存
+  nonce: "", // 所有权口令的随机部分
+  // 整包 sha256 = 用户选中的那个文件的全部字节的 SHA-256（与 Worker ⑤-c 的 computedSha 同口径）。
+  // 口令的两个来源是 nonce 与 zipSha 这两个**值本身**；那串文本永远由
+  // buildProofString(id, zipSha, nonce) 现算，缓存它就等于让展示串和来源脱钩。
+  zipSha: "",
   // 上限由后端自报（api.js 的 fetchServiceLimits）；config.js 那份只是问不到时的兜底。
   maxBytes: CONFIG.MAX_UPLOAD_BYTES,
   maxBytesFrom: "config", // config | backend | unreachable | no-field
@@ -229,6 +233,9 @@ function termLines(lines) {
 function clearFile() {
   state.file = null;
   state.zip = null;
+  // 包没了，这一串口令的来源就少一个：整包哈希当场归零，口令行跟着收起。
+  // 不在这里清的话，屏幕上会留着一串属于「已经不存在的那个包」的口令。
+  state.zipSha = "";
   state.checkStatus = null;
   $("#file").value = "";
   $("#term").hidden = true;
@@ -303,6 +310,28 @@ async function intake(file) {
   }
 
   state.zip = { arrayBuffer, entries, inspect, prop: null };
+
+  // 整包 sha256 是口令的第二个来源，每次换包都在这儿重算 —— 上一包的哈希对新包毫无意义。
+  // 异步：几百毫秒内口令行按「还没算出来」显示（门禁说当时的实话），算完自己出现。
+  // 算失败就留空：那一串根本不会显示，于是没人会抄一串对不上任何包的口令去填签名。
+  const zipForThisFile = state.zip;
+  state.zipSha = "";
+  sha256HexBytes(arrayBuffer).then(
+    (hex) => {
+      // 认对象不认值：换过包（或已清掉）就别把上一个文件的哈希贴到当前这个包上。
+      if (state.zip !== zipForThisFile) return;
+      state.zipSha = hex;
+      renderProof();
+      refreshGate();
+    },
+    () => {
+      if (state.zip !== zipForThisFile) return;
+      state.zipSha = "";
+      renderProof();
+      refreshGate();
+    }
+  );
+
   out.push(["found", "module.prop @ root  校验通过"]);
 
   if (!canInflateRaw()) {
@@ -436,7 +465,8 @@ function bindCheck() {
   for (const key of ["id", "versionCode"]) {
     fieldEls[key].addEventListener("input", runCheck);
   }
-  // 口令文本是 (id, nonce) 的派生值，id 一动就得重算 —— 与 runCheck 同一个触发点。
+  // 口令文本是 (id, 整包 sha256, nonce) 的派生值，id 一动就得重算 —— 与 runCheck 同一个触发点。
+  // 另一个来源（包）在 intake 里到货，那里算完哈希自己再渲染一次。
   fieldEls.id.addEventListener("input", renderProof);
   $("#proof-copy").addEventListener("click", async () => {
     const t = $("#proof-text").textContent;
@@ -502,15 +532,17 @@ function uidBlocked() {
   return false;
 }
 
-/* 口令只在「UID 核实通过」那一刻生成（runUidCheck 里那一行是唯一赋值点），所以这条没过时，
+/* 口令只在「UID 核实通过」那一刻拿到随机段（runUidCheck 里那一行是唯一赋值点），所以这条没过时，
    原因可能在站点这边（核实根本没接），也可能在流程还没走完（正在查 / 还没查）。两者写成同一句
    「口令没生成」，被拦住的人就只剩一个说不清为什么的坏按钮 —— 状态文案必须说清卡在谁手上。
+   随机段就位之后还差两个来源：模块 ID 和整包 sha256。口令串绑的是它们三个（设计文档 §14.1），
+   所以哈希没算完的那一刻不能说「已生成」—— 那时屏幕上还没有可抄进签名的一串。
    注意这里改的全是说明文字：ok 只看 Boolean(state.nonce)，前端不加第二条闸，判定在 Worker。 */
 const NONCE_WHY = {
   off: "后端没配置酷安身份核实，口令生成不了 —— 投稿通道未开放，这一步要站点来接",
   self_reported: "后端收到了 UID 但没核实它，口令生成不了 —— 投稿通道未开放，这一步要站点来接",
   unavailable: "这次没核实成，口令还没生成 —— 把 UID 重敲一遍会再查；一直不通是后端没接上核实",
-  checking: "正在核实 UID —— 通过后这串口令自动出现",
+  checking: "正在核实 UID —— 通过后随机段就位，这一串还要有模块 ID 和整包 sha256 才算得出",
 };
 
 function gateItems() {
@@ -538,12 +570,23 @@ function gateItems() {
         : "酷安用户核实（这一条不拦你；口令要核实通过才生成）";
     items.push({ ok: !uidBlocked(), text: label });
   }
-  const nonceText = state.nonce
-    ? fieldValue("id")
-      ? "投稿口令已生成（填进酷安签名）"
-      // 口令有了但还没 id，派生串就没有来源，下面那一行也就还是藏着的
-      : "投稿口令已生成 —— 填上模块 ID 就显示这一串"
-    : NONCE_WHY[state.uidStatus] || "投稿口令还没生成 —— UID 核实通过之后自动出现这一串";
+  const proofId = fieldValue("id");
+  let nonceText;
+  if (!state.nonce) {
+    nonceText =
+      NONCE_WHY[state.uidStatus] ||
+      "投稿口令还没生成 —— UID 核实通过、填上模块 ID、包也选好了，这一串才出现";
+  } else if (!proofId) {
+    nonceText = "随机段已生成 —— 填上模块 ID 才算得出这一串";
+  } else if (!state.zipSha) {
+    // 两句各说一个来源缺哪一样：没选包是「还没得选」，选了包是「正在算 / 没算出来」。
+    // 都不写「正在算」的肯定语气 —— 算失败时那句话就成假话了。
+    nonceText = state.zip
+      ? "随机段已生成 —— 这个包的整包 sha256 还没算出来，这一串要等它（稍等会自己出现；一直没出现就重新选一次包）"
+      : "随机段已生成 —— 口令绑的是这个包的字节，先把包选上，这一串才算得出来";
+  } else {
+    nonceText = "投稿口令已生成（填进酷安签名）";
+  }
   items.push({ ok: Boolean(state.nonce), text: nonceText });
   items.push({ ok: IS_API_CONFIGURED, text: "后端 API_BASE 已配置" });
   return items;
@@ -683,18 +726,22 @@ function syncUploaderField() {
       : UPLOADER_FALLBACK[state.uidStatus] || "这次没从酷安取到昵称，请自己填一个署名。";
 }
 
-// 派生显示：口令 = sha256(当前 id) 前 8 位 + "-" + state.nonce，每次都在这里现算，
-// 界面上那份字符串永远跟着输入框里的 id —— 缓存派生值迟早和来源脱钩。
+// 派生显示：口令 = sha256(当前 id + 整包 sha256) 前 8 位 + "-" + state.nonce，
+// 每次都在这里现算三个来源，界面上那串字符串永远跟着输入框里的 id 和当前这个包的字节走 ——
+// 缓存派生值迟早和来源脱钩，而换包不换口令正是这条闸要封死的那件事。
 async function renderProof() {
   const box = $("#proof-field");
   const id = fieldValue("id");
-  if (!state.nonce || !id) {
+  const zipSha = state.zipSha;
+  const nonce = state.nonce;
+  if (!nonce || !id || !zipSha) {
     box.hidden = true;
     return;
   }
-  const text = await buildProofString(id, state.nonce);
-  // 连打 id 时先发的请求可能后到（runUidCheck 里同一类竞态已经踩过一次），旧结果别贴上去。
-  if (fieldValue("id") !== id) return;
+  const text = await buildProofString(id, zipSha, nonce);
+  // 三个来源里任何一个在 await 期间动过都不许贴这一串：连打 id / 连着换包时先发的请求可能后到，
+  // 而失败换串（showFailure 里那次重掷）也可能正好落在等待中间（runUidCheck 里同一类竞态踩过一次）。
+  if (fieldValue("id") !== id || state.zipSha !== zipSha || state.nonce !== nonce) return;
   $("#proof-text").textContent = text;
   box.hidden = false;
 }
@@ -828,9 +875,13 @@ function currentFields() {
     source: normalizeCoolapkUrl(fieldValue("source")) || fieldValue("source"),
     uploader: fieldValue("uploader"),
     coolapkUid: fieldValue("coolapkUid"),
-    // 承诺文本的版本号 + 口令的随机部分。派生串不在这里算 —— 后端拿 id 与 nonce 自己重算，
+    // 承诺文本的版本号 + 整包 sha256 + 口令的随机部分。派生串不在这里算 —— 后端自己重算，
     // 前端算出来的那份只用来显示。
+    // sha256 交出去的理由：Worker 的 ⑤-c 会拿它和实算值对一遍。前端把自己算的哈希交过去，
+    // 是为了让「口令对不上」和「哈希对不上」保持成两种可分辨的失败，而不是第三种。
+    // 哈希还没算出来时发的是空串 —— ⑤-c 对空串跳过（老客户端同一条路），判不判由服务端定。
     pledge: "pledge-v1",
+    sha256: state.zipSha,
     nonce: state.nonce,
     turnstile: state.turnstileToken,
   };
@@ -939,6 +990,15 @@ function showSuccess(pr) {
   ft.append(stay);
 }
 
+/**
+ * 服务端只有两种说法意味着这一串口令真的被烧掉了：用过它，或者它可能已经变成了一条投稿。
+ * 只有这两种才重掷随机段。其余失败（400 字段问题、403 平台侧读不出记录）不轮换 ——
+ * 口令绑包体之后重试同一个口令是有效的（Task 9），无故轮换等于让用户白抄一次签名。
+ * 判据是响应文案而不是字段：Worker 目前没有机器可读的失败码，文案是唯一信号，
+ * 所以后端改这句话时前端会静默停止轮换 —— 这一条要跨仓库钉住（本轮 Task 11 的地盘）。
+ */
+const NONCE_SPENT_RE = /口令已(?:经)?用过|可能已(?:经)?提交成功/;
+
 function showFailure(err) {
   $("#run-kicker").textContent = "REJECTED";
   const ttl = $("#run-ttl");
@@ -954,6 +1014,20 @@ function showFailure(err) {
       : "未知的失败，服务端没给原因。";
   box.append(node("p", null, "后端返回的原因："));
   box.append(node("div", "reason", reason));
+
+  let proofRotated = false;
+  if (NONCE_SPENT_RE.test(reason)) {
+    // 这一串确实烧掉了：重掷随机段，口令行现算新的一串，门禁清单跟着刷新。
+    state.nonce = makeNonce();
+    // 重试按钮复用上一份载荷，不同步的话它会带着已经烧掉的那串再打一次，永远回同一句指控。
+    // 整包哈希一并同步：上一份可能是在哈希到货之前取的，那时发出去的是空串。
+    if (state.lastFields) {
+      state.lastFields = { ...state.lastFields, nonce: state.nonce, sha256: state.zipSha };
+    }
+    renderProof();
+    refreshGate();
+    proofRotated = true;
+  }
 
   if (err instanceof BackendError && (err.kind === "network" || err.kind === "not-configured")) {
     const hint = node("p");
@@ -972,6 +1046,17 @@ function showFailure(err) {
       )
     );
   }
+
+  // 换串这件事必须让用户当场看见：签名里那串已经不通过了，不重抄一次就永远 403。
+  if (proofRotated)
+    box.append(
+      node(
+        "p",
+        null,
+        "口令换了一串 —— 表单里「投稿口令」那一行现在是新的，上一串已经作废。" +
+          "先把新串抄进酷安签名并保存，再回来点重试；签名没改就重试，后端还会说这一串不对。"
+      )
+    );
 
   const ft = $("#run-ft");
   const retry = node("button", "btn btn--go", "重试提交");
@@ -1010,6 +1095,7 @@ function resetForm() {
   state.uidStatus = "idle";
   state.uidInfo = null;
   state.nonce = "";
+  state.zipSha = ""; // 两个来源一起归零：nonce 与整包哈希（clearFile 那份是包没了就清，这里是换投稿）
   $("#uid-check").hidden = true;
   renderProof(); // nonce 清空后这一行跟着收起，别留一串还能提交的旧口令在屏幕上
   syncUploaderField(); // 顺手把 readOnly / 标签 / 说明一起还原，别留一个锁着的空框

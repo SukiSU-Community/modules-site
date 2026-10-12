@@ -98,8 +98,12 @@ export function submitModule(fields, { onProgress } = {}) {
   form.append("uploader", fields.uploader);
   // 署名昵称与酷安 UID 分两个字段：前者给人看，后者是唯一可追责的标识。
   form.append(CONFIG.COOLAPK_UID_FIELD, fields.coolapkUid);
-  // 所有权口令：只发随机段 nonce 与承诺版本，派生串由 Worker 拿 id 自己重算 ——
+  // 所有权口令：发随机段 nonce 与承诺版本，派生串不发 —— 后端自己重算，
   // 前端算出来的那份只用来显示，发过去就等于让前端替后端定结论。
+  // sha256 是前端对自己那个文件算的整包摘要（口径同 Worker 的 contentId）。交出去的理由：
+  // ⑤-c 会拿它和服务端实算的值对一遍 —— 于是「哈希对不上」是 400、「口令对不上」是 403，
+  // 两种可分辨的失败，而不是混成第三种没人看得懂的拒绝。留空时 ⑤-c 跳过，判定仍在服务端。
+  form.append("sha256", fields.sha256 ?? "");
   form.append("pledge", fields.pledge ?? "");
   form.append("nonce", fields.nonce ?? "");
   // Turnstile 预留位：没接入时也是发空字符串，不做任何前端假验证码。
