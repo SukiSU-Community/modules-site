@@ -59,8 +59,11 @@ const PROOF_GOLDENS = [
 
 /* 「口令已用过」的兜底文案判据，本文件复写一份（app.js 里那份没法 import：模块一加载就碰 DOM）。
    下面第一条先要求两边字面逐字符相同，才拿这份复写跑正反例 —— 否则过了我的例子也证明不了它。
-   Worker 正在加的机器可读码是 code: 'proof_used'；码到位之前这句话是轮换的唯一信号，
-   之后它是退路。写进检查名的理由：后端只改一次措辞，前端就会静默停止重掷随机段。 */
+   Worker 源码里那条判据的机器可读码已经是 code: 'proof_used'（contrib/worker/src/index.ts:2318
+   的 used-nonce 分支，--require-backend 那组跨仓库核对的就是它）；码到达线上部署之前文案仍是
+   唯一信号，之后它是退路。第二支 `可能已…提交成功` 今天没有任何可发的后端文案与之对应，是前向
+   兼容钩子 —— 客户端侧真正的「可能已提交」（网络失败/中断/读不懂）按判据刻意不轮换。
+   写进检查名的理由：后端只改一次措辞，前端就会静默停止重掷随机段。 */
 const SPENT_TEXT_RE_FALLBACK = /口令已(?:经)?用过|可能已(?:经)?提交成功/;
 
 let pass = 0;
@@ -860,8 +863,9 @@ async function main() {
 
   /* ----------------------------------------------- 口令烧掉的判据：码优先，文案兜底
      后端只改一句中文就能让前端静默停止重掷随机段（用户拿废串反复重试，永远撞同一句指控）。
-     Worker 那边正在加 code: 'proof_used'；本机 contrib 还没这个字面量，所以这里钉的是
-     「前端两条判据都在、且没把文案那条删掉」，码是否与后端同值由跨仓库那组在落地之后接管。 */
+     Worker 源码已回 code: 'proof_used'（contrib/worker/src/index.ts:2318 的 used-nonce 分支），
+     这里钉「前端两条判据都在、且没把文案那条删掉」；码与后端的同值由下面 --require-backend
+     那组跨仓库检查真跑 —— 本机走的是检查分支，不是 skip。 */
   check(
     "口令轮换的判据两条都在：code === 'proof_used' 优先，中文文案兜底",
     /backendCode\(err\) === "proof_used"/.test(appSrc) &&
@@ -880,13 +884,18 @@ async function main() {
     `app.js: ${nonceSpentLiteral}`
   );
   check(
-    "平台侧「口令记录读不出来」不算口令烧掉（兜底判据只认那两种说法）",
+    "平台侧「读不出本次投稿的口令记录」不算口令烧掉（兜底判据只认那两种说法）",
     [
       "这个口令已经用过，请重新生成后再提交",
+      // 第二支钉的是正则里的前向兼容钩子：Worker 今天没有任何可发的文案与之匹配（整个
+      // worker/src 搜不到「可能已」「提交成功」）—— 这条正例证明钩子还挂着，不证明后端会发。
+      // 客户端真正的「可能已提交」（网络失败/中断/读不懂应答）按判据刻意不轮换，归码那边兜底。
       "口令可能已提交成功，请刷新索引后确认",
     ].every((s) => SPENT_TEXT_RE_FALLBACK.test(s)) &&
       [
-        "酷安核实没通过（口令记录读不出来），本次未提交 —— 请稍后重试",
+        // 9d66cd8 换掉旧文案「酷安核实没通过（口令记录读不出来）」后的现行句子（index.ts 的
+        // KV 读失败分支原样）：失败的是自家记账，不是「你用过了」，绝不许触发轮换。
+        "服务端读不出本次投稿的口令记录（自家记账的 KV 没有应答），本次未提交 —— 请稍后重试",
         "酷安核实没通过（连接超时），本次未提交 —— 与你是不是本人无关，请稍后重试",
         "投稿需要酷安等级 Lv2 及以上",
       ].every((s) => !SPENT_TEXT_RE_FALLBACK.test(s))
@@ -1082,9 +1091,10 @@ async function main() {
       // 随机段的字母表也是契约：前端换成大写或符号，Worker 的 PROOF_NONCE_RE 会把每条口令判非法。
       const badNonce = Array.from({ length: 60 }, () => makeNonce()).find((n) => !wp.PROOF_NONCE_RE.test(n));
       check("前端生成的 nonce 过后端的形状校验（两边字母表同值）", !badNonce, badNonce);
-      /* 「口令已用过」的机器可读失败码：Task 9 正在给后端加，本机后端源码里还没有这个字面量。
-         加了就把两端对起来；还没加就如实报 skip —— 不许因为它现在没得对就写成 pass，
-         也不许因为它没得对就干脆不提：前端的码判据此刻是个未兑现的半边，这话得留在输出里。 */
+      /* 「口令已用过」的机器可读失败码：后端源码里已经有了（contrib/worker/src/index.ts:2318，
+         used-nonce 命中的 403 响应体字面量），所以本机走进下面的是真检查那一支 —— 前后端的码
+         逐字对齐，这是验证过的半边，不是未兑现的承诺。skip 支本身留着：contrib 工作树若退在
+         这条落地之前，就如实报 skip —— 不许没得对也写成 pass，也不许干脆不提。 */
       const workerIndexSrc = readFileSync(workerPath, "utf8");
       const workerCodes = [...workerIndexSrc.matchAll(/code:\s*["']([^"']+)["']/g)].map((m) => m[1]);
       if (workerCodes.includes("proof_used")) {
@@ -1096,7 +1106,7 @@ async function main() {
       } else {
         skip(
           "口令已用过的失败码前后端同值",
-          `后端源码里的失败码只有 ${JSON.stringify(workerCodes)} —— 没有 proof_used（Task 9 在途）；` +
+          `后端源码里的失败码只有 ${JSON.stringify(workerCodes)} —— 没有 proof_used（contrib 工作树停在这条落地之前）；` +
             "前端的码判据本机未验证，目前靠文案兜底",
           1
         );

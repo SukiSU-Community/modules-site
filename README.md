@@ -139,9 +139,16 @@ proofString  = `${proofPrefix}-${nonce}`
 提示用户重新抄签名；其余失败（400 字段问题、403 平台侧读不出记录）保持同一串 —— 重试同一个口令是
 有效的，无故轮换只是给用户加一次活。
 
-这套公式有**三份实现**（本站 `public/scripts/proof.js`、Worker `contrib/worker/src/proof.ts`、
-管理器 App 的提交端），本轮三处同改；**这里只写静态站已落地的部分**，Worker 与 App 那两处按同一
-公式在改，线上部署与端到端真跑都还没做 —— 别把这一节当「已上线」。
+这套公式有**四份实现**（本站 `public/scripts/proof.js`、Worker `contrib/worker/src/proof.ts`、
+管理器 App 的提交端，以及索引仓库 CI 复核 pending 时逐条重算前缀的 `contrib/repo/scripts/verify-pending-proof.mjs`），
+再加 `contrib/worker/scripts/e2e-submit.mjs` 为真跑投稿内嵌的第五份拷贝；本轮三处同改；
+**这里只写静态站已落地的部分**——`--require-backend` 的跨仓库自检已把前端与 Worker 两份逐值对进
+黄金值，线上部署与端到端真跑都还没做，别把这一节当「已上线」。包体绑定也关不死全部抢投窗口，
+两种残法仍在：把受害者已公开的口令串（他的签名与 pending JSON 都读得到）抄进**自己的**签名、
+用自己的 UID 提交同一份包体成立——used-nonce 只认口令前缀与 nonce、不认 UID，先烧成功的人让
+本人随后只收到「这个口令已经用过」；以及用**本人的 UID** 提交同一份包体、只换展示文案——
+name/author/description 不在口令绑定范围，id 必与 module.prop 一致（包里缺 id 直接拒），
+versionCode 只在 module.prop 声明了它时才被绑。
 
 ### 出处现在只收酷安站内链接
 
