@@ -795,12 +795,13 @@ async function main() {
   );
 
   /* ------------------------ 派生值的来源一换，屏幕上那一串就得当场死（intake 那一路）
-     上面几条钉的是「说了什么」，这一组钉的是「什么时候死的」。两条都是顺序断言，不是抄整行字面量：
-     注释重排、引号换样式都不该让钉子悄悄松开，而把顺序挪回 await 之后必须当场红。
+     上面几条钉的是「说了什么」，这一组钉的是「什么时候死的」。①②④ 全是顺序断言而不是抄整行字面量：
+     注释重排、引号换样式都不该让钉子悄悄松开，而把顺序挪回 await 之后、或删掉一道比较，必须当场红。
+     ③ 是反向的一条：修谎不许顺手变成前端第二道闸。
      ① 上一轮的修复（换包那一刻同步归零 + 立刻重画）此前一条都没钉着——fix1 报告 §6 第 2 条要的就是它。
      ② 这一轮的串行化：intake() 不串行，连着选 A、B 时两次解析重叠，而 state.zip 的赋值原先是无条件的；
         A 的解析晚到就会让 state.zip 指回 A 而 state.file 已是 B，于是 A 的摘要还能通过 digest 那侧
-        的对象标识守卫贴到 B 上——同一类谎的另一条到达路径，钉「赋值之前有对 state.file 的比较」。 */
+        的对象标识守卫贴到 B 上——同一类谎的另一条到达路径。 */
   const intakeAt = appSrc.indexOf("async function intake(");
   // intake() 里嵌套的 } 全部带缩进，第一个顶格的 } 就是函数结束（与上面 refreshBody 同一个取法）。
   const intakeSrc = intakeAt === -1 ? "" : appSrc.slice(intakeAt, appSrc.indexOf("\n}", intakeAt));
@@ -819,12 +820,31 @@ async function main() {
       ? `state.file=${iFileSet} / state.zipSha=${iShaClear} / await=${iAwait} / 同步段 ${intakeSync.length} 字符`
       : "切不出 intake() 第一个 await 之前的那一段"
   );
+  /* intake() 里每一处 await 续点都得在**写 state 之前**再认一次 file 身份。下面两条按「离那次写入
+     最近的一道比较」判，而不是数一共有几道 —— 删掉哪一道就红它管的那次写入，变异能逐条对上号。
+     ② 第一个续点（读整包字节回来）：让 state.zip 指回旧包而 state.file 已是新包的那一次赋值。
+     ④ 第二个续点（读 module.prop 回来）：第一道比较管不到它 —— 旧包解出的 prop 会盖掉新包
+        预填的 id（applyProp 见 data-auto 就该覆盖），而 id 是口令的三个来源之一，于是「旧包的 id +
+        新包的整包哈希」这一串会被真算出来、画上屏幕、装进载荷；这一次不只是显示，id 真的发出去了。 */
   const iZipSet = intakeSrc.search(/\n\s*state\.zip\s*=\s*\{/);
-  const iFileGuard = intakeSrc.search(/(?:state\.file\s*!==\s*file|file\s*!==\s*state\.file)/);
+  const iReadAwait = intakeSrc.search(/\bawait\s+readEntry/);
+  const iPropWrite = intakeSrc.search(/state\.zip\.prop\s*=/);
+  const guardIdx = [
+    ...intakeSrc.matchAll(/(?:state\.file\s*!==\s*file|file\s*!==\s*state\.file)/g),
+  ].map((m) => m.index);
+  const guardBefore = (upto) => guardIdx.filter((i) => i < upto).pop();
   check(
-    "解析回来那一步认 file 的对象身份：state.zip 的赋值之前有一道对 state.file 的比较，且它在第一个 await 之后",
-    iZipSet !== -1 && iFileGuard !== -1 && iFileGuard > iAwait && iFileGuard < iZipSet,
-    `await=${iAwait} / state.file 比较=${iFileGuard} / state.zip 赋值=${iZipSet}`
+    "第一个续点认 file 的对象身份：state.zip 的赋值之前最近的一道 state.file 比较，排在第一个 await 之后",
+    iZipSet !== -1 && guardBefore(iZipSet) !== undefined && guardBefore(iZipSet) > iAwait,
+    `await=${iAwait} / state.zip 赋值=${iZipSet} / 赋值前最近的比较=${guardBefore(iZipSet)} / 全部比较=${JSON.stringify(guardIdx)}`
+  );
+  check(
+    "第二个续点再认一次：写 state.zip.prop 之前最近的一道 state.file 比较，排在 await readEntry 之后",
+    iPropWrite !== -1 &&
+      iReadAwait !== -1 &&
+      guardBefore(iPropWrite) !== undefined &&
+      guardBefore(iPropWrite) > iReadAwait,
+    `await readEntry=${iReadAwait} / state.zip.prop=${iPropWrite} / 赋值前最近的比较=${guardBefore(iPropWrite)} / 全部比较=${JSON.stringify(guardIdx)}`
   );
   /* 这一轮修的是一句谎（屏幕上那串对不上要上传的字节），不是「前端该多拦一道」——判定在 Worker，
      前端加闸会把判据挪回浏览器，而且它会伪装成「已经把诚实问题修好了」。所以反向再钉一条：

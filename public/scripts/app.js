@@ -357,6 +357,12 @@ async function intake(file) {
 
   try {
     const bytes = await readEntry(arrayBuffer, inspect.rootEntry);
+    // 第二个 await，就得再认一次身份：上面那次比较通过之后到这里又是另一段时间，中途换过包的话
+    // state.zip 已经是新包的对象，而 prop 还是旧包解出来的 —— applyProp 会把旧包的 id 盖进表单
+    // （预填过的字段带 data-auto，本来就该被下一次预填覆盖），于是函数末尾那次 renderProof 会把
+    // 「旧包的 id + 新包的整包哈希」这一串真算出来、画上屏幕、装进载荷。id 是口令的三个来源之一，
+    // 来源换掉的那一刻这一串就得死，不能等下一回重画。
+    if (state.file !== file) return;
     const prop = parseModuleProp(new TextDecoder("utf-8").decode(bytes));
     state.zip.prop = prop;
     const { filled, kept } = applyProp(prop);
