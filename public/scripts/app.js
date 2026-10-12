@@ -537,7 +537,9 @@ function uidBlocked() {
    「口令没生成」，被拦住的人就只剩一个说不清为什么的坏按钮 —— 状态文案必须说清卡在谁手上。
    随机段就位之后还差两个来源：模块 ID 和整包 sha256。口令串绑的是它们三个（设计文档 §14.1），
    所以哈希没算完的那一刻不能说「已生成」—— 那时屏幕上还没有可抄进签名的一串。
-   注意这里改的全是说明文字：ok 只看 Boolean(state.nonce)，前端不加第二条闸，判定在 Worker。 */
+   注意这里改的全是说明文字：ok 只看 Boolean(state.nonce)，前端不加第二条闸，判定在 Worker。
+   说明文字一律先说「还差什么」再说已有什么 —— 底栏那句「全部就绪」也由这些句子代写，
+   口令还没出现在屏幕上时它不许说就绪（见 refreshGate 里那段 shown）。 */
 const NONCE_WHY = {
   off: "后端没配置酷安身份核实，口令生成不了 —— 投稿通道未开放，这一步要站点来接",
   self_reported: "后端收到了 UID 但没核实它，口令生成不了 —— 投稿通道未开放，这一步要站点来接",
@@ -577,17 +579,24 @@ function gateItems() {
       NONCE_WHY[state.uidStatus] ||
       "投稿口令还没生成 —— UID 核实通过、填上模块 ID、包也选好了，这一串才出现";
   } else if (!proofId) {
-    nonceText = "随机段已生成 —— 填上模块 ID 才算得出这一串";
+    nonceText = "口令还差：填上模块 ID —— 随机段已生成，但这一串要模块 ID 和整包哈希才算得出";
   } else if (!state.zipSha) {
     // 两句各说一个来源缺哪一样：没选包是「还没得选」，选了包是「正在算 / 没算出来」。
     // 都不写「正在算」的肯定语气 —— 算失败时那句话就成假话了。
     nonceText = state.zip
-      ? "随机段已生成 —— 这个包的整包 sha256 还没算出来，这一串要等它（稍等会自己出现；一直没出现就重新选一次包）"
-      : "随机段已生成 —— 口令绑的是这个包的字节，先把包选上，这一串才算得出来";
+      ? "口令还差：整包哈希还没算完 —— 随机段已生成，这一串要等它（稍等会自己出现；一直没出现就重新选一次包）"
+      : "口令还差：还没选包 —— 口令绑的是这个包的字节，先把包选上，这一串才算得出来";
   } else {
     nonceText = "投稿口令已生成（填进酷安签名）";
   }
-  items.push({ ok: Boolean(state.nonce), text: nonceText });
+  // shown 说的是「屏幕上现在有没有一串可抄进签名」，三个来源齐了才有。
+  // 它不参与 ready，也就不参与按钮 —— 全局约束是前端不加第二条闸，判据在 Worker。
+  // 它只改底栏那两句：少一个来源时那里写的是这一条的实话，而不是「全部就绪，可以确认」。
+  items.push({
+    ok: Boolean(state.nonce),
+    shown: Boolean(state.nonce && proofId && state.zipSha),
+    text: nonceText,
+  });
   items.push({ ok: IS_API_CONFIGURED, text: "后端 API_BASE 已配置" });
   return items;
 }
@@ -603,9 +612,14 @@ function refreshGate() {
   const ready = items.every((i) => i.ok);
   $$("[data-open-confirm]").forEach((btn) => (btn.disabled = !ready));
   const firstBad = items.find((i) => !i.ok);
-  $("#dock-t").textContent = firstBad ? firstBad.text : "全部就绪，可以确认";
-  $("#dock-s").textContent = firstBad ? "还差这一步" : "点「去确认」勾完四项";
-  $("#gate-note").textContent = ready ? "四项上传前确认还没勾" : "先把上面几项填齐";
+  // 底栏那句「全部就绪」必须是真话。清单里那条口令行自己不拦人（ok 为真、按钮照常亮），
+  // 但屏幕上还没有一串可抄进签名的东西 —— 这时候说就绪就是把假话写在了最显眼的地方。
+  // 所以这里排在 firstBad 之后、成功语之前插一段「还差什么」，enable 条件一个字没动。
+  const firstNotShown = firstBad ? null : items.find((i) => i.ok && i.shown === false);
+  const blocking = firstBad || firstNotShown;
+  $("#dock-t").textContent = blocking ? blocking.text : "全部就绪，可以确认";
+  $("#dock-s").textContent = blocking ? "还差这一步" : "点「去确认」勾完四项";
+  $("#gate-note").textContent = ready && !firstNotShown ? "四项上传前确认还没勾" : "先把上面几项填齐";
   if (state.attempted) paintFieldErrors();
 }
 
@@ -994,10 +1008,33 @@ function showSuccess(pr) {
  * 服务端只有两种说法意味着这一串口令真的被烧掉了：用过它，或者它可能已经变成了一条投稿。
  * 只有这两种才重掷随机段。其余失败（400 字段问题、403 平台侧读不出记录）不轮换 ——
  * 口令绑包体之后重试同一个口令是有效的（Task 9），无故轮换等于让用户白抄一次签名。
- * 判据是响应文案而不是字段：Worker 目前没有机器可读的失败码，文案是唯一信号，
- * 所以后端改这句话时前端会静默停止轮换 —— 这一条要跨仓库钉住（本轮 Task 11 的地盘）。
+ *
+ * 判据首选机器可读的失败码：Worker 给「口令已用过」这条回 `code: "proof_used"`
+ * （Task 9 正在加）。文案匹配（NONCE_SPENT_RE）继续留着当退路 —— 今天的线上 Worker 还只给
+ * 中文原因，只认 code 的话这一下就变成「永远不轮换」，比原来的毛病更糟。
+ * 两个判据并起来才是这次要的：后端改文案时不再静默停止轮换，后端没回 code 时行为与今天一致。
+ * 注意 code 那一半本机对不上后端源码（contrib 工作树里还没有 proof_used 这个字面量），
+ * 所以 selftest 钉的是「两条都在、且文案那条没被删」，不是「Worker 确实回了这个码」。
  */
 const NONCE_SPENT_RE = /口令已(?:经)?用过|可能已(?:经)?提交成功/;
+
+/** 从后端响应体里取机器可读的失败码；响应不是 JSON（网关的 HTML、纯文本）时返回空串。 */
+function backendCode(err) {
+  const raw = err instanceof BackendError && typeof err.detail === "string" ? err.detail : "";
+  if (!raw) return "";
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "";
+  }
+  return parsed && typeof parsed.code === "string" ? parsed.code : "";
+}
+
+/** 这一串口令是不是真的被烧掉了：码优先，文案兜底。 */
+function proofWasSpent(err, reason) {
+  return backendCode(err) === "proof_used" || NONCE_SPENT_RE.test(reason);
+}
 
 function showFailure(err) {
   $("#run-kicker").textContent = "REJECTED";
@@ -1016,7 +1053,7 @@ function showFailure(err) {
   box.append(node("div", "reason", reason));
 
   let proofRotated = false;
-  if (NONCE_SPENT_RE.test(reason)) {
+  if (proofWasSpent(err, reason)) {
     // 这一串确实烧掉了：重掷随机段，口令行现算新的一串，门禁清单跟着刷新。
     state.nonce = makeNonce();
     // 重试按钮复用上一份载荷，不同步的话它会带着已经烧掉的那串再打一次，永远回同一句指控。

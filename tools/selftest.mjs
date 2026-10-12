@@ -3,6 +3,8 @@
 // 实现可以原样在这里跑，不需要为测试另写一份。
 // 用法：node tools/selftest.mjs [--require-backend]
 //   --require-backend 把「找不到后端源码」从跳过升级为失败，CI 用这个。
+//   带这个开关时要 Node ≥ 22.6：跨仓库那组直接 import worker/src/proof.ts，靠类型擦除；
+//   package.json 的 engines.node 钉的就是这条下限（接 CI 时 node-version 别抄 20）。
 import zlib from "node:zlib";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -17,9 +19,49 @@ import {
   inspectEntries,
 } from "../public/scripts/zipread.js";
 import { parseModuleProp, missingRequired } from "../public/scripts/moduleprop.js";
-import { sha256Hex, proofPrefixForId, buildProofString, makeNonce } from "../public/scripts/proof.js";
+import {
+  sha256Hex,
+  sha256HexBytes,
+  proofPrefixFor,
+  buildProofString,
+  makeNonce,
+} from "../public/scripts/proof.js";
 
 const REQUIRE_BACKEND = process.argv.includes("--require-backend");
+
+/* ----------------------------------------------------------------- 口令黄金值
+   公式（设计文档 §14.1，三处实现必须逐字符一致）：
+     proofPrefix = sha256(UTF-8(`${模块id}:${整包sha256}`)) 的十六进制前 8 位
+     proofString = proofPrefix + "-" + nonce，nonce 是 6 位小写字母数字，整串 15 字符
+
+   下面这些期望值由 node:crypto 与 coreutils sha256sum 各自独立推得，**不是从被测实现里算的**：
+   拿实现自己生成的串去断言实现，红了也只是自我循环，什么都判不出来。
+
+   为什么要把它抄进本文件，而不是只留「前后端两份实现同值」那条：跨仓库那组要
+   ../../sukisu/contrib/worker/src/proof.ts 在场才跑得起来，而公开模板仓库的 fork 里它永远是
+   skip —— 于是 fork 里「公式」一条都不钉，谁改错拼接顺序都不会红，直到真投稿时把每个口令
+   判成假的。有了这张表，public/scripts/proof.js 单独就能被逐条判死。
+   两边同值那条照旧保留：在装了 contrib 的机器上它更硬（它判的是「两份拷贝锁在一起」）。 */
+const ZIP_SHA_A = "e37287b0ddbda7edb55845acc6de4244cd82e14df5824bdd71007a452a7cbaab"; // = sha256("zip-a")
+const ZIP_SHA_B = "2898d907fba3a01bbe9e078e73fb9c20c33a69fc322d062c61e826f2798e3621"; // = sha256("zip-b")
+const ZIP_SHA_CN = "4c0811ae6205a89d3a741861d8883c9c58687f1a268f7cffd028e37c5ca202e4"; // = sha256("包体内容")
+const ZIP_SHA_ZERO = "0".repeat(64); // 形状合法的占位：不是任何真实包的摘要
+
+const PROOF_GOLDENS = [
+  // (id, zipSha) -> proofPrefix。第 4、5 行是同一条占位哈希配两个不同 id：
+  // 只绑包体不绑 id 的话这两行会算出同一个前缀，id 那一半就白绑了。
+  { id: "demo", zipSha: ZIP_SHA_A, prefix: "4f91ceb8" },
+  { id: "sukisu_proof_vector_1", zipSha: ZIP_SHA_B, prefix: "e66e7d33" },
+  { id: "含中文的模块id", zipSha: ZIP_SHA_CN, prefix: "002be46d" }, // 非 ASCII：钉的是 UTF-8 字节序
+  { id: "x", zipSha: ZIP_SHA_ZERO, prefix: "cbaaf85b" },
+  { id: "demo", zipSha: ZIP_SHA_ZERO, prefix: "4fd67254" },
+];
+
+/* 「口令已用过」的兜底文案判据，本文件复写一份（app.js 里那份没法 import：模块一加载就碰 DOM）。
+   下面第一条先要求两边字面逐字符相同，才拿这份复写跑正反例 —— 否则过了我的例子也证明不了它。
+   Worker 正在加的机器可读码是 code: 'proof_used'；码到位之前这句话是轮换的唯一信号，
+   之后它是退路。写进检查名的理由：后端只改一次措辞，前端就会静默停止重掷随机段。 */
+const SPENT_TEXT_RE_FALLBACK = /口令已(?:经)?用过|可能已(?:经)?提交成功/;
 
 let pass = 0;
 let fail = 0;
@@ -39,10 +81,13 @@ function check(name, ok, extra) {
  * 上一版把「后端源码不在本机」做成静默跳过，结果 contrib 目录一搬家，
  * 6 条跨仓库字段名校验（当时是 5 条）就再也不跑了，而输出仍然写着「全部通过」——
  * 这正是最坏的一种绿：契约检查消失了，而没人看见它消失。
+ *
+ * count 传这组里**本来会跑几条**：只报「跳过 1 组」的话，一组十条和一组一条
+ * 在总结行里长得一模一样，而 fork 里丢掉的恰恰是那组最硬的口令同值校验。
  */
-function skip(name, why) {
-  skipped++;
-  console.log(`  SKIP ${name} —— ${why}`);
+function skip(name, why, count = 1) {
+  skipped += count;
+  console.log(`  SKIP ${name} —— ${why}（这组少 ${count} 条）`);
 }
 
 const CRC_TABLE = (() => {
@@ -608,9 +653,63 @@ async function main() {
     (await sha256Hex("sukisu_proof_vector_1")) ===
       createHash("sha256").update("sukisu_proof_vector_1", "utf8").digest("hex")
   );
+  // 上面那条把 zipSha 那几个字面量当已知输入用，所以这里先拿独立 oracle 把输入本身复算一遍：
+  // 表腐烂了要当场看得见，不能等到某条黄金值对不上时才去猜「是公式错了还是常量错了」。
+  check(
+    "黄金值表的输入复算：三个 zipSha 字面量确实等于那三段明文的 sha256（node:crypto）",
+    createHash("sha256").update("zip-a", "utf8").digest("hex") === ZIP_SHA_A &&
+      createHash("sha256").update("zip-b", "utf8").digest("hex") === ZIP_SHA_B &&
+      createHash("sha256").update("包体内容", "utf8").digest("hex") === ZIP_SHA_CN
+  );
+  // 前端算整包摘要走的是 sha256HexBytes（File.arrayBuffer() 出来的那串字节），不是文本版。
+  // 两条路径必须是同一个口径：Worker 的 contentId 对 zip 全部字节算，口令绑的就是这个值。
+  // 这条红 == 「展示的口令绑的是另一种东西」，界面上完全看不出来。
+  const zipBytesA = Buffer.from("zip-a", "utf8");
+  check(
+    "整包摘要口径一致：sha256HexBytes 对 Uint8Array / ArrayBuffer 与 node:crypto 同值",
+    (await sha256HexBytes(zipBytesA)) === ZIP_SHA_A &&
+      (await sha256HexBytes(zipBytesA.buffer.slice(zipBytesA.byteOffset, zipBytesA.byteOffset + zipBytesA.byteLength))) === ZIP_SHA_A &&
+      (await sha256HexBytes(zipBytesA)) === (await sha256Hex("zip-a")),
+    await sha256HexBytes(zipBytesA)
+  );
+  // 逐向量一条检查，不是一个循环里 AND 起来：变异之后要说得出红的是哪一对，
+  // 而「五个里有一个红」和「五个全红」是不同的事故。
+  for (const [i, v] of PROOF_GOLDENS.entries()) {
+    const got = await proofPrefixFor(v.id, v.zipSha);
+    check(
+      `内嵌黄金值 ${i + 1}/${PROOF_GOLDENS.length}：proofPrefixFor(${JSON.stringify(v.id)}, ${
+        v.zipSha === ZIP_SHA_ZERO ? "64 个 0" : JSON.stringify(v.zipSha.slice(0, 12)) + "…"
+      }) = ${v.prefix}（fork 里没有 contrib 也要咬）`,
+      got === v.prefix,
+      got
+    );
+  }
+  // 同一批向量再拿 node:crypto 按公式复算一遍。与上面那张表是两条独立的路：
+  // 表钉的是「答案不许改」，这条钉的是「算式的形状」，改测试里的期望表达式骗不过字面量，
+  // 改实现里的字面量骗不过独立复算。缺任何一条，另一半都可能在没人看见时漂走。
+  const oracleDrift = [];
+  for (const v of [...PROOF_GOLDENS, { id: "a".repeat(200), zipSha: ZIP_SHA_A, prefix: "" }]) {
+    const want = createHash("sha256").update(`${v.id}:${v.zipSha}`, "utf8").digest("hex").slice(0, 8);
+    const got = await proofPrefixFor(v.id, v.zipSha);
+    if (got !== want) oracleDrift.push(`${v.id.slice(0, 12)}: 实现=${got} node=${want}`);
+    if (v.prefix && got !== v.prefix) oracleDrift.push(`${v.id.slice(0, 12)}: 与黄金表不一致`);
+  }
+  check(
+    "公式形状独立复算：前缀 = sha256(UTF-8(id + ':' + zipSha)) 前 8 位（含 200 字节长 id）",
+    oracleDrift.length === 0,
+    oracleDrift.join(" | ")
+  );
+  // 整串的最后一环：分隔符与「谁在前」。Worker 是拿整串去签名里找的，
+  // 分隔符换成 "_"、或者 nonce 跑到前面，都会让每条真口令被判成假的。
+  check(
+    "内嵌黄金值：整串口令 = 期望前缀 + '-' + nonce（buildProofString 三个来源都算进去）",
+    (await buildProofString("demo", ZIP_SHA_ZERO, "ab12cd")) === "4fd67254-ab12cd" &&
+      (await buildProofString("x", ZIP_SHA_ZERO, "ab12cd")) === "cbaaf85b-ab12cd",
+    await buildProofString("demo", ZIP_SHA_ZERO, "ab12cd")
+  );
   // 形状是 Worker 那边的判据之一（它拿 id 重算整串再去签名里找），所以 8 位前缀、那个连字符、
   // 6 位随机段一个都不能漂；整串 15 字符也是设计上限（酷安签名实测 60 的一半以下）。
-  const proofSample = await buildProofString("any", "ab12cd");
+  const proofSample = await buildProofString("any", ZIP_SHA_ZERO, "ab12cd");
   check(
     "整串口令 15 字符，形状固定：8 位十六进制 + '-' + 6 位小写字母数字",
     /^[0-9a-f]{8}-[a-z0-9]{6}$/.test(proofSample) && proofSample.length === 15,
@@ -625,17 +724,108 @@ async function main() {
     [...nonceSamples].every((n) => /^[a-z0-9]{6}$/.test(n)) && nonceSamples.size > 150,
     `${nonceSamples.size}/200 个不同，首个 ${[...nonceSamples][0]}`
   );
-  // 派生值一旦进 state，就和来源脱钩了：改了 id 还缓存着旧口令。只准缓存随机段。
+  // 派生值一旦进 state，就和来源脱钩了：改了 id / 换了包还缓存着旧口令。只准缓存三个来源。
   // 反例写成 state.proof 的前缀匹配（不带 \b）：state.proofText / state.proofString 一样是缓存派生串。
+  // 来源从两个变成三个（口令绑整包 sha256），所以这里连 zipSha 的取值点一起钉住 ——
+  // 只钉 nonce 的话，把 zipSha 换成一个缓存下来的旧哈希，这条还是绿的。
   check(
-    "前端只缓存随机部分：口令文本由 (id, nonce) 现算",
-    /state\.nonce/.test(appSrc) && /buildProofString\(id, state\.nonce\)/.test(appSrc) && !/state\.proof/.test(appSrc)
+    "前端只缓存来源不缓存派生串：口令文本由 (id, state.zipSha, state.nonce) 现算",
+    /state\.nonce/.test(appSrc) &&
+      /const zipSha = state\.zipSha;/.test(appSrc) &&
+      /const nonce = state\.nonce;/.test(appSrc) &&
+      /buildProofString\(id, zipSha, nonce\)/.test(appSrc) &&
+      !/state\.proof/.test(appSrc)
   );
-  // 载荷里没这两项时后端只能把「没承诺」判成「承诺过」——静默放行，前端界面还一切正常。
-  // 引号样式不管：钉的是「这两个字段真的进了 FormData」，不是钉 api.js 怎么写字符串。
+  // 载荷里没这三项时后端只能把「没承诺」判成「承诺过」、把「没声明哈希」判成「哈希一致」——
+  // 静默放行，前端界面还一切正常。sha256 是 ⑤-c 的输入，也是口令的第二个来源：
+  // 它一旦不再进 FormData，「绑包体」就只剩下屏幕上那串好看的文字。
+  // 引号样式不管：钉的是「这三个字段真的进了 FormData」，不是钉 api.js 怎么写字符串。
   check(
-    "提交载荷带上 pledge 与 nonce",
-    /form\.append\(\s*["']pledge["']/.test(apiSrc) && /form\.append\(\s*["']nonce["']/.test(apiSrc)
+    "提交载荷带上 pledge、nonce 与整包 sha256",
+    /form\.append\(\s*["']pledge["']/.test(apiSrc) &&
+      /form\.append\(\s*["']nonce["']/.test(apiSrc) &&
+      /form\.append\(\s*["']sha256["']/.test(apiSrc)
+  );
+  // 派生串不发：前端算出来的那一份只用来显示，发过去等于让前端替后端定结论，
+  // 也等于把「口令」这个本该由 Worker 重算的判据降级成一个自报字段。
+  check(
+    "载荷里不发派生出来的口令串（后端自己重算，前端只展示）",
+    !/form\.append\(\s*["'](proof|proofString|proofText|proofPrefix)["']/.test(apiSrc)
+  );
+
+  /* -------------------------------------------- 口令的来源齐了才算「就绪」（状态措辞）
+     口令行只在三个来源（nonce / id / 整包 sha256）都齐时才把串贴到屏幕上；少任何一个，屏幕上
+     根本没有可抄进签名的东西。而全局约束不许前端为此加第二条闸 —— 判定在 Worker，按钮照常亮。
+     这个夹缝里唯一能钉的就是状态描述：清单那条要说不清还差什么，底栏不许说「全部就绪，可以确认」。
+     Task 10 的走查实测到过这个假现场：整包哈希还在算的时候门禁全绿、底栏写就绪、口令行是空的。
+     下面两条故意分开放：一条钉「说的是实话」，一条钉「按钮没顺手变严」。后者不是形式主义 ——
+     前端加闸会把判定从 Worker 挪回浏览器（那是另一种坏），而且它会伪装成「修好了这个诚实问题」。 */
+  const gateBody = appSrc.slice(
+    appSrc.indexOf("function gateItems()"),
+    appSrc.indexOf("function refreshGate()")
+  );
+  const refreshBody = appSrc.slice(
+    appSrc.indexOf("function refreshGate()"),
+    appSrc.indexOf("\n}", appSrc.indexOf("function refreshGate()"))
+  );
+  check(
+    "口令行的三个来源齐了才算 shown（屏幕上没串可抄时不许自称就绪）",
+    /shown: Boolean\(state\.nonce && proofId && state\.zipSha\)/.test(gateBody) &&
+      /if \(!nonce \|\| !id \|\| !zipSha\) \{/.test(appSrc),
+    gateBody.includes("shown:") ? "shown 在，但 renderProof 的显示条件变了" : "gateItems 里没有 shown"
+  );
+  check(
+    "还差哪个来源就点名哪个：清单三条各说一种「口令还差」",
+    ["口令还差：填上模块 ID", "口令还差：整包哈希还没算完", "口令还差：还没选包"].every((k) => gateBody.includes(k)) &&
+      !gateBody.includes("随机段已生成 —— 填上模块 ID"),
+    "口令行的文案又回到先报「已生成」后报缺什么"
+  );
+  check(
+    "底栏那句「全部就绪」由 shown 把关：有 ok 但未 shown 的行时不许说就绪",
+    /i\.ok && i\.shown === false/.test(refreshBody) &&
+      /blocking \? blocking\.text : "全部就绪，可以确认"/.test(refreshBody),
+    refreshBody.includes("全部就绪") ? "全部就绪还在，但没让 shown 先过一遍" : "底栏不再写「全部就绪」"
+  );
+  check(
+    "这条诚实不许变成第二道闸：确认按钮的 enable 条件仍只看 ok，ok 仍只看 state.nonce",
+    /const ready = items\.every\(\(i\) => i\.ok\);/.test(refreshBody) &&
+      /btn\.disabled = !ready/.test(refreshBody) &&
+      /ok: Boolean\(state\.nonce\)/.test(gateBody) &&
+      !/disabled = !(ready && state\.zipSha)/.test(refreshBody)
+  );
+
+  /* ----------------------------------------------- 口令烧掉的判据：码优先，文案兜底
+     后端只改一句中文就能让前端静默停止重掷随机段（用户拿废串反复重试，永远撞同一句指控）。
+     Worker 那边正在加 code: 'proof_used'；本机 contrib 还没这个字面量，所以这里钉的是
+     「前端两条判据都在、且没把文案那条删掉」，码是否与后端同值由跨仓库那组在落地之后接管。 */
+  check(
+    "口令轮换的判据两条都在：code === 'proof_used' 优先，中文文案兜底",
+    /backendCode\(err\) === "proof_used"/.test(appSrc) &&
+      /NONCE_SPENT_RE\.test\(reason\)/.test(appSrc) &&
+      /if \(proofWasSpent\(err, reason\)\)/.test(appSrc),
+    "只剩文案时，后端改一次措辞就会静默停止轮换"
+  );
+  // 「读不出记录」那句是平台故障，不是「你用过了」——误判成烧掉会让用户白抄一次签名。
+  // 轮换判据扩到码那一侧时最容易顺手把这两种混起来，所以把兜底文案的正反例都钉一遍。
+  // 这里复写一份判据而不是 import app.js 的那份（app.js 一加载就要碰 DOM）：
+  // 所以下面第一条先要求两边字面完全相同，否则「过了我的正反例」什么也没证明。
+  const nonceSpentLiteral = /const NONCE_SPENT_RE = (\/.*\/[a-z]*);/.exec(appSrc)?.[1] ?? "";
+  check(
+    "兜底文案判据与本文件复写的那份同字面（app.js 里的 NONCE_SPENT_RE 不许偷偷换词）",
+    nonceSpentLiteral === SPENT_TEXT_RE_FALLBACK.toString(),
+    `app.js: ${nonceSpentLiteral}`
+  );
+  check(
+    "平台侧「口令记录读不出来」不算口令烧掉（兜底判据只认那两种说法）",
+    [
+      "这个口令已经用过，请重新生成后再提交",
+      "口令可能已提交成功，请刷新索引后确认",
+    ].every((s) => SPENT_TEXT_RE_FALLBACK.test(s)) &&
+      [
+        "酷安核实没通过（口令记录读不出来），本次未提交 —— 请稍后重试",
+        "酷安核实没通过（连接超时），本次未提交 —— 与你是不是本人无关，请稍后重试",
+        "投稿需要酷安等级 Lv2 及以上",
+      ].every((s) => !SPENT_TEXT_RE_FALLBACK.test(s))
   );
   // 四条勾选是「逐条知情」的载体，而解锁按钮数的是真的 checkbox 元素（app.js 里
   // $$("#layer-confirm input[type=checkbox]")）：勾少一条，04 那条承诺就再没人被要过，
@@ -666,6 +856,21 @@ async function main() {
     `label ${ticks.map((t) => t.id).join(",")} / input ${[...tickInputs].join(",")}`
   );
   check("「三项」这种旧文案没有残留（第四勾加上了）", !formHtml.includes("三项") && !appSrc.includes("三项") && !formHtml.includes("三道"));
+  /* 承诺的版本号与那段文案必须绑在一起。
+     归档里那句「他接受过承诺」以后是要被人拿出来的，它的可辩护性全靠「pledge-v1 指的是哪段话」
+     还答得出来：文案改了而版本号照旧，归档就写着「他接受过 pledge-v1」，而 pledge-v1 今天指的
+     已经不是用户当时勾的那段话 —— 这一句就成了假话，且没有任何一处会报错。
+     所以两条必须**同时**成立，缺一条就算红；版本字面量也在本文件里钉死一份，
+     不让它靠「和 Worker 同值」那条跨仓库检查来兜 —— fork 里那条根本不跑。 */
+  const pledgeSent = /pledge:\s*["']([^"']+)["']/.exec(appSrc)?.[1] ?? "";
+  check(
+    "承诺版本字面量与 ck4 那段文案绑在一起：pledge-v1 与「不含恶意代码」必须同时存在",
+    pledgeSent === "pledge-v1" &&
+      ticks.length === 4 &&
+      /04 \/ MALICE/.test(ticks[3].body) &&
+      ticks[3].body.includes("不含恶意代码"),
+    `app.js 发的 pledge=${JSON.stringify(pledgeSent)}，ck4 文案里有「不含恶意代码」=${ticks[3]?.body.includes("不含恶意代码") ?? "无 ck4"}`
+  );
   check(
     "COOLAPK_VERIFY_REQUIRED 被彻底删除 —— 能关掉安全闸的开关本身就是洞",
     !configSrc.includes("COOLAPK_VERIFY_REQUIRED") &&
@@ -677,6 +882,10 @@ async function main() {
   // 后端仓库在同一台机器上时，直接把它的源码当契约的另一端来读。
   // 路径靠猜迟早会像 contrib 从 H:\刷机包 搬到 H:\sukisu 那样一次搬家就全哑掉，
   // 所以显式环境变量优先：WORKER_SRC=/path/to/worker/src/index.ts npm test
+  //
+  // fork 里这一整组都是 skip —— 这正是本文件要内嵌黄金值的理由（见文件顶部那张表）：
+  // 公开模板仓库的 fork 没有 contrib，而公式的正确性不该取决于这台机器上有没有第二个仓库。
+  // skip 的条数按「这组本来会跑几条」如实报出，总结行里要看得见，不许伪装成全通过。
   const here = dirname(fileURLToPath(import.meta.url));
   const workerCandidates = [
     process.env.WORKER_SRC,
@@ -689,7 +898,7 @@ async function main() {
     if (REQUIRE_BACKEND) {
       check("后端源码必须存在（--require-backend）", false, msg);
     } else {
-      skip("后端源码那组跨仓库契约校验", msg);
+      skip("后端源码那组跨仓库契约校验", msg, 9);
     }
   } else {
     console.log(`  后端契约另一端：${workerPath}`);
@@ -744,7 +953,7 @@ async function main() {
     if (REQUIRE_BACKEND) {
       check("后端那份口令实现必须存在（--require-backend）", false, msg);
     } else {
-      skip("前后端口令算法同值那组跨仓库校验", msg);
+      skip("前后端口令算法同值那组跨仓库校验", msg, 4);
     }
   } else {
     console.log(`  口令契约另一端：${workerProofPath}`);
@@ -758,27 +967,49 @@ async function main() {
     } catch (err) {
       loadErr = err && err.message ? err.message : String(err);
     }
-    if (typeof wp?.proofPrefixForId !== "function") {
+    if (!wp) {
       const msg = `这个运行时加载不了 ${workerProofPath}（需要 Node ≥ 22.6 的类型擦除）—— ${loadErr}`;
       if (REQUIRE_BACKEND) check("后端那份口令实现必须可加载（--require-backend）", false, msg);
-      else skip("前后端口令算法同值那组跨仓库校验", msg);
+      else skip("前后端口令算法同值那组跨仓库校验", msg, 4);
+    } else if (typeof wp.proofPrefixFor !== "function" || typeof wp.buildProofString !== "function") {
+      // 加载成功却没有这三个导出 == 后端那份换回了旧签名（只吃 id 的 proofPrefixForId）。
+      // 这不是「这台机器没条件判」，是条件齐全地判出了坏结果 —— 所以必须红，不许混进 skip。
+      check(
+        "后端导出的是新签名：proofPrefixFor(id, zipSha) / buildProofString(id, zipSha, nonce)（旧名字不许活着）",
+        false,
+        `实际导出：${Object.keys(wp).join(", ") || "(空)"}`
+      );
     } else {
-      // 四个向量挑的是两边最容易各写各的：纯 ASCII、上面那条已知答案串、非 ASCII（UTF-8 字节序）、
-      // 以及 200 字节的长 id。任一条漂了都算漂移，不是「抽样看着一样」。
-      const drift = [];
+      /* 向量从 (id) 升到 (id, zipSha) 对。
+         旧那四个只喂 id 的向量在绑包体之后已经判不出东西了：两份实现可以「逐条相同」而全都
+         算错公式。所以现在四对黄金值 + 保留旧向量里那条 200 字节长 id（覆盖面一条都不许丢）：
+         两边各跑一遍，先横着比（两份拷贝锁在一起），再竖着比（各自命中内嵌黄金值）。
+         竖着那一条是新加的，它补的是横着那条的结构洞：两份实现同轮一起漂的时候，只有它们
+         都对不上这张表才会红 —— 而这张表来自 node:crypto，不属于任何一份实现。 */
+      const vectors = [...PROOF_GOLDENS, { id: "a".repeat(200), zipSha: ZIP_SHA_A, prefix: "" }];
       const nonce = "ab12cd";
-      for (const id of ["demo", "sukisu_proof_vector_1", "含中文的模块id", "a".repeat(200)]) {
-        const prefixWeb = await proofPrefixForId(id);
-        const prefixWorker = await wp.proofPrefixForId(id);
-        if (prefixWeb !== prefixWorker) drift.push(`${id.slice(0, 12)}: web=${prefixWeb} worker=${prefixWorker}`);
-        const fullWeb = await buildProofString(id, nonce);
-        const fullWorker = await wp.buildProofString(id, nonce);
-        if (fullWeb !== fullWorker) drift.push(`${id.slice(0, 12)}: 整串 web=${fullWeb} worker=${fullWorker}`);
+      const drift = [];
+      const workerWrong = [];
+      for (const v of vectors) {
+        const tag = `${v.id.slice(0, 10)}|${v.zipSha.slice(0, 8)}`;
+        const webPrefix = await proofPrefixFor(v.id, v.zipSha);
+        const workerPrefix = await wp.proofPrefixFor(v.id, v.zipSha);
+        if (webPrefix !== workerPrefix) drift.push(`${tag}: web=${webPrefix} worker=${workerPrefix}`);
+        const webFull = await buildProofString(v.id, v.zipSha, nonce);
+        const workerFull = await wp.buildProofString(v.id, v.zipSha, nonce);
+        if (webFull !== workerFull) drift.push(`${tag}: 整串 web=${webFull} worker=${workerFull}`);
+        if (v.prefix && workerPrefix !== v.prefix) {
+          workerWrong.push(`${tag}: worker=${workerPrefix} 黄金值=${v.prefix}`);
+        }
       }
       check("前后端算出的口令前缀逐条相同（两份实现必须锁在一起）", drift.length === 0, drift.join(" | "));
-      // 承诺版本的字面值从前端源码里取，不在这儿抄一份：前端发的必须是 Worker 认账的集合里的一个。
-      // 取不到字面值（比如改成了常量引用）也算红 —— 这条宁可得罪人，不要静默放过。
-      const pledgeSent = /pledge:\s*["']([^"']+)["']/.exec(appSrc)?.[1] ?? "";
+      check(
+        "后端那份逐条命中内嵌黄金值（两边一起漂也算红，不只靠互相对账）",
+        workerWrong.length === 0,
+        workerWrong.join(" | ")
+      );
+      // 承诺版本的字面值用的是上面从前端源码里取的那一份，不在这儿抄：
+      // 前端发的必须是 Worker 认账的集合里的一个。取不到字面值（比如改成了常量引用）也算红。
       check(
         "前端发的承诺版本在 Worker 承认的集合里，且等级下限没被调低（写死的 2）",
         pledgeSent !== "" && wp.PLEDGE_VERSIONS.includes(pledgeSent) && wp.MIN_COOLAPK_LEVEL === 2,
@@ -787,6 +1018,25 @@ async function main() {
       // 随机段的字母表也是契约：前端换成大写或符号，Worker 的 PROOF_NONCE_RE 会把每条口令判非法。
       const badNonce = Array.from({ length: 60 }, () => makeNonce()).find((n) => !wp.PROOF_NONCE_RE.test(n));
       check("前端生成的 nonce 过后端的形状校验（两边字母表同值）", !badNonce, badNonce);
+      /* 「口令已用过」的机器可读失败码：Task 9 正在给后端加，本机后端源码里还没有这个字面量。
+         加了就把两端对起来；还没加就如实报 skip —— 不许因为它现在没得对就写成 pass，
+         也不许因为它没得对就干脆不提：前端的码判据此刻是个未兑现的半边，这话得留在输出里。 */
+      const workerIndexSrc = readFileSync(workerPath, "utf8");
+      const workerCodes = [...workerIndexSrc.matchAll(/code:\s*["']([^"']+)["']/g)].map((m) => m[1]);
+      if (workerCodes.includes("proof_used")) {
+        check(
+          "后端对「口令已用过」回了机器可读码，且前端认的就是这同一个码",
+          /backendCode\(err\) === "proof_used"/.test(appSrc),
+          `后端 code=proof_used / 前端认的码=${JSON.stringify(/backendCode\(err\) === "([^"]+)"/.exec(appSrc)?.[1] ?? "(无)")}`
+        );
+      } else {
+        skip(
+          "口令已用过的失败码前后端同值",
+          `后端源码里的失败码只有 ${JSON.stringify(workerCodes)} —— 没有 proof_used（Task 9 在途）；` +
+            "前端的码判据本机未验证，目前靠文案兜底",
+          1
+        );
+      }
     }
   }
 
@@ -802,7 +1052,7 @@ async function main() {
   if (!dispPath) {
     const msg = `找不到索引仓库的台账判据（试过：${dispCandidates.join(" / ")}）`;
     if (REQUIRE_BACKEND) check("索引仓库台账模块必须存在（--require-backend）", false, msg);
-    else skip("处置台账词汇与指针那组跨仓库校验", msg);
+    else skip("处置台账词汇与指针那组跨仓库校验", msg, 4);
   } else {
     console.log(`  台账契约另一端：${dispPath}`);
     const repo = await import(pathToFileURL(dispPath).href);
@@ -874,7 +1124,7 @@ async function main() {
   if (!pubPath) {
     const msg = `找不到索引仓库的盖章脚本（试过：${pubCandidates.join(" / ")}）`;
     if (REQUIRE_BACKEND) check("索引仓库盖章脚本必须存在（--require-backend）", false, msg);
-    else skip("双签文案与审核端一致性校验", msg);
+    else skip("双签文案与审核端一致性校验", msg, 2);
   } else {
     console.log(`  双签契约另一端：${pubPath}`);
     const pub = await import(pathToFileURL(pubPath).href);
@@ -891,10 +1141,17 @@ async function main() {
     );
   }
 
-  const summary = `${fail === 0 ? "全部通过" : "有失败项"}：${pass} passed, ${fail} failed`;
-  console.log(`\n${skipped ? `${summary}，跳过 ${skipped} 组` : summary}`);
+  // 总结行不许把跳过藏进后缀。fork 里没有 contrib，跨仓库那几组永远不跑，
+  // 而「全部通过」四个字会让所有人以为公式被验过 —— 恰恰在钉最少的地方写得最像钉住了。
+  // 所以：有跳过时不说「全部通过」，且把缺席的条数写在同一行里。
+  const head = fail === 0 ? (skipped ? "跑到的全通过" : "全部通过") : "有失败项";
+  const summary = `${head}：${pass} passed, ${fail} failed${skipped ? `, 跳过 ${skipped} 条跨仓库检查` : ""}`;
+  console.log(`\n${summary}`);
   if (skipped && !REQUIRE_BACKEND) {
-    console.log("注意：跳过的这些是跨仓库契约校验。CI 里请用 npm test -- --require-backend，别让它们静默消失。");
+    console.log(
+      "注意：跳过的这些是跨仓库契约校验，在没有 contrib 的 fork 里一条都不跑。" +
+        "口令公式在 fork 里只剩上面那组内嵌黄金值守着 —— CI 里请用 npm test -- --require-backend，别让它们静默消失。"
+    );
   }
   if (fail) process.exitCode = 1;
 }

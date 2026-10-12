@@ -8,10 +8,11 @@
     "serve": "node tools/serve.mjs",
     "test": "node tools/selftest.mjs",
     "test:ci": "node tools/selftest.mjs --require-backend",
+    "_test:ci_note": "接 CI 时 node-version 必须钉 24，不能抄别的仓库的 20：跨仓库那组要直接 import worker/src/proof.ts，靠 Node ≥ 22.6 的类型擦除；18/20 上这组会红在「后端那份必须可加载」。engines.node 就是这条的下限。",
     "fonts": "node tools/fetch-fonts.mjs",
     "build": "node tools/build.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.6"
   }
 }
