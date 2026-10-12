@@ -141,9 +141,15 @@ proofString  = `${proofPrefix}-${nonce}`
 
 这套公式有**四份实现**（本站 `public/scripts/proof.js`、Worker `contrib/worker/src/proof.ts`、
 管理器 App 的提交端，以及索引仓库 CI 复核 pending 时逐条重算前缀的 `contrib/repo/scripts/verify-pending-proof.mjs`），
-再加 `contrib/worker/scripts/e2e-submit.mjs` 为真跑投稿内嵌的第五份拷贝；本轮三处同改；
-**这里只写静态站已落地的部分**——`--require-backend` 的跨仓库自检已把前端与 Worker 两份逐值对进
-黄金值，线上部署与端到端真跑都还没做，别把这一节当「已上线」。包体绑定也关不死全部抢投窗口，
+`contrib/worker/scripts/e2e-submit.mjs` **不是**第五份拷贝 —— 它直接 `import` Worker 那份 `src/proof.ts`，
+所以真跑用的公式与线上跑的是同一份代码。本轮三处同改；`--require-backend` 的跨仓库自检把前端与 Worker
+两份逐值对进黄金值。
+
+**已上线（2026-10-12）**：Worker 已部署，本站已发布到 Pages `cool-module`。端到端真跑把酷安回包的
+`data.bio` 逐字节比过（15 字符原样穿回来，两个域名一致），线上 ⑤-f 当场拒掉了签名里没有本次口令的投稿，
+`COOLAPK_VERIFY=off` 杀不掉这道闸（先用 `/user` 从 `verified` 变 `self_reported` 证明开关真的生效，再打的）。
+第四份实现（索引仓库 CI 侧复核）**还在 PR 里没合** —— 合进去之前「绕开 `/submit` 手写投稿」那条路仍然开着，
+这句话不替它宣布完成。包体绑定也关不死全部抢投窗口，
 两种残法仍在：把受害者已公开的口令串（他的签名与 pending JSON 都读得到）抄进**自己的**签名、
 用自己的 UID 提交同一份包体成立——used-nonce 只认口令前缀与 nonce、不认 UID，先烧成功的人让
 本人随后只收到「这个口令已经用过」；以及用**本人的 UID** 提交同一份包体、只换展示文案——
