@@ -262,6 +262,12 @@ async function intake(file) {
   const out = [];
   state.file = file;
   state.zip = null;
+  // 派生值在来源换掉的那一刻就得死：这里如果等到下面解析完才归零，读 B 的整段期间
+  // 屏幕上挂的还是 A 的口令、门禁写着「已生成」，此时点提交就是 zip:B + sha256:A。
+  // 同步清完立刻重画，B 的哈希到货前界面上说的是「还没选包」这句实话。
+  state.zipSha = "";
+  renderProof();
+  refreshGate();
 
   const limit = state.maxBytes;
   out.push([null, `读取 ${file.name} · ${fmtBytes(file.size)}`]);
