@@ -1030,7 +1030,11 @@ async function main() {
     );
     check(
       "镜像在上游失败时绝不发 200 错误体（MMRL 客户端会把 body 当索引进食）",
-      /status: 502/.test(worker) && /'cache-control': 'no-store'/.test(worker),
+      // 2026-10-17 起那一步分成两种失败：源站真的 404（证据文件名不存在）说 404，取不到源站说 502。
+      // 这条钉子守的从来不是「必须是 502」，而是「不能是 2xx」—— 一个 200 + JSON 错误体会被 MMRL
+      // 当成索引吃进去，把整个订阅源换成一句错误文案。所以两种形状都算过，写成 200 就红。
+      /status: (?:upstreamNotFound \? 404 : 502|502)/.test(worker) &&
+        /'cache-control': 'no-store'/.test(worker),
     );
   }
 
