@@ -339,6 +339,7 @@ async function main() {
     dispositionsUrl,
     byLink,
     evidenceUrlFor,
+    fetchEvidence,
     LEDGER_EVIDENCE_FILE_RE,
     LEDGER_SCHEMA,
     KNOWN_LEDGER_SCHEMAS,
@@ -992,7 +993,10 @@ async function main() {
     if (REQUIRE_BACKEND) {
       check("后端源码必须存在（--require-backend）", false, msg);
     } else {
-      skip("后端源码那组跨仓库契约校验", msg, 9);
+      // 这个数要等于 else 分支里 check() 的**调用点总数**，不许沿用旧值：整组跳过时报「跳了 4 条」
+      // 而实际有 19 条判据没跑，就是把「这台机器没验到」说得比真实情况更轻。
+      // 口径与复算：`grep -c "check(" ` 数这个块，或把整个仓拷到没有同级 contrib 的目录里跑一遍看总数。
+      skip("后端源码那组跨仓库契约校验", msg, 11);
     }
   } else {
     console.log(`  后端契约另一端：${workerPath}`);
@@ -1030,12 +1034,42 @@ async function main() {
     );
     check(
       "镜像在上游失败时绝不发 200 错误体（MMRL 客户端会把 body 当索引进食）",
-      // 2026-10-17 起那一步分成两种失败：源站真的 404（证据文件名不存在）说 404，取不到源站说 502。
-      // 这条钉子守的从来不是「必须是 502」，而是「不能是 2xx」—— 一个 200 + JSON 错误体会被 MMRL
-      // 当成索引吃进去，把整个订阅源换成一句错误文案。所以两种形状都算过，写成 200 就红。
-      /status: (?:upstreamNotFound \? 404 : 502|502)/.test(worker) &&
-        /'cache-control': 'no-store'/.test(worker),
+      // 钉在**同一个构造点**上，不是「全文件里找得到 502、找得到 no-store」。
+      // 全文件口径会被两处无关文本喂绿：注释里出现 `status: 502`、或把 no-store 从错误应答上摘掉
+      // 只挂到 200 那一支 —— 两种都实测过，钉子照样绿，那就是假钉子。
+      // 这一格真正守的是「一次都没成功过时不能发 200」；发旧副本那一条本来就是 200 + 旧正文（故意的，
+      // 由 `x-mirror: stale` + `max-age=5, must-revalidate` 那条规则管），不在这句断言的范围里。
+      /error: upstreamNotFound \? 'not_found' : 'upstream_unavailable' \}\), \{\s*status: upstreamNotFound \? 404 : 502,[\s\S]{0,200}'cache-control': 'no-store'/.test(
+        worker
+      ),
     );
+    // 网关的 include 名单是这些镜像路径的**隐形闸**：Worker 有这条路而网关没放行时，Pages 自己回一个
+    // 空正文 404（连 `x-mirror` 都没有），看着像「源站没这个文件」，其实是请求根本没到 Worker。
+    // 2026-10-17 上线 `/evidence/*` 那天撞的就是这一格，而当时全套测试没有一个字提到这个文件。
+    // workerPath 落在 `worker/src/`，网关在它的**上一级**目录里（`worker/gateway/`）——
+    // 少算一层的话这里会红在「找不到文件」，而那是本钉子的假红，不是被测面的问题。
+    const gatewayPath = resolve(dirname(workerPath), "..", "gateway", "public", "_routes.json");
+    if (!existsSync(gatewayPath)) {
+      check("网关 _routes.json 必须读得到（Worker 每条镜像路的隐形闸）", false, `找不到 ${gatewayPath}`);
+    } else {
+      const include = JSON.parse(readFileSync(gatewayPath, "utf8")).include || [];
+      const missing = ["index.json", "dispositions.json", "evidence/*"].filter(
+        (p) => !include.includes(`/${p}`)
+      );
+      // 两个方向都要对：网关少一条 = 线上静默 404；Worker 少一条而网关放着 = 放行一条不存在的路，
+      // 白名单在这里没有意义，所以只比"名字都在两边"，不比顺序、不比别的路径。
+      const workerHas = ["index.json", "dispositions.json", "evidence/*"].every(
+        (p) =>
+          p === "evidence/*"
+            ? /MIRROR_EVIDENCE_RE/.test(worker) && /evidenceRawUrl/.test(worker)
+            : new RegExp(`'\\/${p.replace(".", "\\.")}':`).test(worker)
+      );
+      check(
+        "网关 include 与 Worker 镜像路两侧对齐（少一条就是一次「测试全绿而线上 404」）",
+        missing.length === 0 && workerHas,
+        `网关缺：${missing.join(", ") || "无"}；Worker 侧三条齐全=${workerHas}`
+      );
+    }
   }
 
   /* ------------------------------------------------ 所有权口令：两份实现的同值（跨仓库）
@@ -1151,7 +1185,8 @@ async function main() {
   if (!dispPath) {
     const msg = `找不到索引仓库的台账判据（试过：${dispCandidates.join(" / ")}）`;
     if (REQUIRE_BACKEND) check("索引仓库台账模块必须存在（--require-backend）", false, msg);
-    else skip("处置台账词汇与指针那组跨仓库校验", msg, 4);
+    // 同上：这一组实际有 19 个 check() 调用点，旧值 4 是好几轮加格之后没跟着改的。
+    else skip("处置台账词汇与指针那组跨仓库校验", msg, 19);
   } else {
     console.log(`  台账契约另一端：${dispPath}`);
     const repo = await import(pathToFileURL(dispPath).href);
@@ -1244,6 +1279,33 @@ async function main() {
         CONFIG.DISPOSITIONS_URL = "https://api.example.dev/dispositions.json";
         const bad = ["https://evil.tld/evidence/x.json", "evidence/../x.json", "evidence/" + "a".repeat(63) + ".json", "", null, "evidence/" + "a".repeat(64) + ".json?x=1"];
         check("形状不对的证据指针一律推不出地址", bad.every((b) => evidenceUrlFor(b) === ""), bad.filter((b) => evidenceUrlFor(b) !== "").join(","));
+
+        // 上面那条只证明「函数返回空串」。真正要守的是**调用点不发请求** —— 拿空串去 `fetch("")`
+        // 会打到当前页面所在的主机，那种形状下台账页就在替一条它并不认识的证据发跨站请求。
+        // 所以这里换成假 fetch，直接数它被调用了几次、打到哪儿。
+        const calls = [];
+        const realFetch = globalThis.fetch;
+        globalThis.fetch = async (u) => {
+          calls.push(String(typeof u === "string" ? u : u.url));
+          return new Response('{"schema":"sukisu-evidence-v1"}', { status: 200, headers: { "content-type": "application/json" } });
+        };
+        try {
+          const miss = await fetchEvidence("https://evil.tld/evidence/" + "a".repeat(64) + ".json");
+          const miss2 = await fetchEvidence("evidence/" + "b".repeat(63) + ".json");
+          const good = "evidence/" + "c".repeat(64) + ".json";
+          const hit = await fetchEvidence(good);
+          check(
+            "取证据：形状不对一次请求都不发；形状对才打到推导出来的那个地址",
+            calls.length === 1 &&
+              miss.ok === false && miss2.ok === false && hit.ok === true &&
+              calls[0] === `https://api.example.dev/${good}`,
+            `calls=${JSON.stringify(calls)} miss=${String(miss.reason).slice(0, 24)} miss2=${String(miss2.reason).slice(0, 24)}`
+          );
+          await fetchEvidence(good);
+          check("同一枚证据第二次取用缓存，不再打网络", calls.length === 1, `calls=${calls.length}`);
+        } finally {
+          globalThis.fetch = realFetch;
+        }
       } finally {
         CONFIG.DISPOSITIONS_URL = saved;
       }
