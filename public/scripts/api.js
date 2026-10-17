@@ -510,6 +510,75 @@ export function byLink(value) {
   return /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+#issuecomment-\d+$/.test(s) ? s : "";
 }
 
+/**
+ * 证据文件名 → 能取的地址。
+ *
+ * 台账里的 `evidence[].file` 是仓库根相对路径（`evidence/<64 hex>.json`），而这一页拿到的是
+ * **台账**的地址，两种部署各差一层目录：
+ *   - 镜像端点 `https://host/dispositions.json` → 证据在 `https://host/evidence/<sha>.json`；
+ *   - 直给仓库 `…/<owner>/<repo>/<ref>/json/dispositions.json` → 证据在 `…/<ref>/evidence/<sha>.json`。
+ * 所以规则是「换掉文件名，并越过 `json` 这一层到仓库根」，而不是原地换名 —— 后者在直给仓库那一档
+ * 会拼出一个不存在的 `json/evidence/…`，而它看起来完全像对的。
+ *
+ * ⚠️ 先验形状再拼 URL：台账是**签名之前由人写进 PR 的**数据，`file` 这一格如果被写成
+ * `https://别处/x.json` 或 `../../`，原地拼接就等于让公示页替投稿者发一次跨站请求。
+ * 不匹配的那个正则的形状一律不取。
+ */
+export const LEDGER_EVIDENCE_FILE_RE = /^evidence\/[0-9a-f]{64}\.json$/;
+
+export function evidenceUrlFor(file) {
+  const f = String(file || "").trim();
+  if (!LEDGER_EVIDENCE_FILE_RE.test(f)) return "";
+  const base = dispositionsUrl();
+  if (!base) return "";
+  let u;
+  try {
+    u = new URL(base);
+  } catch {
+    return "";
+  }
+  const segs = u.pathname.split("/");
+  segs.pop(); // 去掉文件名本身
+  if (segs.length && segs[segs.length - 1] === "json") segs.pop(); // 再越过 json/ 这一层
+  u.pathname = `${segs.join("/")}/${f}`.replace(/\/{2,}/g, "/");
+  u.hash = "";
+  return u.href;
+}
+
+const evidenceCache = new Map();
+
+/**
+ * 取一份固化证据。**只在真的要看的时候取**（点开某个人卡的那一层），
+ * 一份动辄几十 KB，第一屏不该为它发 N 个请求。
+ * 失败分两类报：形状不对（台账里那格被写坏了）与取不到（还没合进 main、镜像端点没这条路、网络）。
+ */
+export async function fetchEvidence(file) {
+  const f = String(file || "").trim();
+  if (!LEDGER_EVIDENCE_FILE_RE.test(f)) {
+    return { ok: false, reason: "台账里这一格的文件名不是 `evidence/<64 位十六进制>.json` 的形状，本页不去取它。" };
+  }
+  if (evidenceCache.has(f)) return evidenceCache.get(f);
+  const url = evidenceUrlFor(f);
+  if (!url) {
+    const r = { ok: false, reason: "处置台账的地址还没确定，证据文件也就没有可推的目录。" };
+    evidenceCache.set(f, r);
+    return r;
+  }
+  let out;
+  try {
+    const res = await fetch(url, FRESH);
+    if (!res.ok) {
+      out = { ok: false, reason: `取不到 ${f}（HTTP ${res.status}）。可能是那条处置的证据还没合进默认分支，或镜像端点还没有这一条路。`, url };
+    } else {
+      out = { ok: true, data: await res.json(), url };
+    }
+  } catch {
+    out = { ok: false, reason: `取 ${f} 时请求没成功（网络或跨域）。`, url };
+  }
+  evidenceCache.set(f, out);
+  return out;
+}
+
 export async function fetchDispositions() {
   const target = dispositionsUrl();
   if (!target) {

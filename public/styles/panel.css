@@ -1397,6 +1397,9 @@ textarea:focus {
   margin: 6px 0 0;
   font-size: 13.5px;
   color: var(--ink-2);
+  /* 处置行把这格用来列选择器，里面会有一段 64 字符的 sha256 —— 不给断行，
+     窄屏上整页会被顶出横向滚动条（本地 516px 量到 .mod 的 min-content 544）。 */
+  overflow-wrap: anywhere;
 }
 .mod__ft {
   display: flex;
@@ -1905,6 +1908,570 @@ mark {
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+}
+
+/* =====================================================================
+ * 公示页 · 人卡层 / 三层证据卡 / 高仿主页头卡（spec §6.1 骨架 A、§6.2、§5.4）
+ * ===================================================================== */
+
+.pc-wall {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 22px;
+}
+.pc-wall__hd {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.pc-wall__t {
+  font: 700 14px/1.5 var(--mono);
+  letter-spacing: -0.01em;
+}
+.pc-wall__s {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.pc-wall__none {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r);
+  background: var(--void-2);
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.pc__wall-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+}
+.pc {
+  display: grid;
+  gap: 10px;
+  padding: 0 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel);
+  overflow: hidden;
+}
+.pc__cover {
+  padding: 12px;
+  background: linear-gradient(160deg, #10151c 0%, #1b2330 55%, #0d1116 100%);
+  border-bottom: 1px solid var(--line);
+}
+.pc__idrow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.pc__av {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.86);
+  background: #202633;
+  color: #fff;
+  font: 700 15px/1 var(--mono);
+}
+.pc__names {
+  min-width: 0;
+  flex: 1;
+}
+.pc__nm {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.pc__uid {
+  color: rgba(233, 236, 243, 0.62);
+  font: 500 11px/1.6 var(--mono);
+  overflow-wrap: anywhere;
+}
+/* 「已拉黑 / 已处置」占的就是酷安那张卡上 +关注 的位置 —— 那个位置在我们语境里意思正好反了。 */
+.pc__badge {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #23c76a;
+  color: #04160b;
+  font: 700 11px/1.6 var(--mono);
+}
+.pc__meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  padding: 0 12px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.pc__n {
+  font: 700 11.5px/1.6 var(--mono);
+  color: var(--amber);
+}
+.pc__kind {
+  padding: 1px 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--ink-2);
+}
+.pc__reasons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 12px;
+}
+.pc__reason {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  background: var(--void-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 2px 7px;
+}
+.pc__open {
+  margin: 0 12px;
+  justify-self: start;
+}
+
+.pc-detail {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 26px;
+  padding: 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--void-2);
+}
+.pc-detail__hd {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.pc-detail__t {
+  font: 700 13px/1.5 var(--mono);
+}
+
+.inc__layerhead {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.inc__layerhead-t {
+  font: 700 13px/1.5 var(--mono);
+  color: var(--ink);
+}
+.inc__layerhead-s {
+  font-size: 12px;
+  color: var(--ink-3);
+  flex: 1;
+  min-width: 220px;
+}
+
+/* ---- 高仿酷安主页头卡：固定用那套配色，**不跟随站点主题**（§6.2 两个理由：要像真的；
+       且它在视觉上跟我们的界面隔开，一眼是「外部平台的数据」）。 ---- */
+.ck {
+  border: 1px solid #2b3340;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #12161d;
+  max-width: 560px;
+}
+.ck__cover {
+  padding: 14px;
+  background:
+    radial-gradient(120% 140% at 85% 10%, rgba(35, 199, 106, 0.2), transparent 60%),
+    linear-gradient(165deg, #131a22 0%, #1d2634 52%, #0d1116 100%);
+  color: #fff;
+}
+.ck__row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.ck__av {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  object-fit: cover;
+  background: #232b38;
+}
+.ck__av--none {
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.6);
+  font: 700 18px/1 var(--mono);
+}
+.ck__col {
+  min-width: 0;
+}
+.ck__nmrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ck__nm {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  overflow-wrap: anywhere;
+}
+.ck__lv {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #23c76a;
+  color: #04160b;
+  font: 700 11px/1.7 var(--mono);
+}
+.ck__stats {
+  display: flex;
+  gap: 16px;
+  margin-top: 6px;
+}
+.ck__stat {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+}
+.ck__stat b {
+  color: #fff;
+  font: 700 13px/1.4 var(--mono);
+}
+.ck__stat i {
+  font-style: normal;
+}
+.ck__pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.ck__pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.86);
+  font: 500 11.5px/1.7 var(--mono);
+}
+.ck__pill--v {
+  border-color: #23c76a;
+  color: #7ef0ad;
+}
+.ck__bio {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 10px 14px;
+  border-top: 1px solid #232b36;
+  background: #12161d;
+  font-size: 12.5px;
+  color: #d7dbe3;
+  overflow-wrap: anywhere;
+}
+.ck__bio-k {
+  flex: 0 0 auto;
+  font: 600 11px/1.7 var(--mono);
+  color: #7d8798;
+}
+.ck__foot {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  padding: 10px 14px;
+  border-top: 1px solid #232b36;
+  background: #0e1218;
+  font-size: 11.5px;
+  color: #98a3b5;
+}
+.ck__replay {
+  margin-left: auto;
+  color: #23c76a;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(35, 199, 106, 0.5);
+  font: 600 11.5px/1.7 var(--mono);
+  overflow-wrap: anywhere;
+}
+.ck__replay:hover {
+  background: rgba(35, 199, 106, 0.12);
+}
+
+/* ---- 三层证据卡：三种边框让「谁说的」在版面上无法混淆（§6.2） ---- */
+.ec {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel);
+}
+.ec__title {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.ec__title-t {
+  font: 700 14px/1.5 var(--mono);
+  overflow-wrap: anywhere;
+}
+.ec__title-s {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.ec__title-k {
+  margin-left: auto;
+  font: 700 11.5px/1.7 var(--mono);
+  color: var(--amber);
+}
+.ec__layer {
+  padding: 10px 12px;
+  border-radius: 3px;
+}
+.ec__layer--facts {
+  border: 1px solid var(--line-2);
+  background: var(--void-2);
+}
+.ec__layer--machine {
+  border: 1px dashed var(--line-2);
+  /* 用色板里的档位而不是写死一个近黑：写死之后日间模式下这一层是「黑底配深字」，
+     一层读不出来的东西比没有那一层更糟（本地逐主题量 computed style 时抓到的）。 */
+  background: var(--panel-3);
+}
+.ec__layer--human {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--amber);
+  background: var(--amber-wash);
+}
+.ec__hd {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.ec__num {
+  font: 700 11px/1.7 var(--mono);
+  color: var(--ink-3);
+}
+.ec__t {
+  font: 700 12px/1.7 var(--mono);
+  letter-spacing: 0.02em;
+}
+.ec__note {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.ec__kv {
+  display: grid;
+  gap: 4px 14px;
+}
+.ec__kv--2 {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.ec__r {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12.5px;
+}
+.ec__k {
+  flex: 0 0 auto;
+  min-width: 92px;
+  color: var(--ink-3);
+  font: 500 11.5px/1.7 var(--mono);
+}
+.ec__v {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.ec__link {
+  color: var(--amber);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--amber-line);
+  overflow-wrap: anywhere;
+}
+.ec__link:hover {
+  background: var(--amber-wash);
+}
+.ec__two {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+}
+.ec__colbox {
+  min-width: 0;
+}
+.ec__colt {
+  margin: 0 0 6px;
+  font: 700 11.5px/1.7 var(--mono);
+  color: var(--ink-2);
+}
+.ec__finds {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+.ec__finds li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font: 500 11.5px/1.7 var(--mono);
+  color: var(--ink-2);
+}
+.ec__fid {
+  color: var(--ink);
+}
+.ec__fse {
+  padding: 0 6px;
+  border: 1px solid var(--red-line);
+  border-radius: 2px;
+  color: var(--red);
+}
+.ec__floc {
+  margin-left: auto;
+  overflow-wrap: anywhere;
+}
+.ec__more,
+.ec__miss {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  /* 降级那一句里会带着 `evidence/<64 hex>.json` 整串文件名 —— 不给断行，这句话自己就是把整层顶宽的元凶。 */
+  overflow-wrap: anywhere;
+}
+.ec__seals {
+  display: grid;
+  gap: 10px;
+}
+/* 证据框：高仿卡外面那一圈「什么时候采的、哈希是什么、谁能重放」（§6.1 的 C 决定） */
+.es {
+  padding: 10px 12px;
+  border: 1px solid var(--mint-line);
+  border-radius: 3px;
+  background: var(--mint-wash);
+}
+.es--miss {
+  border-color: var(--line-2);
+  background: var(--void-2);
+}
+.es__hd {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.es__t {
+  font: 700 11.5px/1.7 var(--mono);
+  color: var(--mint);
+}
+.es__at {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.es__file {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+}
+.es__k {
+  color: var(--ink-3);
+}
+.es__hash {
+  font: 500 11px/1.7 var(--mono);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.es__links {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  margin-top: 6px;
+}
+.es__link {
+  color: var(--mint);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--mint-line);
+  font: 600 11.5px/1.7 var(--mono);
+  overflow-wrap: anywhere;
+}
+.es__link:hover {
+  background: var(--mint-wash);
+}
+.es__sha {
+  font: 500 11px/1.7 var(--mono);
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.es__note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* 长 token 必须真的能断：sha256、`evidence/<64 hex>.json`、release 直链都是一整串没有空格的字符，
+   而 flex/grid 的子项默认 `min-width:auto` = 不肯缩到内容的 min-content 以下 —— 不写这一组，
+   375px 的手机上这一层会把整页顶出横向滚动条（本地量到的：.ec 的 min-content 544 > 视口 516）。 */
+.pc-detail > *,
+.ec,
+.ec > *,
+.ec__title > *,
+.ec__r > *,
+.es,
+.es > *,
+.ck__foot > *,
+.ck__row > * {
+  min-width: 0;
+}
+.es__hash,
+.ck__replay {
+  word-break: break-all;
+}
+
+@media (max-width: 620px) {
+  .ec__two {
+    grid-template-columns: 1fr;
+  }
+  .ec__kv--2 {
+    grid-template-columns: 1fr;
+  }
+  .ck__replay {
+    margin-left: 0;
+  }
+}
+/* 320px 那一档：头像 + 三个计数并排时 min-content 会把卡顶宽 4px（本地量到的），
+   让这一行自己折下去，而不是去缩头像。 */
+@media (max-width: 360px) {
+  .ck__row {
+    flex-wrap: wrap;
+  }
+  .ck__stats {
+    gap: 10px 14px;
+    flex-wrap: wrap;
   }
 }
 

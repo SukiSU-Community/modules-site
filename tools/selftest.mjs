@@ -338,6 +338,8 @@ async function main() {
     normalizeDispositions,
     dispositionsUrl,
     byLink,
+    evidenceUrlFor,
+    LEDGER_EVIDENCE_FILE_RE,
     LEDGER_SCHEMA,
     KNOWN_LEDGER_SCHEMAS,
     KIND_LABELS,
@@ -1177,6 +1179,88 @@ async function main() {
       return n.subject?.coolapkUid === "99999999" && n.evidence.length === 1
         && view.items[0].subject?.coolapkUid === "99999999" && view.items[0].evidence.length === 1;
     })());
+    // 证据文件的形状：写入端（§8 固化那一步）与展示端（这一页）认的必须是同一个正则。
+    check("证据文件名那把正则两端同值", repo.EVIDENCE_FILE_RE.source === LEDGER_EVIDENCE_FILE_RE.source,
+      `${repo.EVIDENCE_FILE_RE.source} / ${LEDGER_EVIDENCE_FILE_RE.source}`);
+
+    // 这一组是「真生产者 → 公示页消费者」的闭环：拿索引仓库那份固化模块产出的**真实字节**，
+    // 走台账校验，再走这一页的 URL 推导。三处任何一处漂移，这里就红，而不是页面上少一块。
+    const harvestPath = resolve(dirname(dispPath), "harvest-evidence.mjs");
+    if (!existsSync(harvestPath)) {
+      skip("§8 固化的产物进得了台账、也推得出地址", "索引仓库那边还没有 harvest-evidence.mjs（该分支尚未合入）");
+    } else {
+      const hv = await import(pathToFileURL(harvestPath).href);
+      const match = {
+        filePath: "pending/probe_mod/7.json",
+        commitSha: "0123456789abcdef0123456789abcdef01234567",
+        commitSubject: "pending: probe_mod 7 (#999)",
+        pr: 999,
+        prUrl: "https://github.com/o/r/pull/999",
+        record: {
+          id: "probe_mod", name: "P", author: "p", description: "d",
+          versions: [{ version: "v7", versionCode: 7, zipUrl: "https://x/y.zip", size: 10, sha256: "a".repeat(64) }],
+          source: "https://www.coolapk.com/feed/1", uploader: "p", coolapkUid: "99999999",
+          pledge: { version: "pledge-v1", atMs: 1 }, ownership: { nonce: "n", proofPrefix: "p", via: "bio", verifiedAt: 1 },
+          identity: { username: "pnickname", level: 3 }, storage: "github-release-asset",
+          releaseTag: "assets-v1", assetName: `${"a".repeat(64)}.zip`, submittedAt: "2026-10-12T00:00:00.000Z",
+        },
+      };
+      const obj = hv.buildEvidence({ match, packages: null, reportWhy: "夹具：不取评论" });
+      const bytes = hv.canonicalBytes(obj);
+      const file = hv.evidencePathFor(bytes);
+      check("固化的产物文件名过两端那把正则", repo.EVIDENCE_FILE_RE.test(file) && LEDGER_EVIDENCE_FILE_RE.test(file), file);
+      const fields = hv.ledgerFieldsFrom({ ok: true, files: [{ path: file, bytes, evidence: obj }] }, new Date("2026-10-17T00:00:00Z"));
+      const entry = {
+        kind: "revoke", reason: "malware", by: "https://github.com/o/r/issues/3#issuecomment-1",
+        at: "2026-10-17T00:00:00Z", id: "probe_mod", coolapkUid: "99999999", ...fields,
+      };
+      let normEntry = null;
+      let normErr = "";
+      try {
+        [normEntry] = repo.parseDispositions({ schema: repo.DISPOSITIONS_SCHEMA, dispositions: [entry] }, "selftest");
+      } catch (e) {
+        normErr = e.message;
+      }
+      check("固化的产物填进台账后，索引仓库那份判得动", !!normEntry && normEntry.evidence[0].file === file, normErr);
+      const view = normalizeDispositions({ schema: repo.DISPOSITIONS_SCHEMA, dispositions: [normEntry || entry] });
+      check("公示页把同一条的 subject 与 evidence 原样带出来",
+        view.items[0].subject?.coolapkUid === "99999999" && view.items[0].evidence[0]?.file === file,
+        JSON.stringify(view.items[0].evidence));
+
+      // URL 推导：两种部署各一档，再加「形状不对的一律不取」（台账是人在 PR 里写的，
+      // 那一格要是能写 `https://别处/x.json`，公示页就替投稿者发了一次跨站请求）。
+      const saved = CONFIG.DISPOSITIONS_URL;
+      try {
+        CONFIG.DISPOSITIONS_URL = "https://api.example.dev/dispositions.json";
+        check("镜像部署下证据地址推成 /evidence/<sha>.json",
+          evidenceUrlFor(file) === `https://api.example.dev/${file}`, evidenceUrlFor(file));
+        CONFIG.DISPOSITIONS_URL = "https://raw.example.com/o/r/main/json/dispositions.json";
+        check("直给仓库部署下证据地址越过 json/ 那一层",
+          evidenceUrlFor(file) === `https://raw.example.com/o/r/main/${file}`, evidenceUrlFor(file));
+        CONFIG.DISPOSITIONS_URL = "https://api.example.dev/dispositions.json";
+        const bad = ["https://evil.tld/evidence/x.json", "evidence/../x.json", "evidence/" + "a".repeat(63) + ".json", "", null, "evidence/" + "a".repeat(64) + ".json?x=1"];
+        check("形状不对的证据指针一律推不出地址", bad.every((b) => evidenceUrlFor(b) === ""), bad.filter((b) => evidenceUrlFor(b) !== "").join(","));
+      } finally {
+        CONFIG.DISPOSITIONS_URL = saved;
+      }
+    }
+
+    // 高仿头卡读的字段必须在 Worker 那份白名单里：不在就等于那一格永远显示「没采到」，
+    // 而页面看起来仍然是对的（这一条就是 goods_count 那三个字段被发现没进快照的方式）。
+    const workerIdx = [process.env.WORKER_INDEX_SRC, "../../sukisu/contrib/worker/src/index.ts", "../contrib/worker/src/index.ts"]
+      .filter(Boolean).map((p) => resolve(here, p)).find((p) => existsSync(p));
+    if (!workerIdx) {
+      skip("头卡读的字段都在后端采到的那份白名单里", "找不到 worker/src/index.ts");
+    } else {
+      const src = readFileSync(workerIdx, "utf8");
+      const m = src.match(/const IDENTITY_KEYS = \[([\s\S]*?)\] as const/);
+      const keys = m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]) : [];
+      const PAGE_FIELDS = ["username", "displayUsername", "level", "bio", "regdate", "logintime", "userBigAvatar", "follow", "fans", "be_like_num"];
+      const missing = PAGE_FIELDS.filter((k) => !keys.includes(k));
+      check("头卡读的字段都在后端采到的那份白名单里", !!m && missing.length === 0, m ? missing.join(",") : "没找到 IDENTITY_KEYS 那个常量");
+    }
+
+
     // 选择器集合从仓库那份的**归一化输出**里取，不抄常量：它才是「台账里可能出现哪些命中条件」的定义。
     const norm = repo.parseDispositions({
       schema: repo.DISPOSITIONS_SCHEMA,
@@ -1220,6 +1304,28 @@ async function main() {
   check(
     "公示页的申诉段存在，地址由脚本从 config 填",
     html.includes('id="inc-appeal-where"') && /renderIncAppeal\(\)/.test(appSrc) && /CONFIG\.ISSUES_URL/.test(appSrc)
+  );
+  // 第一屏那一层是新加的，但它只在自己被画出来的时候才存在：容器、调用点、降级那三格的措辞
+  // 都在源码里钉一遍 —— 少一条就是页面上少一块而 selftest 仍然是绿的。
+  check(
+    "公示页的人卡层三件齐：容器、渲染调用、按条那一层的分界",
+    html.includes('id="inc-people"') && html.includes('id="inc-detail"') && html.includes('id="inc-list-head"')
+      // 这一条是**文本判据**，所以必须挡住「把调用注释掉」这种形状：只看 `renderPeopleWall(` 在不在，
+      // 注释掉它的那一发变异照样绿（2026-10-17 实测到）。负向断言把注释行排除掉。
+      && /^(?! *\/\/) *renderPeopleWall\(shown, q\);/m.test(appSrc) && /groupPeople/.test(appSrc)
+  );
+  check(
+    "没有 subject 的条目走降级那一格，措辞不是「没有处置」",
+    /pc-wall__none/.test(appSrc) && /所以下面按条那一层就是全部/.test(appSrc) && /只在下面按条那一层列出/.test(appSrc)
+  );
+  check(
+    "证据取不到时说的是取不到，不是一片空白",
+    /es--miss/.test(appSrc) && /取不到 \$\{ref\.file\}（\$\{res\.reason\}）|—— \$\{res\.reason\}/.test(appSrc)
+  );
+  const cssSrc = readFileSync(resolve(here, "../public/styles/panel.css"), "utf8");
+  check(
+    "高仿头卡固定用那套配色，不跟随站点主题（spec §6.2）",
+    /\.ck__cover \{[\s\S]{0,400}?#131a22/.test(cssSrc) && /\.ck__lv \{[\s\S]{0,200}?#23c76a/.test(cssSrc)
   );
   check(
     "申诉地址没配置时写的是「还没配置」，不给假链接",
