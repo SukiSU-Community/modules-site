@@ -339,6 +339,7 @@ async function main() {
     dispositionsUrl,
     byLink,
     LEDGER_SCHEMA,
+    KNOWN_LEDGER_SCHEMAS,
     KIND_LABELS,
     REASON_LABELS,
     SELECTOR_KEYS,
@@ -373,9 +374,27 @@ async function main() {
   check("选择器按固定顺序取出，id+versionCode 是一条而不是两条", ledger.items[1].selectors.map(([k]) => k).join(",") === "id,versionCode,coolapkUid", JSON.stringify(ledger.items[1].selectors));
   check("缺 note 不炸", ledger.items[1].note === "");
 
+  // v2 的两个可选字段：读的一侧原样带过去，缺字段的历史条目仍然是完整的一条。
+  const v2 = normalizeDispositions({
+    schema: LEDGER_SCHEMA,
+    lastUpdate: 1791687753247,
+    dispositions: [
+      {
+        kind: "revoke", reason: "malware", by: "gh:b@1", at: "2026-10-17T00:00:00Z", id: "mod_x",
+        subject: { coolapkUid: "99999999", username: "被处置的人" },
+        evidence: [{ file: `evidence/${"f".repeat(64)}.json`, pr: 53 }],
+      },
+      { kind: "deny", reason: "policy", by: "gh:b@2", at: "2026-10-18T00:00:00Z", coolapkUid: "88888888" },
+    ],
+  });
+  check("v2 认得，subject / evidence 原样带出来", v2.schemaKnown === true
+    && v2.items[0].subject?.coolapkUid === "99999999" && v2.items[0].evidence.length === 1);
+  check("v1 形状（没有这两个键）不被补出空壳，页面按缺字段降级渲染", v2.items[1].subject === null
+    && Array.isArray(v2.items[1].evidence) && v2.items[1].evidence.length === 0);
+
   // 读取层的失效方向和 CI 那份相反，这条必须钉住：这里丢掉一条台账 == 公示漏一项处置。
   const weird = normalizeDispositions({
-    schema: "sukisu-dispositions-v2",
+    schema: "sukisu-dispositions-v99",
     dispositions: [
       { kind: "quarantine", reason: "brand-new-case", at: "不是时间", id: "x" },
       { kind: "revoke", reason: "malware", by: "b", at: "2026-10-11T00:00:00Z", id: "y" },
@@ -1135,6 +1154,29 @@ async function main() {
     check("仓库的每个 reason 在公示页都有人话标题", missReason.length === 0, missReason.join(","));
     check("仓库的每个 kind 在公示页都有人话标题", missKind.length === 0, missKind.join(","));
     check("schema 标识两边同值", repo.DISPOSITIONS_SCHEMA === LEDGER_SCHEMA, `${repo.DISPOSITIONS_SCHEMA} / ${LEDGER_SCHEMA}`);
+    // 认的集合也要同值，不只当前那一档：v1 的历史台账在 Worker 那一侧读不动的话，
+    // 它的失效方向是「放行」——公示页还在显示下架，投稿已经不再被挡了。
+    const repoKnown = [...repo.KNOWN_DISPOSITIONS_SCHEMAS].sort().join(",");
+    const frontKnown = [...KNOWN_LEDGER_SCHEMAS].sort().join(",");
+    check("两边认的 schema 集合逐字同值", repoKnown === frontKnown, `${repoKnown} / ${frontKnown}`);
+    check("v1 仍在认的集合里（线上 json/dispositions.json 今天还是 v1）",
+      repo.KNOWN_DISPOSITIONS_SCHEMAS.includes("sukisu-dispositions-v1")
+      && KNOWN_LEDGER_SCHEMAS.includes("sukisu-dispositions-v1"));
+    check("v2 的两个新字段仓库那份认、公示页也带得出来", (() => {
+      const [n] = repo.parseDispositions({
+        schema: repo.DISPOSITIONS_SCHEMA,
+        dispositions: [{
+          kind: "revoke", reason: "malware", by: "gh:b@1", at: "2026-10-17T00:00:00Z", id: "mod_x",
+          subject: { coolapkUid: "99999999" }, evidence: [{ file: `evidence/${"f".repeat(64)}.json` }],
+        }],
+      });
+      const view = normalizeDispositions({
+        schema: repo.DISPOSITIONS_SCHEMA,
+        dispositions: [{ kind: "revoke", reason: "malware", by: "gh:b@1", at: "2026-10-17T00:00:00Z", id: "mod_x", subject: n.subject, evidence: n.evidence }],
+      });
+      return n.subject?.coolapkUid === "99999999" && n.evidence.length === 1
+        && view.items[0].subject?.coolapkUid === "99999999" && view.items[0].evidence.length === 1;
+    })());
     // 选择器集合从仓库那份的**归一化输出**里取，不抄常量：它才是「台账里可能出现哪些命中条件」的定义。
     const norm = repo.parseDispositions({
       schema: repo.DISPOSITIONS_SCHEMA,

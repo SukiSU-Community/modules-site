@@ -386,8 +386,15 @@ export function normalizeIndex(json) {
 
 /* ---------------------------------------------------------- 处置台账（公示） */
 
-/** 台账的 schema 标识。与 contrib/repo/scripts/dispositions.mjs 的 DISPOSITIONS_SCHEMA 同值。 */
-export const LEDGER_SCHEMA = "sukisu-dispositions-v1";
+/** 台账的 schema 标识（写入侧那一档）。与 contrib/repo/scripts/dispositions.mjs 的 DISPOSITIONS_SCHEMA 同值。 */
+export const LEDGER_SCHEMA = "sukisu-dispositions-v2";
+/**
+ * 认得的 schema 全集 —— v1 的条目是 v2 的子集（少了两个可选字段），历史数据不改。
+ * 这一份集合必须与索引仓库、Worker 两处同值；`tools/selftest.mjs --require-backend`
+ * 拿仓库那份逐字比一次，漂了就红（这里漂了不会红，只会让公示页把已经认识的台账
+ * 标成「不认识的 schema」，而那句提示正是给人看「这份数据不该被信任」的）。
+ */
+export const KNOWN_LEDGER_SCHEMAS = ["sukisu-dispositions-v2", "sukisu-dispositions-v1"];
 
 /**
  * 台账的读取地址：显式填的优先，没填就从 INDEX_URL 换掉文件名。
@@ -472,6 +479,10 @@ export function normalizeDispositions(json) {
       // 否则「可复验」只写在 by 那个指针里，普通人手上没有仓库就复验不了。
       verify: String(raw.verify || ""),
       atMs: Number.isFinite(at) ? at : null,
+      // v2 的两个字段：这一层不校验、不重排，原样带过去给公示页用（校验是索引仓库与 Worker 那两份判据的活）。
+      // 缺就是 null / 空数组 —— 历史条目一个都没有，页面必须照旧渲染（spec §10），不许空白不许报错。
+      subject: raw.subject && typeof raw.subject === "object" && !Array.isArray(raw.subject) ? raw.subject : null,
+      evidence: Array.isArray(raw.evidence) ? raw.evidence : [],
       // 选择器按固定顺序取，缺的不显示；一个都没有的条目也照样列出来（它是台账的一条）
       selectors: SELECTOR_KEYS.filter((k) => raw[k] !== undefined && raw[k] !== null && raw[k] !== "")
         .map((k) => [k, String(raw[k])]),
@@ -479,7 +490,9 @@ export function normalizeDispositions(json) {
   });
   return {
     schema: typeof json.schema === "string" ? json.schema : "",
-    schemaKnown: json.schema === LEDGER_SCHEMA,
+    schemaKnown: KNOWN_LEDGER_SCHEMAS.includes(
+      typeof json.schema === "string" ? json.schema : ""
+    ),
     lastUpdate: typeof json.lastUpdate === "number" ? json.lastUpdate : null,
     items,
   };
