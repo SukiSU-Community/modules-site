@@ -113,24 +113,25 @@
                 审核通过后进入公开索引，所有人就能在管理器里<span class="hl">搜到并一键安装</span>。
               </p>
             </div>
-          </div>
-          <!-- 四条硬性条件排成 2×2，整块与下面的栏目矩形同宽 -->
-          <div class="spec" aria-label="投稿硬性条件">
-            <div class="spec__cell">
-              <span class="spec__k">大小上限</span>
-              <span class="spec__v" id="spec-max"><b>8</b> MB</span>
-            </div>
-            <div class="spec__cell">
-              <span class="spec__k">zip 形态</span>
-              <span class="spec__v">根目录含 <b>module.prop</b></span>
-            </div>
-            <div class="spec__cell">
-              <span class="spec__k">溯源</span>
-              <span class="spec__v">酷安出处 + 投稿人 <b>UID</b></span>
-            </div>
-            <div class="spec__cell">
-              <span class="spec__k">提交之后</span>
-              <span class="spec__v">自动开 <b>GitHub PR</b> 待审</span>
+            <!-- 四条硬性条件排成 2×2：窄屏占满整行（与下面的 .panel 同宽），
+                 ≥1100px 起它就是 hero 的右列（见 panel.css 文末断点地图） -->
+            <div class="spec" aria-label="投稿硬性条件">
+              <div class="spec__cell">
+                <span class="spec__k">大小上限</span>
+                <span class="spec__v" id="spec-max"><b>8</b> MB</span>
+              </div>
+              <div class="spec__cell">
+                <span class="spec__k">zip 形态</span>
+                <span class="spec__v">根目录含 <b>module.prop</b></span>
+              </div>
+              <div class="spec__cell">
+                <span class="spec__k">溯源</span>
+                <span class="spec__v">酷安出处 + 投稿人 <b>UID</b></span>
+              </div>
+              <div class="spec__cell">
+                <span class="spec__k">提交之后</span>
+                <span class="spec__v">自动开 <b>GitHub PR</b> 待审</span>
+              </div>
             </div>
           </div>
         </div>

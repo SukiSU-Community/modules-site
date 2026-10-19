@@ -1221,9 +1221,13 @@ function renderIndex() {
   }
 
   const { name, lastUpdate, modules } = state.index;
-  $("#index-readout").classList.remove("bad");
-  $("#index-readout").textContent =
-    `${name || "索引"} · ${modules.length} 个模块` + (lastUpdate ? ` · 更新 ${fmtDate(lastUpdate)}` : "");
+  const idxReadout = $("#index-readout");
+  idxReadout.classList.remove("bad");
+  // 日期包成 .nb 块整体不断行（「更新 2026-10-」/「11 11:02」拆开读起来像两段）
+  idxReadout.replaceChildren(
+    `${name || "索引"} · ${modules.length} 个模块`,
+    ...(lastUpdate ? [" · 更新 ", node("span", "nb", fmtDate(lastUpdate))] : [])
+  );
 
   const q = state.query;
   const low = q.trim().toLowerCase();
@@ -1959,10 +1963,12 @@ function renderIncidents() {
   shell.hidden = true;
   const { items, lastUpdate, schemaKnown } = state.ledger;
   readout.classList.remove("bad");
-  readout.textContent =
-    `${items.length} 条处置记录` +
-    (lastUpdate ? ` · 台账更新 ${fmtDate(lastUpdate)}` : "") +
-    (schemaKnown ? "" : " · 这份台账的 schema 标记本页不认识，按原文列出");
+  // 同上：台账日期包 .nb 不拆行
+  readout.replaceChildren(
+    `${items.length} 条处置记录`,
+    ...(lastUpdate ? [" · 台账更新 ", node("span", "nb", fmtDate(lastUpdate))] : []),
+    ...(schemaKnown ? [] : [" · 这份台账的 schema 标记本页不认识，按原文列出"])
+  );
 
   const q = state.incQuery;
   const low = q.trim().toLowerCase();

@@ -502,8 +502,15 @@ h1 .hi::after,
 .readout.bad {
   color: var(--amber);
 }
+/* 不拆行块：readout 里的日期用它包住（拼装处见 app.js 的 node("span", "nb", …)），
+   否则「更新 2026-10-」/「11 11:02」会从连字符处拆开，读起来像两段。 */
+.nb {
+  white-space: nowrap;
+}
 
-/* 规格铭牌：2×2 一格一块，中间用十字线分开（不留空隙），整块与下面的 .panel 同宽 */
+/* 规格铭牌：2×2 一格一块，中间用十字线分开（不留空隙）。
+   窄屏占满整行（与下面的 .panel 同宽）；≥1100px 时它就是 hero 的右列
+   （见文末断点地图），所以上下间距交给 .hero__grid 的 gap，自己不带 margin。 */
 .spec {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -511,7 +518,6 @@ h1 .hi::after,
   border-radius: var(--r);
   background: linear-gradient(180deg, var(--panel-2), var(--panel));
   overflow: hidden;
-  margin-top: 22px;
 }
 .spec__cell {
   display: grid;
@@ -680,7 +686,9 @@ textarea {
   width: 100%;
   padding: 10px 12px;
   font-family: var(--sans);
-  font-size: 15px;
+  /* 16px：iOS Safari 会把字号 <16px 的输入框在聚焦时自动放大整页，
+     破坏版式；16px 起才不触发。桌面端视觉几乎无差。 */
+  font-size: 16px;
   color: var(--ink);
   background: var(--void-2);
   border: 1px solid var(--line-2);
@@ -689,10 +697,10 @@ textarea {
 }
 input.mono,
 textarea.mono {
-  /* 字号与正文输入框一致（15px）：placeholder 在两种输入框之间不能一个 13.5 一个 15，
+  /* 字号与正文输入框一致（16px）：placeholder 在两种输入框之间不能一个大一个小，
      那会让人以为两个框填的东西重要程度不同。要区分靠等宽字体本身。 */
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: 16px;
 }
 textarea {
   min-height: 76px;
@@ -1335,7 +1343,8 @@ textarea:focus {
 .search input {
   padding-left: 34px;
   font-family: var(--mono);
-  font-size: 13.5px;
+  /* 同样 16px 起步（见上文输入框注释），13.5px 会让 iOS 聚焦时整页缩放 */
+  font-size: 16px;
 }
 .search svg {
   position: absolute;
@@ -2472,6 +2481,65 @@ mark {
   .ck__stats {
     gap: 10px 14px;
     flex-wrap: wrap;
+  }
+}
+
+/* ============================================================
+   断点地图（全站档位一览，新增档位也来这里登记）
+   · ≥1100px  桌面宽屏：hero 文案与规格铭牌左右并列（下面 min-width 档）
+   · ≤760px   手机主档：单列、底部 dock、panel 标签收起（中段大档）
+   · ≤620px   小手机：顶栏收装饰、规格格收字号、搜索行折两行
+   · ≤380px   窄屏：规格值再收字号、名条 9px
+   · ≤360px   极窄：承诺行折行
+   · 触控档（pointer: coarse 或 ≤760px）：可点目标补到 44px
+   ============================================================ */
+
+/* 桌面宽屏：hero 两列 —— 文案在左，四条硬性条件在右。
+   列数只写在 .hero__grid 上：.spec 自己任何屏宽都保持 2×2（窄屏也是一眼看完
+   的 2×2，代价由字号内边距承担，见 620px 那两档）。 */
+@media (min-width: 1100px) {
+  .hero__grid {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    gap: 22px 40px;
+  }
+}
+
+/* 触控档：可点目标补到 44×44（WCAG 2.5.5）。能加高的直接加高；
+   加不动的用不可见外扩热区，排版一动不动。
+   .nav a 只加高、不加宽：390px 顶栏排成一行是硬约束（见 620px 顶栏档注释），
+   39px 宽仍在 WCAG 2.5.8 的 24px 底线之上 —— 取舍记在这里，不是漏了。 */
+@media (pointer: coarse), (max-width: 760px) {
+  .btn {
+    min-height: 44px;
+  }
+  .nav a {
+    min-height: 44px;
+  }
+  /* 主题开关实际只有 27×27：外扩 9px 的透明热区到 45×45。
+     可读名字仍在 .theme span 里用 clip-path 藏着，不要去动它。 */
+  .theme {
+    position: relative;
+  }
+  .theme::after {
+    content: "";
+    position: absolute;
+    inset: -9px;
+  }
+  /* 帮助行里的句内小链接只有 18px 高。扩到 24px：
+     句内链本来就在 WCAG 2.5.8 的豁免清单里，这里只是不想太抠。 */
+  .field__help a {
+    display: inline-block;
+    padding: 3px 2px;
+    margin: -3px -2px;
+  }
+}
+
+/* 搜索行折两行：窄屏下输入框和计数挤在一行时，输入框被压到 210px 下限、
+   placeholder 被截断。让输入框独占一行，计数掉到第二行右对齐。 */
+@media (max-width: 620px) {
+  .search {
+    flex: 1 1 100%;
+    min-width: 0;
   }
 }
 
