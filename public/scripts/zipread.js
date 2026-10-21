@@ -124,7 +124,7 @@ export async function readEntry(arrayBuffer, entry) {
 }
 
 /**
- * 投稿要求的规范形态：根目录直接含 module.prop。
+ * 上传要求的规范形态：根目录直接含 module.prop。
  * 返回 { ok, rootEntry, nestedPaths, entryCount }
  */
 export function inspectEntries(entries) {

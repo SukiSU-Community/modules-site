@@ -555,17 +555,19 @@ async function main() {
     "utf8"
   );
   check(
-    "昵称整行默认不出现，出现时叫「投稿人酷安昵称」且不挂必填星号",
+    "昵称整行默认不出现，出现时叫「上传人酷安昵称」且不挂必填星号",
     /id="nick-field" hidden/.test(formHtml) &&
-      /<label for="f-uploader">投稿人酷安昵称<\/label>/.test(formHtml) &&
-      !/for="f-uploader">投稿人酷安昵称<span class="req">/.test(formHtml)
+      /<label for="f-uploader">上传人酷安昵称<\/label>/.test(formHtml) &&
+      !/for="f-uploader">上传人酷安昵称<span class="req">/.test(formHtml)
   );
-  // 界面上只有「投稿人」这一个称呼（about 页早就这么写了），混用会让人以为是两个人
+  // 界面上只有「上传人」这一个称呼（about 页早就这么写了），混用会让人以为是两个人
   check(
-    "UID 那栏点名是「投稿人酷安 UID」，且全站不再出现「投稿者」",
-    /<label for="f-uid">投稿人酷安 UID<span class="req">\*<\/span><\/label>/.test(formHtml) &&
-      !formHtml.includes("投稿者") &&
-      !appSrc.includes("投稿者")
+    "UID 那栏点名是「上传人酷安 UID」，且全站不再出现第二种称呼",
+    /<label for="f-uid">上传人酷安 UID<span class="req">\*<\/span><\/label>/.test(formHtml) &&
+      !formHtml.includes("投稿人") &&
+      !appSrc.includes("投稿人") &&
+      !formHtml.includes("上传者") &&
+      !appSrc.includes("上传者")
   );
   // placeholder 是全站都会渲染出来的字符串，往里塞一个真实 UID 等于把它贴公开。
   check(
@@ -1279,8 +1281,8 @@ async function main() {
     gateBody.slice(gateBody.indexOf("if (recorded.length)"), gateBody.indexOf("if (state.cards.length > 1)"))
   );
   check(
-    "已收录那一档拦下来时闸门点的是那一枚、说的是这个 id 已被投稿过：那条行写在 gateItems 里，并说清它分不清谁投的",
-    recordedLine.includes("这个 id 已被投稿过") &&
+    "已收录那一档拦下来时闸门点的是那一枚、说的是这个 id 已被上传过：那条行写在 gateItems 里，并说清它分不清谁投的",
+    recordedLine.includes("这个 id 已被上传过") &&
       recordedLine.includes("已从这一套里摘出去") &&
       recordedLine.includes("它不进 manifest") &&
       recordedLine.includes("口令那一串按剩下的") &&
@@ -1448,7 +1450,7 @@ async function main() {
   check(
     "边界的两条也写在界面小字里：索引不带酷安 UID（分不清谁投的）+ 没合进索引的查不到",
     /索引里不带酷安 UID/.test(appSrc) &&
-      /已经投稿但还没合进索引的那些今天查不到/.test(appSrc) &&
+      /已经上传但还没合进索引的那些今天查不到/.test(appSrc) &&
       /queue-note/.test(appSrc) &&
       /id="queue-note"/.test(formHtml)
   );
@@ -1521,8 +1523,8 @@ async function main() {
   );
   const singleProof = /nonceText = state\.cards\.length > 1/.test(gateBody);
   check(
-    "只有一枚时口令那句仍是原来那一句（「投稿口令已生成（填进酷安签名）」原样留着）",
-    singleProof && gateBody.includes('"投稿口令已生成（填进酷安签名）"'),
+    "只有一枚时口令那句仍是原来那一句（「上传口令已生成（填进酷安签名）」原样留着）",
+    singleProof && gateBody.includes('"上传口令已生成（填进酷安签名）"'),
     "单枚的口令文案被改写了"
   );
   check(

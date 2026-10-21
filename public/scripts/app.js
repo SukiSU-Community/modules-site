@@ -38,9 +38,9 @@ const MB = 1024 * 1024;
 
 const PREFILL_KEYS = ["id", "name", "version", "versionCode", "author", "description"];
 /**
- * 字段按「属不属于那一枚」分成两张表 —— 批量投稿把这条界线变成了契约的一部分：
+ * 字段按「属不属于那一枚」分成两张表 —— 批量上传把这条界线变成了契约的一部分：
  *   CARD_KEYS  = 每枚一份，进 manifest 的 `modules[]`（§17.3），在卡与视图之间来回搬；
- *   SHARED_KEYS = 一次投稿一份，留在顶层 text fields（`pledge` / `nonce` / `coolapkUid` /
+ *   SHARED_KEYS = 一次上传一份，留在顶层 text fields（`pledge` / `nonce` / `coolapkUid` /
  *                `uploader` / turnstile），**不进卡、不进口令集合**。
  * 把 UID 与署名当 per-card 存是旧语义的残留（那时一枚一个请求、各自带 UID）；现在一次动作
  * 只有一个人，队列里 A 枚的 UID 和 B 枚的 UID 必须同时消失，所以它们根本没有「哪一枚的」这件事。
@@ -55,13 +55,13 @@ const CARD_REQUIRED_KEYS = ["id", "name", "version", "versionCode", "source"];
 const REQUIRED_KEYS = [...CARD_REQUIRED_KEYS, ...SHARED_KEYS];
 
 const state = {
-  /* 队列：一次投稿动作 = 一整套模块。每枚一张卡，卡上放着**它自己的**那份来源（包、整包哈希）
+  /* 队列：一次上传动作 = 一整套模块。每枚一张卡，卡上放着**它自己的**那份来源（包、整包哈希）
      与它自己的那份结论（查重状态、后端逐枚回执）。
      下面那几个同名单值字段（file / zip / zipSha）是「当前卡」的镜像：视图与派生渲染读的是镜像，
      切卡时先 commitView() 把镜像写回旧卡，再 applyView() 装新卡。
      一份值只在一个地方是真的（卡），镜像只是投影 —— 反过来做就会出「上一枚的哈希挂到下一枚上」。
 
-     nonce 与口令不在这里：v2 的口令一串覆盖整套（设计文档 §15），所以随机段是**一次投稿一份**，
+     nonce 与口令不在这里：v2 的口令一串覆盖整套（设计文档 §15），所以随机段是**一次上传一份**，
      不住在卡上。把它放回每枚一份就退回旧语义了 —— 那时 N 枚要 N 串、N 次签名、N 次提交。 */
   cards: [],
   active: "",
@@ -70,7 +70,7 @@ const state = {
   checkStatus: null,
   uidStatus: "idle", // idle | checking | off | verified | not_found | unavailable | self_reported | invalid
   uidInfo: null, // { uid, nickname, avatar }
-  // 这一次投稿那一枚一次性随机段：整套共用一句口令，所以它只有一份。
+  // 这一次上传那一枚一次性随机段：整套共用一句口令，所以它只有一份。
   nonce: "",
   // 整包 sha256 = 当前卡那个文件的全部字节的 SHA-256（与 Worker ⑤-c 的 computedSha 同口径）。
   // 口令的两个来源是「这一整套的 (id, 整包 sha256) 集合」与 state.nonce 这**一个值**；
@@ -185,7 +185,7 @@ const fieldRaw = (key) => (fieldEls[key] ? fieldEls[key].value : "");
    而这些必须各自存住 —— 表单仍只有一个（一套校验、一套派生，不许写第二份），但它的内容属于
    「当前卡」，切卡时来回搬快照。
    反过来，**跨枚共享的那几样一份都不能变成 N 份**：口令 v2 是一串覆盖整套（§15），
-   随机段因此一次投稿一枚；承诺只勾一次；提交只发一次 POST。这三样住在 state 与表单顶层，
+   随机段因此一次上传一枚；承诺只勾一次；提交只发一次 POST。这三样住在 state 与表单顶层，
    不住在卡上。 */
 
 let cardSeq = 0;
@@ -282,8 +282,8 @@ function applyView(card) {
   state.zip = card ? card.zip : null;
   state.zipSha = card ? card.zipSha : "";
   state.checkStatus = card ? checkOf(card) : null;
-  // 随机段不在这里搬：一次投稿一份、整套共用（v2 的口令覆盖全集），它不属于任何一张卡。
-  // 同样不搬的还有 uploader / coolapkUid —— 一次投稿只有一个人，那两行是顶层共享字段。
+  // 随机段不在这里搬：一次上传一份、整套共用（v2 的口令覆盖全集），它不属于任何一张卡。
+  // 同样不搬的还有 uploader / coolapkUid —— 一次上传只有一个人，那两行是顶层共享字段。
   for (const key of CARD_KEYS) {
     const el = fieldEls[key];
     if (!el) continue;
@@ -367,7 +367,7 @@ function dropCard(card) {
 }
 
 /**
- * 随机段：一次投稿**一份**，整套共用。
+ * 随机段：一次上传**一份**，整套共用。
  * v1 时代它住在卡上（一枚一串、一枚一次提交），v2 把它收回到这里 ——
  * 一串口令覆盖一整套（§15），所以「一枚一份」现在是错形状：那会需要 N 次签名、N 次提交，
  * 而服务端第一次就把这串烧掉，后 N-1 次全被判「口令已用过」。
@@ -399,7 +399,7 @@ function setCheck(card, status, key, why) {
 /* ------------------------------------------------------- 路由：hash 三视图 */
 
 const VIEWS = {
-  submit: { el: "#view-submit", label: "投稿" },
+  submit: { el: "#view-submit", label: "上传" },
   index: { el: "#view-index", label: "已收录" },
   incidents: { el: "#view-incidents", label: "处置公示" },
   about: { el: "#view-about", label: "说明" },
@@ -429,7 +429,7 @@ function renderRoute() {
   if (params.has("q")) {
     state.query = params.get("q") || "";
     $("#q").value = state.query;
-    // 从投稿页/浏览页跳到公示页时带的是同一个词，两个过滤框都按它起头
+    // 从上传页/浏览页跳到公示页时带的是同一个词，两个过滤框都按它起头
     state.incQuery = state.query;
     $("#q-inc").value = state.query;
   }
@@ -569,7 +569,7 @@ async function intakeBatch(files) {
     state.cards.push(card);
     return card;
   });
-  // 核实早就通过了（先填 UID 再选包的人）：这次投稿那份随机段该在这儿补上。
+  // 核实早就通过了（先填 UID 再选包的人）：这次上传那份随机段该在这儿补上。
   if (state.uidStatus === "verified") ensureNonce();
   renderQueue();
   let pickedDuring = ""; // 用户在解析中途点过的那一枚 —— 批处理完了要还给他
@@ -595,8 +595,8 @@ async function intakeBatch(files) {
     (prev && state.cards.includes(prev) ? prev : fresh[0]);
   if (back && activeCard() !== back) selectCardNow(back.key);
   renderQueue();
-  // 早期重复拦截就排在这一句：一批包一次问完，命中「已被投稿过」的那一枚当场摘出去，
-  // 不让它跟着走完填表、抄签名、提交这三步（那三步的代价由投稿人付：一次签名修改 + 一次限流格）。
+  // 早期重复拦截就排在这一句：一批包一次问完，命中「已被上传过」的那一枚当场摘出去，
+  // 不让它跟着走完填表、抄签名、提交这三步（那三步的代价由上传人付：一次签名修改 + 一次限流格）。
   await runBatchCheck(fresh.filter((c) => state.cards.includes(c)));
 }
 
@@ -654,7 +654,7 @@ async function intake(file) {
 
   // 解析回来的这一刻可能已经晚了：视图的租约中途没了（这一枚被移除、或整批被清空）。
   // 比的是**这一次开始时选中的那个 file 对象**（intake 顶部刚把它记进 state.file），
-  // 不是名字也不是大小：中途换过包、清过、或重开过投稿，就把这一次整条丢掉。
+  // 不是名字也不是大小：中途换过包、清过、或重开过上传，就把这一次整条丢掉。
   // 不丢的话 state.zip 会指回旧包而 state.file 已是新包，旧包的摘要随后还能通过下面那道对象
   // 标识守卫贴到新包上 —— 屏幕上那一串就成了「新包的口令、旧包的字节」。
   if (state.file !== file) return;
@@ -825,7 +825,7 @@ function statusOf(card) {
   if (state.uploading && submitTargets().includes(card)) return { tone: "idle", text: "随这套提交中" };
   if (card.ack) return { tone: "ok", text: "后端已回执" };
   const status = checkOf(card);
-  if (status === "recorded") return { tone: "muted", text: "已被投稿过 · 摘出" };
+  if (status === "recorded") return { tone: "muted", text: "已被上传过 · 摘出" };
   if (status === "version_update") return { tone: "warn", text: "版本更新" };
   if (status === "new") return { tone: "ok", text: "没收录 · 可投" };
   if (status === "unknown") return { tone: "warn", text: "查重未确认" };
@@ -1042,7 +1042,7 @@ function paintQueueReadout() {
   count.textContent = targets.length
     ? `这一套 ${targets.length} 枚 · 一次提交`
     : "这一套里没有要投的枚";
-  if (recorded.length) count.textContent += ` · ${recorded.length} 枚已被投稿过，摘出了`;
+  if (recorded.length) count.textContent += ` · ${recorded.length} 枚已被上传过，摘出了`;
   // 只有一枚、而且这一枚没被摘出去时，整条队列退化成一行：不写这套那两句边界话 ——
   // 那两句对只投一枚的人一个字都没多说。有摘出去的枚、或有被跳过的包时它才是信息。
   const quiet = state.cards.length <= 1 && !recorded.length && !state.skippedFiles.length;
@@ -1053,8 +1053,8 @@ function paintQueueReadout() {
     return;
   }
   const bits = [
-    "一次投稿 = 一整套模块：口令只有一串（绑的是这套的全集）、承诺只勾一次、签名只改一次、POST 只发一次。增删任一枚、改任一枚的模块 ID、给任一枚重选包，都会让那一串变成另一串 —— 改完要重新抄进签名。",
-    "查重这道闸只看公开索引里的模块 ID：索引里不带酷安 UID，所以它只能说「这个 id 已被投稿过」，**分不清是谁投的**；已经投稿但还没合进索引的那些今天查不到 —— 要拦那一档得后端加一档状态，这一轮没做。",
+    "一次上传 = 一整套模块：口令只有一串（绑的是这套的全集）、承诺只勾一次、签名只改一次、POST 只发一次。增删任一枚、改任一枚的模块 ID、给任一枚重选包，都会让那一串变成另一串 —— 改完要重新抄进签名。",
+    "查重这道闸只看公开索引里的模块 ID：索引里不带酷安 UID，所以它只能说「这个 id 已被上传过」，**分不清是谁投的**；已经上传但还没合进索引的那些今天查不到 —— 要拦那一档得后端加一档状态，这一轮没做。",
   ];
   if (state.skippedFiles.length) {
     bits.unshift(
@@ -1071,7 +1071,7 @@ function paintQueueReadout() {
       node(
         "span",
         "queue__dup",
-        ` 队列里有两枚模块 ID 都是 ${dupId}：同一套里同一个 ID 出现两次，服务端按 manifest 形状不对拒掉**整个这一次投稿**（§16 的 normalizeDeclaredSet），不是只跳过那一枚 —— 把其中一枚移掉或改成别的 ID。`
+        ` 队列里有两枚模块 ID 都是 ${dupId}：同一套里同一个 ID 出现两次，服务端按 manifest 形状不对拒掉**整个这一次上传**（§16 的 normalizeDeclaredSet），不是只跳过那一枚 —— 把其中一枚移掉或改成别的 ID。`
       )
     );
   }
@@ -1098,17 +1098,17 @@ function showCheck(tone, chip, title, desc) {
  * 这里加的是「这道前端预拦能做到什么、做不到什么」，属于本页的说明，不是第二份判据。
  *
  * 措辞的边界要说真话，三句都不能少：
- * ① 公开索引里没有投稿人 UID（build-index 的投影层故意不带）⇒ 只能说「这个 id 已被投稿过」，
+ * ① 公开索引里没有上传人 UID（build-index 的投影层故意不带）⇒ 只能说「这个 id 已被上传过」，
  *    **不能暗示归属** —— 说成「你投过了」或「别人投过了」都是猜；
  * ② 正在待审（pending/ 里、还没合进索引）的同 id 今天查不到 ⇒ 这一档拦不住，得后端加一档状态；
  * ③ 摘出之后口令那一串会变 —— 口令绑的是这套的全集，少一枚就是另一个前缀。
  */
 const CHECK_EXTRA = {
   recorded:
-    " 这一枚已经从本次投稿里摘出去了：不进 manifest、不进口令那一串、也不提交。" +
+    " 这一枚已经从本次上传里摘出去了：不进 manifest、不进口令那一串、也不提交。" +
     "摘出去之后屏幕上那一串口令就按剩下的那几枚重算 —— 已经抄进签名的那串要重抄一次。" +
-    "它只看公开索引里的模块 ID：索引里不带酷安 UID，所以分不清「已被投稿过」那一条是谁投的；" +
-    "还在审核里、没合进索引的投稿今天查不到。想留着看就由你留着，队列里点「移除」。",
+    "它只看公开索引里的模块 ID：索引里不带酷安 UID，所以分不清「已被上传过」那一条是谁投的；" +
+    "还在审核里、没合进索引的上传今天查不到。想留着看就由你留着，队列里点「移除」。",
   version_update:
     " 这不是重复，所以它留在这一套里照常要投 —— 只是「对已收录模块的版本更新」要走额外那一层人工审核。",
 };
@@ -1134,7 +1134,7 @@ function cancelCheck(card) {
 }
 
 /**
- * 早期重复拦截（§17.6 的 `POST /check`）：一批包解析完就一次查完，命中「已被投稿过」的那一枚
+ * 早期重复拦截（§17.6 的 `POST /check`）：一批包解析完就一次查完，命中「已被上传过」的那一枚
  * 当场标出来、摘出后续步骤 —— 不让它白走一遍填表、白抄一次签名、白占一次限流。
  *
  * 这条路走不通时（后端还没上批量那个入口、或网络失败）逐枚 `GET /check` 顶上：功能不降级，
@@ -1212,7 +1212,7 @@ async function runCheckFor(card) {
   try {
     status = await checkModule(id, code);
   } catch (err) {
-    why = err instanceof BackendError ? err.message : "查重请求失败，不影响你继续投稿。";
+    why = err instanceof BackendError ? err.message : "查重请求失败，不影响你继续上传。";
   }
   // 这一枚在等回包期间被移除了就什么都不做；结论落卡，视图只在租约还在时跟着动。
   if (!state.cards.includes(card)) return;
@@ -1346,8 +1346,8 @@ function uidBlocked() {
    说明文字一律先说「还差什么」再说已有什么 —— 底栏那句「全部就绪」也由这些句子代写，
    口令还没出现在屏幕上时它不许说就绪（见 refreshGate 里那段 shown）。 */
 const NONCE_WHY = {
-  off: "后端没配置酷安身份核实，口令生成不了 —— 投稿通道未开放，这一步要站点来接",
-  self_reported: "后端收到了 UID 但没核实它，口令生成不了 —— 投稿通道未开放，这一步要站点来接",
+  off: "后端没配置酷安身份核实，口令生成不了 —— 上传通道未开放，这一步要站点来接",
+  self_reported: "后端收到了 UID 但没核实它，口令生成不了 —— 上传通道未开放，这一步要站点来接",
   unavailable: "这次没核实成，口令还没生成 —— 把 UID 重敲一遍会再查；一直不通是后端没接上核实",
   checking: "正在核实 UID —— 通过后随机段就位，这一串还要有模块 ID 和整包 sha256 才算得出",
 };
@@ -1399,7 +1399,7 @@ function gateItems() {
         ? `这一套里有 ${incomplete.length} 枚还没齐：${namesOf(incomplete)} —— 每枚的模块 ID / 名称 / 版本 / 版本号 / 出处都要填，整包哈希也要算出来`
         : targets.length
         ? `这一套 ${targets.length} 枚的 zip 都选了、根目录都含 module.prop、元数据都齐了`
-        : "还没选包：一次投稿可以只投一枚，也可以一整套一起投，先把包拖进来",
+        : "还没选包：一次上传可以只投一枚，也可以一整套一起投，先把包拖进来",
     },
     {
       ok: metaBad.length === 0 && targets.length > 0,
@@ -1415,11 +1415,11 @@ function gateItems() {
     },
     {
       ok: !missingShared.includes("uploader"),
-      text: "投稿人酷安昵称已取得（一次投稿一份署名，这套里每一枚都用它）",
+      text: "上传人酷安昵称已取得（一次上传一份署名，这套里每一枚都用它）",
     },
     {
       ok: !missingShared.includes("coolapkUid") && !badUid,
-      text: "酷安 UID 已填，且是 4-12 位纯数字（一次投稿一份，不用逐枚填）",
+      text: "酷安 UID 已填，且是 4-12 位纯数字（一次上传一份，不用逐枚填）",
     },
   ];
   if (IS_UID_VERIFY_ON) {
@@ -1438,13 +1438,13 @@ function gateItems() {
   if (overCount !== null) {
     items.push({
       ok: false,
-      text: `这一套有 ${targets.length} 枚，超过后端自报的单次枚数上限（${overCount} 枚）—— 拆成两次投稿。`,
+      text: `这一套有 ${targets.length} 枚，超过后端自报的单次枚数上限（${overCount} 枚）—— 拆成两次上传。`,
     });
   }
   if (overTotal !== null) {
     items.push({
       ok: false,
-      text: `这一套合计 ${fmtBytes(totalBytes(targets))}，超过后端自报的整套上限（${fmtBytes(overTotal)}）—— 把大的一枚拆到下一次投稿去。`,
+      text: `这一套合计 ${fmtBytes(totalBytes(targets))}，超过后端自报的整套上限（${fmtBytes(overTotal)}）—— 把大的一枚拆到下一次上传去。`,
     });
   }
   if (spent && !targets.length) {
@@ -1452,7 +1452,7 @@ function gateItems() {
     // 随机段在成功那一刻就换过了，所以这里说的不是「你不能再用这一串」，而是「这一套已经交了」。
     items.push({
       ok: false,
-      text: `${namesOf(acked)} 已经随这一次投稿提交掉了（PR 已开）—— 同一套不能连发两次；要投别的包就再选一批进来。`,
+      text: `${namesOf(acked)} 已经随这一次上传提交掉了（PR 已开）—— 同一套不能连发两次；要投别的包就再选一批进来。`,
     });
   } else {
     const card = activeCard();
@@ -1461,9 +1461,9 @@ function gateItems() {
     if (!state.nonce) {
       nonceText =
         NONCE_WHY[state.uidStatus] ||
-        "投稿口令还没生成 —— UID 核实通过、填上模块 ID、包也选好了，这一串才出现";
+        "上传口令还没生成 —— UID 核实通过、填上模块 ID、包也选好了，这一串才出现";
     } else if (recorded.length && !targets.length) {
-      nonceText = "这一套里没有要投的枚了：都被「已被投稿过」那一档摘出去了，所以没有口令可生成，签名里也不用抄任何东西。";
+      nonceText = "这一套里没有要投的枚了：都被「已被上传过」那一档摘出去了，所以没有口令可生成，签名里也不用抄任何东西。";
     } else if (!proofId && card && !isRecorded(card)) {
       nonceText = "口令还差：填上模块 ID —— 随机段已生成，但这一串要模块 ID 和整包哈希才算得出";
     } else if (incomplete.length) {
@@ -1481,11 +1481,11 @@ function gateItems() {
       // 这一句必须存在，否则下面那句「共用一串口令已生成」就成了屏幕上的一句假话。
       nonceText =
         "口令还差：队列里有两枚的模块 ID 是同一个 —— 同一套里同一个 ID 出现两次时这一串算不出来" +
-        "（服务端也会按 manifest 形状不对拒掉整个这一次投稿），把其中一枚移掉或改成别的 ID";
+        "（服务端也会按 manifest 形状不对拒掉整个这一次上传），把其中一枚移掉或改成别的 ID";
     } else {
       nonceText = state.cards.length > 1
         ? `这一套 ${targets.length} 枚共用一串口令已生成（填进酷安签名，只改这一次）`
-        : "投稿口令已生成（填进酷安签名）";
+        : "上传口令已生成（填进酷安签名）";
     }
     // shown 说的是「屏幕上现在有没有一串可抄进签名」。v2 那一串的来源是「整套的 (id, 整包 sha256)」
     // 加这一枚随机段，所以当前这枚少 id 或少哈希时屏幕上根本没有可抄的东西 —— 那一格不许自称就绪。
@@ -1503,7 +1503,7 @@ function gateItems() {
   if (recorded.length) {
     // 早期重复拦截：这几枚已经被摘出这一套 —— 不进 manifest、不进口令那一串、也不提交。
     // 判据是后端 /check 给的那一档，前端没有另判一份「这个包合不合规」。
-    // 措辞的边界：只能说「这个 id 已被投稿过」—— 公开索引里没有投稿人 UID，分不清是谁投的；
+    // 措辞的边界：只能说「这个 id 已被上传过」—— 公开索引里没有上传人 UID，分不清是谁投的；
     // 还在待审（pending/）里的同 id 今天查不到，那一档这一轮拦不住。
     //
     // `ok: true` 是这一格的关键，不是笔误：要的是「不再参与接下来的步骤」，不是「把剩下几枚
@@ -1513,7 +1513,7 @@ function gateItems() {
     items.push({
       ok: true,
       note: true,
-      text: `${namesOf(recorded)}：这个 id 已被投稿过，已从这一套里摘出去 —— 它不进 manifest，` +
+      text: `${namesOf(recorded)}：这个 id 已被上传过，已从这一套里摘出去 —— 它不进 manifest，` +
         `口令那一串按剩下的 ${targets.length} 枚算（所以摘之前抄进签名的那串要重抄一次）；` +
         `这道闸分不清是谁投的，也查不到还在待审的那一份。`,
     });
@@ -1644,7 +1644,7 @@ function showUid(tone, chip, title, desc, avatar) {
 // 昵称不是要填的字段，是按 UID 反查回来的结果，所以整行默认藏起来：取到了才出现、只读显示，
 // 想改署名只能改 UID —— 这样「UID 是 A、署名写 B」这种组合根本进不了索引。
 // 只有一种情况例外：这次没取到昵称。Worker 那边 uploader 空着直接 400，而酷安抖动、核实被运维
-// 关掉都不该把真人挡在投稿之外，所以这时把同一行放开成可填，并写明是哪一种原因 ——
+// 关掉都不该把真人挡在上传之外，所以这时把同一行放开成可填，并写明是哪一种原因 ——
 // 能被任何人复核的锚点从来是 UID，不是这个随便能起的昵称。
 const UPLOADER_FALLBACK = {
   not_found: "这个 UID 在酷安查不到，所以取不到昵称。改对 UID 会自动带出；急着提交也可以先自己填一个署名。",
@@ -1893,7 +1893,7 @@ const runUidCheck = debounce(async () => {
   // 用户在你等回包的时候又改了 UID，就别把旧结果贴上去
   if (fieldValue("coolapkUid") !== uid) return;
   state.uidStatus = result.status;
-  // 核实通过才发随机段，而且**一次投稿一份**：这一整套共用一串口令（v2 绑的是全集）。
+  // 核实通过才发随机段，而且**一次上传一份**：这一整套共用一串口令（v2 绑的是全集）。
   // 一枚一份是 v1 的形状，那时 N 枚要 N 条不同口令、N 次各自带凭据的 POST。
   if (result.status === "verified") ensureNonce();
   state.uidInfo = result.status === "verified" ? result : null;
@@ -1938,7 +1938,7 @@ function openConfirm() {
   sum.textContent = "";
   // 一次动作只有一个人、一个承诺、一枚口令 —— 这三样在整套之上，逐枚列就是把它们说成 N 份。
   const shared = [
-    ["投稿人酷安昵称", fieldValue("uploader")],
+    ["上传人酷安昵称", fieldValue("uploader")],
     ["酷安 UID", uidLine()],
     ["口令的随机段", state.nonce || "（还没生成）"],
     ["本次要提交", `${targets.length} 枚 · 合计 ${fmtBytes(totalBytes(targets))} · 一个 PR`],
@@ -1975,7 +1975,7 @@ function openConfirm() {
       node(
         "p",
         "warn__queue",
-        `队列里另有 ${rec.length} 枚（${namesOf(rec)}）被「已被投稿过」那一档摘出了：它们不进这一次提交，` +
+        `队列里另有 ${rec.length} 枚（${namesOf(rec)}）被「已被上传过」那一档摘出了：它们不进这一次提交，` +
           "口令那串里也没有它们。要留着看就留着，要重投就先移除再重选包。"
       )
     );
@@ -2062,7 +2062,7 @@ function bindConfirm() {
  *
  * 逐枚那四样（zip / id / name / version / versionCode / author / description / source + sha256）
  * 进 manifest 的 `modules[]`；共享那几样（uploader / coolapkUid / pledge / nonce / turnstile）
- * 留在顶层 —— 一次投稿只有一个人、一个承诺、一枚口令，这是 §17.3 的分工，不是排版偏好。
+ * 留在顶层 —— 一次上传只有一个人、一个承诺、一枚口令，这是 §17.3 的分工，不是排版偏好。
  */
 function batchPayload() {
   const targets = submitTargets();
@@ -2089,7 +2089,7 @@ function batchPayload() {
     coolapkUid: fieldValue("coolapkUid"),
     // 承诺文本的版本号：一次整套勾一次那四条，所以它是顶层那一个字段，不逐枚重复。
     pledge: "pledge-v1",
-    // 口令的随机部分：一次投稿一份，覆盖这一整套。派生串不在这里算 —— 后端自己重算。
+    // 口令的随机部分：一次上传一份，覆盖这一整套。派生串不在这里算 —— 后端自己重算。
     nonce: state.nonce,
     turnstile: state.turnstileToken,
   };
@@ -2128,7 +2128,7 @@ function closeRun() {
  * 所以这一层不再有「这一枚成功了、那一枚失败了」那种半屏结果 —— 一个动作就一个结论。
  *
  * Turnstile 那一层反而更顺了：部件给的令牌是一次性的，旧那份逐枚提交要在 N 次 POST 之间
- * 续 N 次题（而这件事在本地验不了，本站不许拿真投稿去验）；现在整套一次提交只解一次。
+ * 续 N 次题（而这件事在本地验不了，本站不许拿真上传去验）；现在整套一次提交只解一次。
  */
 async function uploadBatch() {
   if (state.uploading) return;
@@ -2155,7 +2155,7 @@ async function uploadBatch() {
     $("#run-pct").textContent = "100%";
     state.batchResult = { ok: true, pr, modules, at: Date.now() };
     // 逐枚回执按 id 落回各自的卡：应答里那个 sha256 是**服务端实算**的那一份（§16 第 3 句），
-    // 落在卡上投稿人才拿得到「我这个字节被算成了什么」，而不是只对着一句「已受理」。
+    // 落在卡上上传人才拿得到「我这个字节被算成了什么」，而不是只对着一句「已受理」。
     const acked = new Map();
     for (const m of modules || []) if (m && typeof m.id === "string") acked.set(m.id, m);
     for (const entry of payload.modules) {
@@ -2236,7 +2236,7 @@ function showSuccess(res) {
   const n = (res.modules && res.modules.length) || (state.lastBatch ? state.lastBatch.modules.length : 0);
   $("#run-kicker").textContent = "PR OPENED";
   const ttl = $("#run-ttl");
-  ttl.textContent = n > 1 ? `这一整套 ${n} 枚已受理，一个 PR 已开` : "投稿已受理，PR 已开";
+  ttl.textContent = n > 1 ? `这一整套 ${n} 枚已受理，一个 PR 已开` : "上传已受理，PR 已开";
   ttl.classList.add("ok");
 
   const box = resultBody();
@@ -2269,7 +2269,7 @@ function showSuccess(res) {
     "点进 PR 能看到审核进度，以及这一整套每一枚的完整元数据。",
     "新模块若风险较低可能自动通过；对已收录模块的版本更新一律人工审核，可能要等。",
     "PR 合并之后，这些模块才会出现在公开索引里，所有人才能在管理器里搜到并一键安装。",
-    "这一串口令已经随这一次投稿记账了（用过即废）。要再投别的包，页面会给你新的一串 —— 签名要再改一次。",
+    "这一串口令已经随这一次上传记账了（用过即废）。要再投别的包，页面会给你新的一串 —— 签名要再改一次。",
   ])
     ul.append(node("li", null, text));
   box.append(node("p", "done__kicker", "接下来"));
@@ -2291,7 +2291,7 @@ function showSuccess(res) {
 
 
 /**
- * 服务端只有两种说法意味着这一串口令真的被烧掉了：用过它，或者它可能已经变成了一条投稿。
+ * 服务端只有两种说法意味着这一串口令真的被烧掉了：用过它，或者它可能已经变成了一条上传。
  * 只有这两种才重掷随机段。其余失败（400 字段问题、403 平台侧读不出记录）不轮换 ——
  * 口令绑包体之后重试同一个口令是有效的（Task 9），无故轮换等于让用户白抄一次签名。
  *
@@ -2374,7 +2374,7 @@ function showFailure(err) {
   if (err instanceof BackendError && (err.kind === "network" || err.kind === "not-configured")) {
     const hint = node("p");
     hint.append(
-      "这类失败通常不用改投稿内容：先确认 ",
+      "这类失败通常不用改上传内容：先确认 ",
       node("code", null, "config.js"),
       " 里的 API_BASE 填了、后端 Worker 在跑，并且它已经给响应加上 Access-Control-Allow-Origin。"
     );
@@ -2403,9 +2403,9 @@ function showFailure(err) {
       node(
         "p",
         null,
-        "口令换了一串 —— 表单里「投稿口令」那一行现在是新的，上一串已经作废。" +
+        "口令换了一串 —— 表单里「上传口令」那一行现在是新的，上一串已经作废。" +
           "先把新串抄进酷安签名并保存，再回来点重试；签名没改就重试，后端还会说这一串不对。" +
-          "换的是这一整套共用的那**一串**：一次投稿只改一次签名。"
+          "换的是这一整套共用的那**一串**：一次上传只改一次签名。"
       )
     );
 
@@ -2439,7 +2439,7 @@ function resetForm() {
   state.uidStatus = "idle";
   state.uidInfo = null;
   state.nonce = "";
-  state.zipSha = ""; // 两个来源一起归零：nonce 与整包哈希（clearQueue 那份是包没了就清，这里是换投稿）
+  state.zipSha = ""; // 两个来源一起归零：nonce 与整包哈希（clearQueue 那份是包没了就清，这里是换上传）
   $("#uid-check").hidden = true;
   renderProof(); // nonce 清空后这一行跟着收起，别留一串还能提交的旧口令在屏幕上
   syncUploaderField(); // 顺手把 readOnly / 标签 / 说明一起还原，别留一个锁着的空框
@@ -2543,8 +2543,8 @@ function renderIndex() {
       shell.append(why);
       return;
     }
-    shell.append(node("p", null, "没找到不等于没被投过 —— 查重以模块 ID 为准。确认自己手上的包还没收录的话，可以直接投稿。"));
-    const go = node("a", "btn btn--go btn--sm", "去投稿");
+    shell.append(node("p", null, "没找到不等于没被投过 —— 查重以模块 ID 为准。确认自己手上的包还没收录的话，可以直接上传。"));
+    const go = node("a", "btn btn--go btn--sm", "去上传");
     go.href = "#/submit";
     shell.append(go);
     // 台账没查过才去查一次：查回来之后这条空态可能升级成「命中了一条处置」。
@@ -2950,7 +2950,7 @@ function factsLayer(item, ev) {
     ["包体 sha256", sel.sha256 || (pkg && pkg.sha256) || v.sha256 || "没按哈希命中", ""],
     ["包在哪", pkg && (pkg.zipUrl || pkg.assetName) ? pkg.assetName || pkg.zipUrl : "没有固化过，包体位置只能从索引历史里查", pkg && pkg.zipUrl ? pkg.zipUrl : ""],
     ["大小", pkg && pkg.size !== undefined && pkg.size !== null ? `${pkg.size} B` : "没采到", ""],
-    ["投稿时刻", pkg && pkg.submittedAt ? String(pkg.submittedAt) : "没采到", ""],
+    ["上传时刻", pkg && pkg.submittedAt ? String(pkg.submittedAt) : "没采到", ""],
     ["模块出处", (pkg && pkg.source) || "没采到", pkg && pkg.source ? String(pkg.source) : ""],
   ];
   box.append(kvRow("ec__kv--2", pairs));
@@ -2968,7 +2968,7 @@ function machineLayer(item, ev) {
   const own = pend && pend.ownership ? pend.ownership : null;
   if (pledge || own) {
     /* 「验证方式」那一格要说人话：pending 里存的是机器可读码 —— `bio` 是今天那条单枚口令（v1），
-       `bio-set` 是 §15/§16 那套「一次投稿共用一串集合口令」。把 `bio-set` 原样印到公示页，
+       `bio-set` 是 §15/§16 那套「一次上传共用一串集合口令」。把 `bio-set` 原样印到公示页，
        读者只会当成一个没见过的错误码，而这一格存在的意义正是让人核对「凭什么说这是你」。
        未知值不编说法：原样印出来并标一句不认识 —— 新值出现的正确反应是改这张表，
        不是让页面替后端猜一个听起来合理的解释。 */
@@ -3406,7 +3406,7 @@ function renderAbout() {
       ok: state.limits.from === "backend",
     },
     {
-      k: "批量投稿形状",
+      k: "批量上传形状",
       v:
         "前端发的是 §17.3 那份 manifest + N 个 name=\"zip\" 的 file part（manifest 排第一个 part），口令走 v2 集合串。" +
         "⚠ 这条要求后端已经认 `manifest`（§17.1）—— 还没上线时这一套会被旧版单枚逻辑读成缺字段，" +
@@ -3477,7 +3477,7 @@ function renderAbout() {
 
 /**
  * 把「当前生效的三个上限」画到界面上。数字是问后端要的，异步到货，
- * 所以三处显示（拖放区提示、投稿规格、说明页状态）都必须能从这一个函数重画。
+ * 所以三处显示（拖放区提示、上传规格、说明页状态）都必须能从这一个函数重画。
  * 问不到的那一条写「后端没自报」而不是写一个猜出来的数 —— 页面上的数字是用户行动的依据。
  */
 function paintLimit() {
@@ -3492,7 +3492,7 @@ function paintLimit() {
       (L.maxModules === null ? "" : ` · 一次最多 ${L.maxModules} 枚`) +
       " · 不要多套一层文件夹";
   }
-  // 投稿规格那一格只有地方放两个数（四格 2×2 是钉住的布局），所以写「单枚 + 一次几枚」，
+  // 上传规格那一格只有地方放两个数（四格 2×2 是钉住的布局），所以写「单枚 + 一次几枚」，
   // 整套那一格由拖放区提示与闸门清单说。
   const spec = $("#spec-max");
   if (spec) {
@@ -3578,7 +3578,7 @@ function init() {
   bindSearch();
   bindIncSearch();
   bindTheme();
-  renderQueue(); // 一开始是空队列：整条收起，投稿页与今天一模一样
+  renderQueue(); // 一开始是空队列：整条收起，上传页与今天一模一样
   renderAbout();
   renderRoute();
 

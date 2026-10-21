@@ -29,13 +29,13 @@ export const CHECK_STATUS = {
     tone: "ok",
     label: "new",
     title: "这是个新模块，索引里还没有",
-    hint: "欢迎投稿。审核通过后所有人就能在管理器里搜到它。",
+    hint: "欢迎上传。审核通过后所有人就能在管理器里搜到它。",
   },
   version_update: {
     tone: "warn",
     label: "version_update",
     title: "已有同名模块，你的是更新版本",
-    hint: "可以投稿，但「对已收录模块的版本更新」一律需要人工审核，不会提交完就立刻上线。",
+    hint: "可以上传，但「对已收录模块的版本更新」一律需要人工审核，不会提交完就立刻上线。",
   },
   recorded: {
     tone: "muted",
@@ -47,7 +47,7 @@ export const CHECK_STATUS = {
     tone: "muted",
     label: "unknown",
     title: "没能确认是否已收录",
-    hint: "服务端查不到（网络问题、索引本身挂了等）。可以继续投稿。",
+    hint: "服务端查不到（网络问题、索引本身挂了等）。可以继续上传。",
   },
 };
 
@@ -88,7 +88,7 @@ export async function checkModule(id, versionCode) {
  * 形状逐条对着设计文档 §17.2 / §17.3，一个字段都不许多、一个都不能换形状。
  *
  * 为什么一次动作只发一个请求（而不是像以前那样一枚发一次）：口令 v2 把绑的对象从
- * 「(模块 id, 整包 sha256) 这一对」换成「这一次投稿的整套」，而 `used-nonce` 用过即废 ⇒
+ * 「(模块 id, 整包 sha256) 这一对」换成「这一次上传的整套」，而 `used-nonce` 用过即废 ⇒
  * 一串口令只有在**一个请求带整套**时语义才干净。拆成 N 次的话要么第一次就把这串烧掉
  * （后 N-1 次全被判「口令已用过」），要么把记账降成一枚一次，那攻击者读到串就能逐枚预占。
  * 这条不是省事，是 §15 写下来的硬约束：「不能只做前端」。
@@ -123,7 +123,7 @@ export function submitContribution(batch, { onProgress } = {}) {
       new BackendError(
         "rejected",
         `有 ${noSha.length} 枚的整包 sha256 还没算出来（${noSha.map((m) => m.id || "（没模块 ID）").join("、")}）—— ` +
-          "批量投稿逐枚必须声明整包哈希，缺任何一枚服务端都会按 manifest 不合法拒掉这一整套。"
+          "批量上传逐枚必须声明整包哈希，缺任何一枚服务端都会按 manifest 不合法拒掉这一整套。"
       )
     );
   }
@@ -137,7 +137,7 @@ export function submitContribution(batch, { onProgress } = {}) {
   const form = new FormData();
   // ① manifest 必须是第一个 part，早于任何一个 file part。
   form.append("manifest", buildManifest(modules));
-  // 共享字段留在顶层，不进 manifest（§17.3）：一次投稿只有一个人、一个承诺、一枚口令。
+  // 共享字段留在顶层，不进 manifest（§17.3）：一次上传只有一个人、一个承诺、一枚口令。
   form.append("uploader", batch.uploader || "");
   form.append(CONFIG.COOLAPK_UID_FIELD, batch.coolapkUid || "");
   form.append("pledge", batch.pledge || "");
@@ -215,15 +215,15 @@ function buildManifest(modules) {
 export const SUBMIT_ERROR_TEXT = {
   zip_too_large: {
     owner: "you",
-    text: "这一套里有枚超过服务端自报的单枚上限，服务端在收字节的这一格就拒了。哪一枚超了页面上已经标出来 —— 换那一枚的包，或者把它拆成单独一次投稿。",
+    text: "这一套里有枚超过服务端自报的单枚上限，服务端在收字节的这一格就拒了。哪一枚超了页面上已经标出来 —— 换那一枚的包，或者把它拆成单独一次上传。",
   },
   batch_too_large: {
     owner: "you",
-    text: "这一套的总字节超过服务端自报的整套上限。这不是你包坏了：把这一整套拆成两次投稿就行（每次改一次签名、只投放得下的那几枚）。",
+    text: "这一套的总字节超过服务端自报的整套上限。这不是你包坏了：把这一整套拆成两次上传就行（每次改一次签名、只投放得下的那几枚）。",
   },
   too_many_modules: {
     owner: "you",
-    text: "一次投稿带的枚数超过服务端自报的上限。拆成两次投，其余的包留着下次选就行。",
+    text: "一次上传带的枚数超过服务端自报的上限。拆成两次投，其余的包留着下次选就行。",
   },
   manifest_invalid: {
     owner: "us",
@@ -269,8 +269,8 @@ function serviceSideHint(status, reason) {
   if (status >= 500) {
     return "后端自己出错了（5xx）。**这是我们的问题**：你的包与签名都不用动，稍后再试一次，一直这样就把这一句发给站点。";
   }
-  if (reason) return "服务端拒了这一次投稿，这一条我们没能归到具体哪一种。";
-  return "服务端拒绝了这次投稿。";
+  if (reason) return "服务端拒了这一次上传，这一条我们没能归到具体哪一种。";
+  return "服务端拒绝了这次上传。";
 }
 
 /**
@@ -279,7 +279,7 @@ function serviceSideHint(status, reason) {
  *
  * 读回来的形状逐条判过才认：非 2xx、不是 JSON、results 不是数组、status 不在那四个值里，
  * 任何一种都算「这一档没判成」而不是「没重复」。失效方向必须是**不拦**：
- * 把「读不懂」说成「已被投稿过」，就是把一个查不到的东西说成查到了。
+ * 把「读不懂」说成「已被上传过」，就是把一个查不到的东西说成查到了。
  * 逐枚落状态用 `single` 那条路兜底（上面那个端点今天就在跑），所以后端还没上批量这一条时
  * 这里退回逐枚 GET，功能不降级、只是多打几个请求。
  */
@@ -365,7 +365,7 @@ export const USER_STATUS = {
     tone: "muted",
     label: "not checked",
     title: "署名未经核实",
-    hint: "后端还没接酷安核实接口，这次投稿的 UID 只是格式对，没有确认存在。",
+    hint: "后端还没接酷安核实接口，这次上传的 UID 只是格式对，没有确认存在。",
   },
   verified: {
     tone: "ok",
@@ -384,25 +384,25 @@ export const USER_STATUS = {
     label: "unavailable",
     title: "暂时无法核实",
     hint:
-      "酷安接口没响应或后端核实不可用。署名会标为未核实；投稿口令要核实通过才生成，所以现在还提交不了 —— " +
+      "酷安接口没响应或后端核实不可用。署名会标为未核实；上传口令要核实通过才生成，所以现在还提交不了 —— " +
       "把 UID 重敲一遍会再查，一直不通是后端还没接上核实。",
   },
   // 后端明确告诉我们「只收到、没核实」。和 unavailable（想核实但没核实成）不同，
   // 这一档是后端目前压根没有核实能力 —— 界面必须说清楚是哪一种，
-  // 否则投稿人会以为「显示未核实」只是网络抖动，而实际上是这条能力还没接。
+  // 否则上传人会以为「显示未核实」只是网络抖动，而实际上是这条能力还没接。
   self_reported: {
     tone: "muted",
     label: "self reported",
     title: "署名未经核实",
     hint:
       "后端收到了 UID，但目前没有核实它对应哪个真实酷安账号。" +
-      "这个署名属于「你自己报的」，出问题时公示按自报处理；核实这条没接上，投稿口令也就生成不了，" +
-      "投稿通道此时是关着的 —— 要站点把核实接上才会开。",
+      "这个署名属于「你自己报的」，出问题时公示按自报处理；核实这条没接上，上传口令也就生成不了，" +
+      "上传通道此时是关着的 —— 要站点把核实接上才会开。",
   },
 };
 
 /**
- * 核实投稿人的酷安 UID。契约照 /check 的风格：任何情况都回 HTTP 200，
+ * 核实上传人的酷安 UID。契约照 /check 的风格：任何情况都回 HTTP 200，
  * 前端只读 status，所以 Worker 挂了也不会让表单卡死。
  */
 export async function lookupCoolapkUser(uid) {
@@ -703,7 +703,7 @@ export function byLink(value) {
  * 会拼出一个不存在的 `json/evidence/…`，而它看起来完全像对的。
  *
  * ⚠️ 先验形状再拼 URL：台账是**签名之前由人写进 PR 的**数据，`file` 这一格如果被写成
- * `https://别处/x.json` 或 `../../`，原地拼接就等于让公示页替投稿者发一次跨站请求。
+ * `https://别处/x.json` 或 `../../`，原地拼接就等于让公示页替上传者发一次跨站请求。
  * 不匹配的那个正则的形状一律不取。
  */
 export const LEDGER_EVIDENCE_FILE_RE = /^evidence\/[0-9a-f]{64}\.json$/;
