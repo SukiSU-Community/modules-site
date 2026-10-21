@@ -252,7 +252,8 @@ export const SUBMIT_ERROR_TEXT = {
        · 「这个包我们读不出来」（要我们补能力）—— 两者的修法完全相反，混一次就是一条
          对具体的人的假结论。
      这一片的应答一律 publicAction:「none」：判定只落一份待办记录，公开索引一个字都没改。
-     举报页本身是后一片的活；先把码接住，是为了让后端那把刮源码的尺子两头同时成立。 */
+     04 那一屏（举报页）读的就是这张表 —— 后端加一个码而这里少一条，页面就只能拿一句通用文案
+     去糊两种相反的失败，所以 tools/selftest.mjs 有一根跨端钉子按后端源码里出现的 code 逐条对账。 */
   not_in_index: {
     owner: "you",
     text: "服务端说这个模块 id 不在公开索引里，所以没有可下架的东西。举报这条路只管已经上架的模块：先在索引页确认 id 那一字不差（复制，不要手打）。如果它还没上架，那要走的是上传那一步，不是举报。",
@@ -315,6 +316,43 @@ function serviceSideHint(status, reason) {
   }
   if (reason) return "服务端拒了这一次上传，这一条我们没能归到具体哪一种。";
   return "服务端拒绝了这次上传。";
+}
+
+/**
+ * POST /report（04 那一屏的举报）。成功形状：
+ * `{ ok, established, verdict, owner, reportId, publicAction, nextStep }` —— 判定成立与否都在 200 里，
+ * 因为「不成立」不是请求失败，而是一条要如实展示的结论（把不成立报成 HTTP 4xx 会让人以为没提交成功）。
+ * 失败那一侧照走 `backendFailure`：那九个码各有一条人话，而这里最要不得的两种失败
+ * （「你引用的那段不在包里」要他改材料 / 「这个包我们读不出来」要我们补能力）修法相反。
+ *
+ * 这一发会消耗服务端的一次实名额度，也可能烧掉签名里那一串口令（受理之后才烧，
+ * 判「我们读不出」那一档不烧）—— 所以调用方必须先把口令那一串的来源逐字确认过：
+ * 被举报 id、索引里那一版的 sha256、nonce，三者任一不对，口令就对不上。
+ */
+export async function reportModule(body) {
+  if (!IS_API_CONFIGURED) {
+    throw new BackendError("not-configured", "后端地址还没配置：请在 config.js 填入 API_BASE 后再举报。");
+  }
+  let res;
+  let text = "";
+  try {
+    res = await fetch(url("/report"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    text = await res.text();
+  } catch {
+    throw new BackendError("network", NETWORK_HINT);
+  }
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = null;
+  }
+  if (!res.ok) throw backendFailure(res.status, json, text);
+  return json;
 }
 
 /**
@@ -529,6 +567,25 @@ export async function fetchServiceLimits() {
     maxModules: pick("maxModules"),
     from: "backend",
   };
+  /* 举报那一格的限制由同一个 GET / 自报（`reportLimits`）。前端不许抄第二份：
+     后端把「一次几条引用」「单条至少几字节」改一个数，页面还在教用户按旧的门槛填材料，
+     而那些填法会一条条撞上「不算逐字」—— 这是把自家改动写成用户的错。 */
+  const rl = json && typeof json.reportLimits === "object" ? json.reportLimits : null;
+  const pickIn = (src, key) => {
+    const n = Number(src?.[key]);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+  };
+  out.report = rl
+    ? {
+        maxEvidenceItems: pickIn(rl, "maxEvidenceItems"),
+        minQuoteBytes: pickIn(rl, "minQuoteBytes"),
+        maxQuoteChars: pickIn(rl, "maxQuoteChars"),
+        maxReasonChars: pickIn(rl, "maxReasonChars"),
+        maxBodyBytes: pickIn(rl, "maxBodyBytes"),
+        perIpPerHour: pickIn(rl, "perIpPerHour"),
+        perUidPerHour: pickIn(rl, "perUidPerHour"),
+      }
+    : null;
   out.fields = {
     maxBytes: out.maxBytes !== null,
     maxTotalBytes: out.maxTotalBytes !== null,

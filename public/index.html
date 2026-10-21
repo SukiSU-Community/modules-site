@@ -82,7 +82,8 @@
           <a href="#/submit"><i>01</i>上传</a>
           <a href="#/index"><i>02</i>已收录</a>
           <a href="#/incidents"><i>03</i>处置公示</a>
-          <a href="#/about"><i>04</i>说明</a>
+          <a href="#/report"><i>04</i>举报</a>
+          <a href="#/about"><i>05</i>说明</a>
         </nav>
         <button class="theme" id="theme" type="button" title="切换显示模式">
           <svg class="theme__ico theme__ico--moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -427,7 +428,100 @@
         </div>
       </section>
 
-      <!-- ====================== 04 说明 ====================== -->
+      <!-- ====================== 04 举报 ====================== -->
+      <section class="view" id="view-report" aria-labelledby="h-report">
+        <div class="hero rise">
+          <h1 id="h-report">举报<span class="hi">已上架的模块</span></h1>
+          <p class="hero__lede">
+            已经进公开索引的模块做了用户没同意的事，可以在这里报。硬的门槛只有一条：
+            <b>实名 + 在包里逐字定位到你引用的那段字节</b>。定位不到就判「与包体不符」，
+            不会被写成对作者的指控 —— 这条门槛防的就是「谁写得漂亮谁杀人」。
+          </p>
+          <p class="readout" id="rp-readout" aria-live="polite"></p>
+        </div>
+
+        <div class="panel rise">
+          <div class="field">
+            <div class="field__lab"><label for="rp-id">被举报的模块 ID<span class="req">*</span></label></div>
+            <input class="mono" type="text" id="rp-id" placeholder="在 02 那一屏那一行小灰字上复制" autocomplete="off" spellcheck="false" required />
+            <p class="field__help">举报只管<b>已经进公开索引</b>的模块。还没上架的走 01 那一条路，不在这里。</p>
+          </div>
+          <div class="field">
+            <div class="field__lab"><label for="rp-vc">哪一版（versionCode）</label></div>
+            <input class="mono" type="text" id="rp-vc" inputmode="numeric" placeholder="留空 = 按索引里最新那一枚判" autocomplete="off" spellcheck="false" />
+            <p class="field__help" id="rp-vc-help">读者装在身上的一般是最新那一版，所以留空是默认答案；要指旧那一版就填它的 code。</p>
+          </div>
+          <div class="field">
+            <div class="field__lab"><label for="rp-reason">你凭什么说它恶意<span class="req">*</span></label></div>
+            <textarea id="rp-reason" rows="3" placeholder="一句话说清「做了用户没同意的事」的那件事"></textarea>
+            <p class="field__help">这一格是给人看的叙述，<b>不当证据</b>。要指控的那一行，请从包里原样复制进下面那几格。</p>
+          </div>
+          <div class="field">
+            <div class="field__lab">
+              <span>包内逐字引用<span class="req">*</span></span>
+              <span class="auto" id="rp-ev-count"></span>
+            </div>
+            <div id="rp-ev-list"></div>
+            <p class="field__help">
+              下面这几条会逐条拿去在归档里<b>按字节</b>找：大小写差一个字母、把全角标点打成半角、
+              被换行拆开的那一行，都算<b>没定位到</b> —— 门槛故意不松，松了它就只剩一句漂亮话。
+            </p>
+            <p class="field__help">
+              <button type="button" class="btn btn--ghost btn--sm" id="rp-ev-add">再加一条</button>
+            </p>
+          </div>
+          <div class="field">
+            <div class="field__lab"><label for="rp-uid">你的酷安 UID<span class="req">*</span></label></div>
+            <input class="mono" type="text" id="rp-uid" placeholder="4-12 位数字" inputmode="numeric" autocomplete="off" spellcheck="false" required />
+            <p class="field__help">
+              打开酷安 App「我的」→ <b>点头像进个人主页</b> → 右上角<b>三点</b> →
+              「查看我的资料」里的 <b>用户 UID</b>。填你自己的 —— 这条记录会署你的名字。
+            </p>
+          </div>
+          <div class="field">
+            <div class="field__lab"><label for="rp-nick">你的酷安昵称<span class="req">*</span></label></div>
+            <input type="text" id="rp-nick" placeholder="与你的账号同名" autocomplete="nickname" />
+            <p class="field__help">这一项只是自称：服务端按 UID 查回来的那份活值为准，改名的人不会被永久挡住。</p>
+          </div>
+          <div class="field" id="rp-proof-field">
+            <span class="field__lab">举报口令<span class="req">*</span></span>
+            <div class="proofs" id="rp-proof-list"></div>
+            <p class="field__help" id="rp-proof-help"></p>
+            <p class="field__help">
+              打开酷安「我的 → 编辑资料 → 签名」，把上面那一串填进去并保存，再回来提交。
+              这一串绑的是<b>被举报那一枚的模块 ID 与索引里那串包体 sha256</b>：换一枚、换一版都会算出另一串。
+              它证明这个账号归你 —— 具名公示只认这个锚点，用别人的 UID 报不了。
+            </p>
+            <p class="field__help">
+              <button type="button" class="btn btn--ghost btn--sm" id="rp-nonce-renew">换一串口令</button>
+              提交成功后这一串就作废了（用过即废）；要再报另一枚，回来点这一下并重新抄签名。
+            </p>
+          </div>
+          <p class="field__err" id="rp-error" hidden></p>
+          <div class="btn-row cta-inline">
+            <button type="button" class="btn btn--go" id="rp-submit" disabled>提交举报</button>
+          </div>
+        </div>
+
+        <div class="panel rise" id="rp-result" hidden></div>
+
+        <div class="panel rise doc">
+          <h3><span>NEXT</span>提交之后会发生什么</h3>
+          <p>
+            判定成立与不成立都只写进一份<b>待办记录</b>：公开索引、下架台账、下载链接一个字都不动，
+            也不会开 PR。这一片的应答里那句 <code>publicAction: none</code> 就是这个意思。
+          </p>
+          <p>
+            下一步才是机器 seal 写台账、开下架 PR（方案 §8）。在那之前，<b>举报不会让任何模块下架</b> ——
+            所以别用它来赌气，也不会真的赌气成功。
+          </p>
+          <p class="field__help">
+            这条路限流按 IP 与按 UID 各一根桶，与上传那 5 格/小时是分开的两本账：举报烧不到上传额度，反过来也不行。
+          </p>
+        </div>
+      </section>
+
+      <!-- ====================== 05 说明 ====================== -->
       <section class="view" id="view-about" aria-labelledby="h-about">
         <div class="hero rise">
           <h1 id="h-about">为什么要<span class="hi">人人共建</span></h1>

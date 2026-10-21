@@ -532,6 +532,21 @@ async function main() {
   );
   check("浏览页搜不到时会去查台账，命中就说明是被处置了", /ledgerHitFor\(q\)/.test(appSrc) && /它不是没被上传过，是被下架或拒收了/.test(appSrc));
 
+  check(
+    "举报那一行错误有三个来源（本地形状 / 口令来源不齐 / 服务端原文），且 hidden 由内容决定",
+    /const shown = local \|\| report\.error;[\s\S]{0,80}err\.hidden = !shown;/.test(appSrc) &&
+      !/err\.hidden = true;/.test(appSrc) &&
+      /!target\.ok && \$\("#rp-id"\)\.value\.trim\(\)/.test(appSrc),
+    "浏览器里真撞过一次：无条件 hidden = true 让「索引给不出那一枚」那句真话永远不出现"
+  );
+  check(
+    "服务端那一句失败活到下一次提交（写进 report.error，由重画统一显示），不许在重画路径之外另擦一次",
+    /report\.busy = true;\s*\n\s*report\.error = "";\s*\n\s*\$\("#rp-submit"\)\.disabled = true;/.test(appSrc) &&
+      /catch \(err\) \{\s*\n\s*report\.result = null;[\s\S]{0,120}report\.error =/.test(appSrc) &&
+      (appSrc.match(/\$\("#rp-error"\)/g) || []).length === 1,
+    "在 catch 里直接写那个节点、又在 finally 重画里清一遍，等于刚显示就擦掉"
+  );
+
   /* ------------------------------------------------ 与后端的字段名/契约对齐     这一节防的是「两边各自改了常量，直到线上报错才发现」。曾经前端发 turnstile、
      后端读 cf-turnstile-response；前端写 8MB、后端实际 2MB。两个都是静默失效。 */
 
@@ -573,6 +588,76 @@ async function main() {
   check(
     "输入框 placeholder 里不许出现纯数字示例（UID 那栏写的是规则不是号码）",
     !/placeholder="\d{4,}"/.test(formHtml) && /id="f-uid"[^>]*placeholder="4-12 位数字"/.test(formHtml)
+  );
+
+  /* ------------------------------------------------------- 04 举报那一屏
+     这条路是站内第二个要「实名」的入口（第一个是上传）：它也会烧掉签名里那一串口令，但只在
+     受理之后烧。它同时是第一个拿服务端自报门槛（一次几条引用、单条几字节起）驱动界面判据的屏，
+     所以这一组钉子盯三件会静默坏掉的事：抄第二本账、派生值与来源脱钩、两种相反的失败糊成一句。 */
+  const rpHtml = (formHtml.match(/<section class="view" id="view-report"[\s\S]*?<\/section>/) || [""])[0];
+  check(
+    "04 举报三处齐：nav 里有入口且编号唯一、VIEWS 指对容器、section 自己有 aria-labelledby",
+    /<a href="#\/report"><i>04<\/i>举报<\/a>/.test(formHtml) &&
+      /report: \{ el: "#view-report"/.test(appSrc) &&
+      /id="view-report" aria-labelledby="h-report"/.test(rpHtml) &&
+      /<h1 id="h-report">/.test(rpHtml) &&
+      (formHtml.match(/<i>04<\/i>/g) || []).length === 1,
+    "nav/VIEWS/section 任一处缺就是这一屏进不去，或编号有两种说法"
+  );
+  /* 这一格盯的不是「有没有写 \|\| 8」这种形状，而是那个函数体里**一个数字都不许出现**：
+     抄一份默认值可以写成 `{ maxEvidenceItems: 8 }`、可以写成三元、也可以写成参数默认值 ——
+     盯形状只会挡住我此刻想到的那一种写法。 */
+  const rpLimitsBody = (appSrc.match(/function reportEvidenceLimits\(\) \{[\s\S]*?\n\}/) || [""])[0];
+  check(
+    "举报页不抄第二本账：条数与单条字节下界都从 state.limits.report 取，取值那一段里一个数字都没有",
+    /state\.limits && state\.limits\.report/.test(appSrc) &&
+      /maxEvidenceItems: pickIn\(rl, "maxEvidenceItems"\)/.test(apiSrc) &&
+      /minQuoteBytes: pickIn\(rl, "minQuoteBytes"\)/.test(apiSrc) &&
+      rpLimitsBody.length > 40 &&
+      !/[0-9]/.test(rpLimitsBody.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")),
+    `取值那一段=${rpLimitsBody.slice(0, 120) || "(切不到)"}`
+  );
+  check(
+    "口令是派生值：每次渲染现算，异步回来时来源一动就丢弃（id / 那一版 / nonce 任一一动）",
+    /buildProofString\(target\.id, target\.sha, report\.nonce\)/.test(appSrc) &&
+      /if \(!now\.ok \|\| `\$\{now\.id\}\|\$\{now\.sha\}\|\$\{report\.nonce\}` !== expected\) return;/.test(appSrc) &&
+      !/const report = \{[^}]*proof:/.test(appSrc),
+    "把算出来的串存进 state 迟早和来源脱钩 —— 屏幕上是 A 的口令、发出去的是 B 的那一枚"
+  );
+  check(
+    "索引里给不出那一枚就不许提交：enable 判据含 reportTarget().ok，缺哪一样说哪一样的真话",
+    /const ok =\s*\n?\s*target\.ok &&/.test(appSrc) &&
+      /\$\("#rp-submit"\)\.disabled = !ok;/.test(appSrc) &&
+      /举报只管已经上架的模块/.test(appSrc) &&
+      /没有 64 位的包体 sha256/.test(appSrc) &&
+      /这一版不在索引里/.test(appSrc)
+  );
+  /* 「不许在失败那一支里轮换 nonce」这一条不能拿「往后数 400 个字符里没有 makeNonce」来判：
+     窗口会漂到下一个函数（renderReport 里就有轮换），改了代码结构就假红。切那一段 catch 体本身。 */
+  const rpCatchBody = (appSrc.match(/catch \(err\) \{[\s\S]*?\n  \} finally \{/) || [""])[0];
+  check(
+    "受理之后才换 nonce；没受理的那一次明说「不消耗你的口令」，且失败那一支里一个 nonce 都不生成",
+    /report\.result = json;[\s\S]{0,160}report\.nonce = makeNonce\(\);/.test(appSrc) &&
+      rpCatchBody.length > 40 &&
+      !/makeNonce/.test(rpCatchBody) &&
+      /它没消耗你的口令/.test(appSrc)
+  );
+  check(
+    "举报只 POST /report，失败一律过那张码表；「不成立」留在 200 里当结论而不是当请求失败",
+    /fetch\(url\("\/report"\)/.test(apiSrc) &&
+      /if \(!res\.ok\) throw backendFailure\(res\.status, json, text\);/.test(apiSrc) &&
+      !/established === false[\s\S]{0,120}throw new BackendError/.test(apiSrc),
+    "把「没有成立」做成 4xx 会让人以为没提交成功，而它其实是这条路上最常见、也最该被如实展示的那一条结论"
+  );
+  check(
+    "举报入口只在索引给得出 64 位 sha256 时才出现（口令来源不齐就别许诺这枚报得了）",
+    /if \(latest && SHA256_HEX_RE\.test\(String\(latest\.sha256 \|\| ""\)\)\) \{[\s\S]{0,220}#\/report\?id=/.test(appSrc)
+  );
+  check(
+    "举报页把「这一片不动公开状态」写在界面上，而不是只写在服务端应答里",
+    /publicAction: none/.test(rpHtml) &&
+      /举报不会让任何模块下架/.test(rpHtml) &&
+      /与上传那 5 格\/小时是分开的两本账/.test(rpHtml)
   );
   check(
     "硬性条件是 2×2 四格，且 app.js 要写的 #spec-max 还在其中一格",

@@ -27,10 +27,11 @@ import {
   lookupCoolapkUser,
   isCoolapkUid,
   normalizeCoolapkUrl,
+  reportModule,
 } from "./api.js";
 import { canInflateRaw, listEntries, readEntry, inspectEntries } from "./zipread.js";
 import { parseModuleProp } from "./moduleprop.js";
-import { buildProofStringV2, canonicalProofSet, makeNonce, sha256HexBytes } from "./proof.js";
+import { buildProofString, buildProofStringV2, canonicalProofSet, makeNonce, sha256HexBytes } from "./proof.js";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -402,6 +403,7 @@ const VIEWS = {
   submit: { el: "#view-submit", label: "上传" },
   index: { el: "#view-index", label: "已收录" },
   incidents: { el: "#view-incidents", label: "处置公示" },
+  report: { el: "#view-report", label: "举报" },
   about: { el: "#view-about", label: "说明" },
 };
 
@@ -435,6 +437,14 @@ function renderRoute() {
   }
   if (name === "index") renderIndex();
   if (name === "incidents") renderIncidents();
+  if (name === "report") {
+    // 从 02 那一屏「举报这一枚」进来时带着 id 与 versionCode：那是用户不必重打的两格，
+    // 也是口令的两个来源 —— 预填错了就等于口令绑错，所以只认索引里真有的那一枚（reportTarget 判）。
+    if (params.has("id")) $("#rp-id").value = params.get("id") || "";
+    if (params.has("vc")) $("#rp-vc").value = params.get("vc") || "";
+    if (!state.index) loadIndex();
+    renderReport();
+  }
   window.scrollTo({ top: 0, behavior: "auto" });
 }
 
@@ -2590,6 +2600,12 @@ function modRow(m, q) {
     a.rel = "noopener noreferrer";
     ft.append(a);
   }
+  // 举报从「就是这一枚」这一格进去：带着 id 与 versionCode，口令的两个来源就不用用户手打。
+  if (latest && SHA256_HEX_RE.test(String(latest.sha256 || ""))) {
+    const rep = node("a", "mod__rep", "举报这一枚");
+    rep.href = `#/report?id=${encodeURIComponent(m.id)}&vc=${encodeURIComponent(latest.versionCode)}`;
+    ft.append(rep);
+  }
   li.append(ft);
   return li;
 }
@@ -2607,6 +2623,265 @@ async function loadIndex() {
       err instanceof BackendError ? err.message : "索引读取失败，可能是网络或格式问题。";
   }
   renderIndex();
+  // 索引是口令的来源之一：它晚到一步，04 那一屏上「算不出口令」那句就得当场改口。
+  if (parseHash().name === "report") refreshReportForm();
+}
+
+/* ------------------------------------------------------- 04 举报（已上架的模块）
+   这条路的硬门槛只有一句：实名 + 在包里逐字定位到。判据全在服务端（worker 的 handleReport），
+   页面只做两件谁都不肯替它做的事：把「实名」那一串口令算出来给人抄进签名，以及把两种相反的
+   失败分开说 —— 「你引用的那段不在包里」（要他改材料）与「这个包我们读不出来」（要我们补能力）。
+   一次成功的举报会烧掉签名里那一串口令（用过即废），所以口令的三个来源任何一动都必须重算。 */
+
+const report = {
+  nonce: "",
+  evidence: [""],
+  busy: false,
+  result: null,
+  /** 服务端那一次的原文（过码表之后）。它活到下一次提交为止 —— 否则重画一次就把人刚看到的那句擦了。 */
+  error: "",
+};
+
+/** 被举报的那一枚：口令绑 (id, 索引里那一版的 sha256)，这一格算不出来就没有可提交的口令。 */
+function reportTarget() {
+  const id = $("#rp-id").value.trim();
+  if (!id) return { ok: false, why: "还没填模块 ID：口令那一串绑的就是那一枚的 id 与包体 sha256。" };
+  if (!state.index) {
+    return { ok: false, why: "公开索引还没读出来。口令要绑的那串 sha256 只在索引里，读不到就算不出那一串。" };
+  }
+  const m = state.index.modules.find((x) => x.id === id);
+  if (!m) {
+    return {
+      ok: false,
+      why: `索引里没有 id=${id} 的模块。举报只管已经上架的模块 —— 请从 02 那一屏复制那一行小灰字，别手打。`,
+    };
+  }
+  const rawVc = $("#rp-vc").value.trim();
+  let version = null;
+  if (rawVc) {
+    version = m.versions.find((v) => Number(v.versionCode) === Number(rawVc)) || null;
+    if (!version) {
+      const known = m.versions.map((v) => v.versionCode).sort((a, b) => a - b).join(", ");
+      return { ok: false, why: `这一版不在索引里；索引里这一枚有 versionCode=${known}。填其中一个，或者留空按最新那一枚判。` };
+    }
+  } else {
+    version = m.latest || m.versions[0] || null;
+  }
+  if (!version) return { ok: false, why: "索引里这一枚没有任何版本条目 —— 那是索引自己的形状问题（本站的事）。" };
+  if (!SHA256_HEX_RE.test(String(version.sha256 || ""))) {
+    return { ok: false, why: "索引里那一枚没有 64 位的包体 sha256，口令算不出来 —— 本站索引的问题，你不需要改任何东西。" };
+  }
+  return { ok: true, module: m, version, id, sha: String(version.sha256).toLowerCase(), assumed: !rawVc };
+}
+
+function reportEvidenceLimits() {
+  // 数字只在服务端自报时才有：没自报就什么都不说，绝不在这儿抄一份默认值当第二本账。
+  const r = state.limits && state.limits.report;
+  return r && r.maxEvidenceItems ? r : null;
+}
+
+function paintEvidence() {
+  const box = $("#rp-ev-list");
+  const lim = reportEvidenceLimits();
+  box.textContent = "";
+  report.evidence.forEach((quote, i) => {
+    const row = node("div", "field");
+    const ta = node("textarea", "mono");
+    ta.rows = 2;
+    ta.id = `rp-ev-${i}`;
+    ta.value = quote;
+    ta.placeholder = i === 0 ? "从包里原样复制的那一行，例如 curl … | sh" : "再一条（同样要逐字）";
+    ta.addEventListener("input", () => {
+      report.evidence[i] = ta.value;
+      refreshReportForm();
+    });
+    row.append(ta);
+    if (report.evidence.length > 1) {
+      const rm = node("button", "btn btn--ghost btn--sm", "去掉这一条");
+      rm.type = "button";
+      rm.addEventListener("click", () => {
+        report.evidence.splice(i, 1);
+        paintEvidence();
+        refreshReportForm();
+      });
+      row.append(rm);
+    }
+    box.append(row);
+  });
+  const count = $("#rp-ev-count");
+  count.textContent = lim
+    ? `${report.evidence.length} / ${lim.maxEvidenceItems} 条 · 每条至少 ${lim.minQuoteBytes} 字节`
+    : `${report.evidence.length} 条`;
+  const add = $("#rp-ev-add");
+  add.disabled = Boolean(lim && report.evidence.length >= lim.maxEvidenceItems);
+}
+
+function refreshReportForm() {
+  const target = reportTarget();
+  const uid = $("#rp-uid").value.trim();
+  const nick = $("#rp-nick").value.trim();
+  const reason = $("#rp-reason").value.trim();
+  const quotes = report.evidence.map((q) => q.replace(/\r/g, "")).filter((q) => q.trim());
+  const lim = reportEvidenceLimits();
+  const shortQuote = lim ? quotes.some((q) => new TextEncoder().encode(q).length < lim.minQuoteBytes) : false;
+  const longReason = lim && lim.maxReasonChars ? [...reason].length > lim.maxReasonChars : false;
+  const ok =
+    target.ok &&
+    isCoolapkUid(uid) &&
+    Boolean(nick) &&
+    Boolean(reason) &&
+    quotes.length > 0 &&
+    !shortQuote &&
+    !longReason &&
+    !report.busy;
+  $("#rp-submit").disabled = !ok;
+  $("#rp-vc-help").textContent = target.ok
+    ? `按这一枚判：versionCode=${target.version.versionCode}${target.assumed ? "（索引里最新那一版，留空时的默认）" : ""} · sha256 ${target.sha.slice(0, 12)}…`
+    : "读者装在身上的一般是最新那一版，所以留空是默认答案；要指旧那一版就填它的 code。";
+  paintProof(target);
+  const err = $("#rp-error");
+  // 三种话只能显示一种，且都不许被无条件 hidden 掉：
+  //   ① 本地能判的形状问题（引用太短）② 口令来源不齐（索引给不出那一枚）③ 服务端那一次的原文。
+  // ②只在用户已经打了 id 之后才说 —— 空表单上追着人喊「索引里没有 id=」是噪音，不是提示。
+  const local = shortQuote
+    ? `有一条引用短于 ${lim.minQuoteBytes} 字节：太短的串在任何包里都找得到，那条门槛就形同虚设。请复制完整那一行。`
+    : !target.ok && $("#rp-id").value.trim()
+      ? target.why
+      : "";
+  const shown = local || report.error;
+  err.hidden = !shown;
+  err.textContent = shown;
+  return ok;
+}
+
+/** 口令那一串：派生值，每次渲染现算 —— id / 那一版 / 换过的 nonce 任一动，串就换。 */
+function paintProof(target) {
+  const list = $("#rp-proof-list");
+  list.textContent = "";
+  const help = $("#rp-proof-help");
+  if (!target.ok) {
+    help.textContent = "口令还差：上面那一格说清了差的是哪一件。";
+    return;
+  }
+  const row = node("div", "proof");
+  const code = node("code", "mono proof__txt", "正在算这一串…");
+  row.append(code);
+  list.append(row);
+  const expected = `${target.id}|${target.sha}|${report.nonce}`;
+  buildProofString(target.id, target.sha, report.nonce).then(
+    (text) => {
+      // 异步回来时来源可能已经动了（改 id / 换版 / 换 nonce）—— 只认还在绑那一套的那份结果。
+      const now = reportTarget();
+      if (!now.ok || `${now.id}|${now.sha}|${report.nonce}` !== expected) return;
+      code.textContent = text;
+      const copy = node("button", "btn btn--ghost btn--sm proof__copy", "复制这一串");
+      copy.type = "button";
+      copy.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          copy.textContent = "已复制";
+        } catch {
+          copy.textContent = "浏览器不让复制，请自己选中";
+        }
+        setTimeout(() => (copy.textContent = "复制这一串"), 1500);
+      });
+      row.append(copy);
+      help.textContent = `这一串绑的是 id=${target.id} 与 versionCode=${target.version.versionCode} 那一枚的包体 sha256（${target.sha.slice(0, 16)}…）。`;
+    },
+    () => {
+      code.textContent = "这一串算不出来（浏览器不支持 SHA-256）";
+    }
+  );
+}
+
+function paintReportResult() {
+  const box = $("#rp-result");
+  const r = report.result;
+  box.hidden = !r;
+  box.textContent = "";
+  if (!r) return;
+  const hd = node("h3", null, r.established ? "这条举报成立，已记下待办" : "这条举报没有成立");
+  box.append(hd);
+  const kv = node("ul", "mono");
+  const add = (k, v) => {
+    const li = node("li");
+    li.append(node("span", "mod__id", k), " ", v);
+    kv.append(li);
+  };
+  add("判定", String(r.verdict || "（服务端没给）"));
+  add("是谁的事", r.owner === "us" ? "本站的（你不需要改任何东西）" : r.owner === "you" ? "举报材料的（照着下面那句改）" : String(r.owner || "（没给）"));
+  add("公开动作", String(r.publicAction || "（没给）") + " —— 公开索引一个字都没动");
+  if (r.reportId) add("记录号", r.reportId);
+  box.append(kv);
+  box.append(node("p", "field__help", String(r.nextStep || "服务端没给下一步 —— 这一句该由服务端说，缺它是本站的问题。")));
+}
+
+async function submitReport() {
+  if (report.busy) return;
+  const target = reportTarget();
+  if (!target.ok) return;
+  const quotes = report.evidence.map((q) => q.replace(/\r/g, "")).filter((q) => q.trim());
+  report.busy = true;
+  report.error = "";
+  $("#rp-submit").disabled = true;
+  $("#rp-readout").textContent = "正在提交：服务端要读一次索引、取一次归档，再在你签名的那一串里核对口令。";
+  try {
+    const json = await reportModule({
+      id: target.id,
+      versionCode: target.version.versionCode,
+      reason: $("#rp-reason").value.trim(),
+      evidence: quotes,
+      coolapkUid: $("#rp-uid").value.trim(),
+      uploader: $("#rp-nick").value.trim(),
+      nonce: report.nonce,
+    });
+    report.result = json;
+    // 受理之后就换一串：口令用过即废，同一串再发一次只会撞「已用过」那一句。
+    report.nonce = makeNonce();
+    paintReportResult();
+    $("#rp-readout").textContent = json.established
+      ? "这条举报成立并记下了待办；公开索引没动，下一步由机器 seal 那片。"
+      : "这条举报没有成立，但同样留下了待办记录；下面那句是服务端给的下一步。";
+  } catch (err) {
+    report.result = null;
+    paintReportResult();
+    report.error = err instanceof BackendError ? err.message : `这一发没打出去：${String((err && err.message) || err)}`;
+    $("#rp-readout").textContent = "这次举报没有受理。它没消耗你的口令 —— 签名不用改，改完下面那一句说的那件事再来一次。";
+  } finally {
+    report.busy = false;
+    refreshReportForm();
+  }
+}
+
+function renderReport() {
+  if (!report.nonce) report.nonce = makeNonce();
+  paintEvidence();
+  paintReportResult();
+  refreshReportForm();
+}
+
+function bindReport() {
+  ["#rp-id", "#rp-vc", "#rp-reason", "#rp-uid", "#rp-nick"].forEach((sel) => {
+    const el = $(sel);
+    const on = () => refreshReportForm();
+    el.addEventListener("input", on);
+    el.addEventListener("change", on);
+  });
+  $("#rp-ev-add").addEventListener("click", () => {
+    const lim = reportEvidenceLimits();
+    if (lim && report.evidence.length >= lim.maxEvidenceItems) return;
+    report.evidence.push("");
+    paintEvidence();
+    refreshReportForm();
+  });
+  $("#rp-nonce-renew").addEventListener("click", () => {
+    report.nonce = makeNonce();
+    refreshReportForm();
+    $("#rp-proof-help").textContent = "换了新的一串：把上面这一串抄进签名并保存，之前那一串就作废了。";
+  });
+  $("#rp-submit").addEventListener("click", () => {
+    submitReport();
+  });
 }
 
 function bindSearch() {
@@ -3531,11 +3806,14 @@ async function syncLimits() {
     r.maxBytes !== state.limits.maxBytes ||
     r.maxTotalBytes !== state.limits.maxTotalBytes ||
     r.maxModules !== state.limits.maxModules ||
-    r.from !== state.limits.from;
+    r.from !== state.limits.from ||
+    // 举报那几格（一次几条、单条几字节起）也走同一个自报：晚到要重画 04，否则条数上限是猜的。
+    (r.report ? JSON.stringify(r.report) : "") !== (state.limits.report ? JSON.stringify(state.limits.report) : "");
   state.limits = r;
   if (!changed) return;
   paintLimit();
   refreshGate(); // 枚数与整套字节这两格依赖它，到货之后清单要说真话
+  if (parseHash().name === "report") renderReport();
   renderAbout();
 }
 
@@ -3577,6 +3855,7 @@ function init() {
   bindConfirm();
   bindSearch();
   bindIncSearch();
+  bindReport();
   bindTheme();
   renderQueue(); // 一开始是空队列：整条收起，上传页与今天一模一样
   renderAbout();
