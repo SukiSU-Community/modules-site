@@ -1693,6 +1693,22 @@ async function main() {
         missing.length === 0 && workerHas,
         `网关缺：${missing.join(", ") || "无"}；Worker 侧三条齐全=${workerHas}`
       );
+      /* 同一族的另一根，方向不同：这次比的是 **Worker 自报的那张端点表**（GET / 里的 endpoints）。
+         2026-10-21 加 POST /report 就撞过一次——Worker 路由在、432 条用例全绿，而浏览器那一侧
+         打进来拿到的是 Pages 的静态 404，因为用户走的入口从来不是 Worker 本身，是这层网关。
+         `<sha256>.json` 那种占位段折成 `*` 再比：include 里写的就是通配形状。
+         `advertised.length >= 8` 是正例控制：那张表读不到时必须红，不许空对空地绿。 */
+      const epBlock = /endpoints: \[([^\]]*)\]/.exec(worker)?.[1] ?? "";
+      const advertised = [...epBlock.matchAll(/'(?:[A-Z]+ )?(\/[^']+)'/g)].map((m) => m[1].replace(/<[^>]+>/g, "*"));
+      // include 里的 `/x/*` 按 Pages 自己的语义匹配「该前缀下的任何一条」，不是字面量相等：
+      // 自报表里那一条写的是 `/evidence/<sha256>.json`，拿字符串比必然假红。
+      const covered = (p) => include.some((inc) => (inc.endsWith("*") ? p.startsWith(inc.slice(0, -1)) : p === inc));
+      const gwMissing = advertised.filter((p) => !covered(p));
+      check(
+        "Worker 自报的每一个端点都在网关 include 里（新端点漏一条就是一次「测试全绿而入口 404」）",
+        advertised.length >= 8 && gwMissing.length === 0,
+        `自报表=${JSON.stringify(advertised)}；网关缺=${gwMissing.join(", ") || "无"}`
+      );
     }
   }
 
