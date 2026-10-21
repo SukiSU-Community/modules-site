@@ -1089,7 +1089,7 @@ async function main() {
     `app.js: ${nonceSpentLiteral}`
   );
   check(
-    "平台侧「读不出本次投稿的口令记录」不算口令烧掉（兜底判据只认那两种说法）",
+    "平台侧「读不出本次上传的口令记录」不算口令烧掉（兜底判据只认那两种说法）",
     [
       "这个口令已经用过，请重新生成后再提交",
       // 第二支钉的是正则里的前向兼容钩子：Worker 今天没有任何可发的文案与之匹配（整个
@@ -1099,10 +1099,11 @@ async function main() {
     ].every((s) => SPENT_TEXT_RE_FALLBACK.test(s)) &&
       [
         // 9d66cd8 换掉旧文案「酷安核实没通过（口令记录读不出来）」后的现行句子（index.ts 的
-        // KV 读失败分支原样）：失败的是自家记账，不是「你用过了」，绝不许触发轮换。
-        "服务端读不出本次投稿的口令记录（自家记账的 KV 没有应答），本次未提交 —— 请稍后重试",
+        // KV 读失败分支原样，2026-10-21 站内语域改成「上传」之后一起跟着换）：失败的是自家记账，
+        // 不是「你用过了」，绝不许触发轮换。
+        "服务端读不出本次上传的口令记录（自家记账的 KV 没有应答），本次未提交 —— 请稍后重试",
         "酷安核实没通过（连接超时），本次未提交 —— 与你是不是本人无关，请稍后重试",
-        "投稿需要酷安等级 Lv2 及以上",
+        "上传需要酷安等级 Lv2 及以上",
       ].every((s) => !SPENT_TEXT_RE_FALLBACK.test(s))
   );
   // 四条勾选是「逐条知情」的载体，而解锁按钮数的是真的 checkbox 元素（app.js 里
@@ -1611,6 +1612,23 @@ async function main() {
       `后端没被映射的码=${unmapped.join(",") || "无"}；后端码=${backCodes.join(",")}`
     );
     check("后端只信 cf-connecting-ip（不再信任可伪造的 x-forwarded-for）", !/headers\.get\(["']x-forwarded-for["']\)/i.test(worker));
+    /* 站内语域（2026-10-21 owner 拍「投稿」全站换「上传」）：后端回给人的句子是页面**原样显示**的，
+       它一处留着旧词，整页就同时有两种说法，而用户分不清哪句是自己该改的。
+       扫的是服务端源码里「会进应答字符串」的那部分，三样刻意排除：注释（不显示给人）、
+       日志（运维看的）、以及 PR 正文与标题那一份 git 侧文案（它由审核端的词表另外钉着，
+       改它要连 GOVERNANCE 与 audit 那侧一起动，不在这条规矩里）。 */
+    const GIT_SIDE = /prBody|body: `-|'### 模块投稿'|投稿者：|首次投稿|一次投稿一套|title: `|`投稿：|zip 存放区|console\.(warn|error|log|info)/;
+    const staleRegister = worker
+      .split(/\r?\n/)
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .map((l) => l.split("//")[0])
+      .filter((l) => l.includes("投稿"))
+      .filter((l) => !GIT_SIDE.test(l));
+    check(
+      "后端回给人的句子不许再出现「投稿」：站内语域统一到上传（注释/日志/PR 正文那三份不在这一格）",
+      staleRegister.length === 0,
+      `还在用旧词的行=${staleRegister.map((l) => l.trim().slice(0, 90)).join(" | ") || "无"}`
+    );
     check("后端自己校验出处主机名", /coolapk\.com\.evil\.tld|endsWith\(["']\.coolapk\.com["']\)/.test(worker));
     // ⑤-a：包内 module.prop 与表单的一致性只能在提交阶段判（索引的键取自表单，安装器读的是包内文件）。
     // 前端故意不重复这条规则，所以这里必须钉住「后端真的在判」，否则两边就都没人了。
