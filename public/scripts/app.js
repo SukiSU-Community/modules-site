@@ -827,7 +827,7 @@ function statusOf(card) {
   const status = checkOf(card);
   if (status === "recorded") return { tone: "muted", text: "已被上传过 · 摘出" };
   if (status === "version_update") return { tone: "warn", text: "版本更新" };
-  if (status === "new") return { tone: "ok", text: "没收录 · 可投" };
+  if (status === "new") return { tone: "ok", text: "没收录 · 可上传" };
   if (status === "unknown") return { tone: "warn", text: "查重未确认" };
   if (card.checkRun) return { tone: "idle", text: "查重中" };
   if (card.checkWhy) return { tone: "warn", text: "查重没成" };
@@ -1041,7 +1041,7 @@ function paintQueueReadout() {
   const count = $("#queue-count");
   count.textContent = targets.length
     ? `这一套 ${targets.length} 枚 · 一次提交`
-    : "这一套里没有要投的枚";
+    : "这一套里没有要上传的枚";
   if (recorded.length) count.textContent += ` · ${recorded.length} 枚已被上传过，摘出了`;
   // 只有一枚、而且这一枚没被摘出去时，整条队列退化成一行：不写这套那两句边界话 ——
   // 那两句对只投一枚的人一个字都没多说。有摘出去的枚、或有被跳过的包时它才是信息。
@@ -1054,7 +1054,7 @@ function paintQueueReadout() {
   }
   const bits = [
     "一次上传 = 一整套模块：口令只有一串（绑的是这套的全集）、承诺只勾一次、签名只改一次、POST 只发一次。增删任一枚、改任一枚的模块 ID、给任一枚重选包，都会让那一串变成另一串 —— 改完要重新抄进签名。",
-    "查重这道闸只看公开索引里的模块 ID：索引里不带酷安 UID，所以它只能说「这个 id 已被上传过」，**分不清是谁投的**；已经上传但还没合进索引的那些今天查不到 —— 要拦那一档得后端加一档状态，这一轮没做。",
+    "查重这道闸只看公开索引里的模块 ID：索引里不带酷安 UID，所以它只能说「这个 id 已被上传过」，**分不清是谁上传的**；已经上传但还没合进索引的那些今天查不到 —— 要拦那一档得后端加一档状态，这一轮没做。",
   ];
   if (state.skippedFiles.length) {
     bits.unshift(
@@ -1107,10 +1107,10 @@ const CHECK_EXTRA = {
   recorded:
     " 这一枚已经从本次上传里摘出去了：不进 manifest、不进口令那一串、也不提交。" +
     "摘出去之后屏幕上那一串口令就按剩下的那几枚重算 —— 已经抄进签名的那串要重抄一次。" +
-    "它只看公开索引里的模块 ID：索引里不带酷安 UID，所以分不清「已被上传过」那一条是谁投的；" +
+    "它只看公开索引里的模块 ID：索引里不带酷安 UID，所以分不清「已被上传过」那一条是谁上传的；" +
     "还在审核里、没合进索引的上传今天查不到。想留着看就由你留着，队列里点「移除」。",
   version_update:
-    " 这不是重复，所以它留在这一套里照常要投 —— 只是「对已收录模块的版本更新」要走额外那一层人工审核。",
+    " 这不是重复，所以它留在这一套里照常要上传 —— 只是「对已收录模块的版本更新」要走额外那一层人工审核。",
 };
 
 const checkTimers = new Map();
@@ -1287,7 +1287,7 @@ function bindCheck() {
     "afterend",
     (() => {
       const p = node("p", "field__help");
-      p.append("想先确认有没有人投过？", " ");
+      p.append("想先确认有没有人上传过？", " ");
       const a = node("a", null, "按当前 ID 搜已收录列表");
       a.href = "#";
       a.addEventListener("click", (e) => {
@@ -1399,7 +1399,7 @@ function gateItems() {
         ? `这一套里有 ${incomplete.length} 枚还没齐：${namesOf(incomplete)} —— 每枚的模块 ID / 名称 / 版本 / 版本号 / 出处都要填，整包哈希也要算出来`
         : targets.length
         ? `这一套 ${targets.length} 枚的 zip 都选了、根目录都含 module.prop、元数据都齐了`
-        : "还没选包：一次上传可以只投一枚，也可以一整套一起投，先把包拖进来",
+        : "还没选包：一次上传可以只传一枚，也可以一整套一起传，先把包拖进来",
     },
     {
       ok: metaBad.length === 0 && targets.length > 0,
@@ -1452,7 +1452,7 @@ function gateItems() {
     // 随机段在成功那一刻就换过了，所以这里说的不是「你不能再用这一串」，而是「这一套已经交了」。
     items.push({
       ok: false,
-      text: `${namesOf(acked)} 已经随这一次上传提交掉了（PR 已开）—— 同一套不能连发两次；要投别的包就再选一批进来。`,
+      text: `${namesOf(acked)} 已经随这一次上传提交掉了（PR 已开）—— 同一套不能连发两次；要上传别的包就再选一批进来。`,
     });
   } else {
     const card = activeCard();
@@ -1463,7 +1463,7 @@ function gateItems() {
         NONCE_WHY[state.uidStatus] ||
         "上传口令还没生成 —— UID 核实通过、填上模块 ID、包也选好了，这一串才出现";
     } else if (recorded.length && !targets.length) {
-      nonceText = "这一套里没有要投的枚了：都被「已被上传过」那一档摘出去了，所以没有口令可生成，签名里也不用抄任何东西。";
+      nonceText = "这一套里没有要上传的枚了：都被「已被上传过」那一档摘出去了，所以没有口令可生成，签名里也不用抄任何东西。";
     } else if (!proofId && card && !isRecorded(card)) {
       nonceText = "口令还差：填上模块 ID —— 随机段已生成，但这一串要模块 ID 和整包哈希才算得出";
     } else if (incomplete.length) {
@@ -1515,7 +1515,7 @@ function gateItems() {
       note: true,
       text: `${namesOf(recorded)}：这个 id 已被上传过，已从这一套里摘出去 —— 它不进 manifest，` +
         `口令那一串按剩下的 ${targets.length} 枚算（所以摘之前抄进签名的那串要重抄一次）；` +
-        `这道闸分不清是谁投的，也查不到还在待审的那一份。`,
+        `这道闸分不清是谁上传的，也查不到还在待审的那一份。`,
     });
   }
   if (state.cards.length > 1) {
@@ -1526,8 +1526,8 @@ function gateItems() {
       ok: true,
       shown: n > 0,
       text: n
-        ? `队列里本次要投 ${n} 枚 —— 一整套一次提交：口令一串、签名改一次、POST 发一次`
-        : "队列里没有要投的枚：都被已收录那一档摘出去了，或者已经投完",
+        ? `队列里本次要上传 ${n} 枚 —— 一整套一次提交：口令一串、签名改一次、POST 发一次`
+        : "队列里没有要上传的枚：都被已收录那一档摘出去了，或者已经传完",
     });
   }
   return items;
@@ -1976,7 +1976,7 @@ function openConfirm() {
         "p",
         "warn__queue",
         `队列里另有 ${rec.length} 枚（${namesOf(rec)}）被「已被上传过」那一档摘出了：它们不进这一次提交，` +
-          "口令那串里也没有它们。要留着看就留着，要重投就先移除再重选包。"
+          "口令那串里也没有它们。要留着看就留着，要重新上传就先移除再重选包。"
       )
     );
   }
@@ -2269,14 +2269,14 @@ function showSuccess(res) {
     "点进 PR 能看到审核进度，以及这一整套每一枚的完整元数据。",
     "新模块若风险较低可能自动通过；对已收录模块的版本更新一律人工审核，可能要等。",
     "PR 合并之后，这些模块才会出现在公开索引里，所有人才能在管理器里搜到并一键安装。",
-    "这一串口令已经随这一次上传记账了（用过即废）。要再投别的包，页面会给你新的一串 —— 签名要再改一次。",
+    "这一串口令已经随这一次上传记账了（用过即废）。要再上传别的包，页面会给你新的一串 —— 签名要再改一次。",
   ])
     ul.append(node("li", null, text));
   box.append(node("p", "done__kicker", "接下来"));
   box.append(ul);
 
   const ft = $("#run-ft");
-  const again = node("button", "btn btn--go", "清掉这一套，投下一套");
+  const again = node("button", "btn btn--go", "清掉这一套，传下一套");
   again.type = "button";
   again.addEventListener("click", () => {
     closeRun();
@@ -2355,7 +2355,7 @@ function showFailure(err) {
       "p",
       "run__scope",
       `这一次是**整套一次提交**，语义全有全无：任何一枚没过 ⇒ 整单拒、一个 GitHub 写入都没发生、` +
-        `口令也没被烧掉。所以${n > 1 ? `这 ${n} 枚` : "这一枚"}要么一起上线、要么一起还留在你手上 —— 页面上不会出现「一半投上了」那种状态。`
+        `口令也没被烧掉。所以${n > 1 ? `这 ${n} 枚` : "这一枚"}要么一起上线、要么一起还留在你手上 —— 页面上不会出现「一半传上了」那种状态。`
     )
   );
 
@@ -2535,7 +2535,7 @@ function renderIndex() {
           null,
           `这个查询命中了一条处置记录：${incTitle(hit)}（${KIND_LABELS[hit.kind] || hit.kind || "处置"}）` +
             ` —— ${REASON_LABELS[hit.reason] || hit.reason || "理由见条目"}。` +
-            "它不是没被投过，是被下架或拒收了，所以不会出现在索引里。"
+            "它不是没被上传过，是被下架或拒收了，所以不会出现在索引里。"
         )
       );
       const why = node("a", "btn btn--ghost btn--sm", "去看这条处置");
@@ -2543,7 +2543,7 @@ function renderIndex() {
       shell.append(why);
       return;
     }
-    shell.append(node("p", null, "没找到不等于没被投过 —— 查重以模块 ID 为准。确认自己手上的包还没收录的话，可以直接上传。"));
+    shell.append(node("p", null, "没找到不等于没被上传过 —— 查重以模块 ID 为准。确认自己手上的包还没收录的话，可以直接上传。"));
     const go = node("a", "btn btn--go btn--sm", "去上传");
     go.href = "#/submit";
     shell.append(go);
@@ -2723,7 +2723,7 @@ function renderIncLegend() {
   const host = $("#inc-legend");
   if (!host || host.childElementCount) return;
   const rows = [
-    ["下架 / 拒收", "下架挡住的是这一段内容（按模块 ID、ID+versionCode 或包的 sha256 命中）；拒收挡住的是一个人或一个 ID 未来投来的任何包。"],
+    ["下架 / 拒收", "下架挡住的是这一段内容（按模块 ID、ID+versionCode 或包的 sha256 命中）；拒收挡住的是一个人或一个 ID 未来上传的任何包。"],
     ["命中条件", "同一条里的多个条件是「且」的关系，不是「或」——写了 ID 又写 versionCode，就只命中那一个版本。"],
     ["证据（by）", "指向一条公开可查的评论，谁下的处置看那条评论的作者 —— 名字不在台账里重复一份，因为那是个会过期的抄本。形状不对的指针原样显示成文本，不猜成链接。这一页显示的就是台账原文，判定发生在索引推导与 CI 里，前端不另判一份。"],
     ["复核（verify）", "有这一项时任何人都能自己跑一遍确认这条处置成立，而不是只能相信页面上写的。"],

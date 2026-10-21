@@ -52,7 +52,7 @@ function readEocd(view) {
     if (locator >= 0 && view.getUint32(locator, true) === EOCD64_LOCATOR_SIG) {
       const eocd64 = Number(view.getBigUint64(locator + 8, true));
       if (view.getUint32(eocd64, true) !== EOCD64_SIG) {
-        throw new ZipError("zip64", "zip64 记录损坏，前端读不了，请重新打包后再投");
+        throw new ZipError("zip64", "zip64 记录损坏，前端读不了，请重新打包后再上传");
       }
       total = Number(view.getBigUint64(eocd64 + 32, true));
       cdOffset = Number(view.getBigUint64(eocd64 + 48, true));

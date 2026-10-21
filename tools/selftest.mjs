@@ -530,7 +530,7 @@ async function main() {
       /fetch\(CONFIG\.INDEX_URL, FRESH\)/.test(apiSrc) &&
       /fetch\(target, FRESH\)/.test(apiSrc)
   );
-  check("浏览页搜不到时会去查台账，命中就说明是被处置了", /ledgerHitFor\(q\)/.test(appSrc) && /它不是没被投过，是被下架或拒收了/.test(appSrc));
+  check("浏览页搜不到时会去查台账，命中就说明是被处置了", /ledgerHitFor\(q\)/.test(appSrc) && /它不是没被上传过，是被下架或拒收了/.test(appSrc));
 
   /* ------------------------------------------------ 与后端的字段名/契约对齐     这一节防的是「两边各自改了常量，直到线上报错才发现」。曾经前端发 turnstile、
      后端读 cf-turnstile-response；前端写 8MB、后端实际 2MB。两个都是静默失效。 */
@@ -1246,7 +1246,7 @@ async function main() {
      整套一次提交之后这个数没有意义了（不存在按枚剩余），所以换成同一判据必须喂给
      paintQueueReadout / batchPayload / proofTargets 这三处 —— 少喂一处就是那一处在自己数 N。 */
   check(
-    "闸门清单里那句「本次要投 N 枚」与队列读数、载荷、口令集合同用一个 submitTargets()：读数与真提交的枚数不会漂",
+    "闸门清单里那句「本次要上传 N 枚」与队列读数、载荷、口令集合同用一个 submitTargets()：读数与真提交的枚数不会漂",
     /const n = submitTargets\(\)\.length;/.test(gateBody) &&
       /const targets = submitTargets\(\);/.test(readoutBody) &&
       /const targets = submitTargets\(\);/.test(batchPayloadSrc) &&
@@ -1281,12 +1281,12 @@ async function main() {
     gateBody.slice(gateBody.indexOf("if (recorded.length)"), gateBody.indexOf("if (state.cards.length > 1)"))
   );
   check(
-    "已收录那一档拦下来时闸门点的是那一枚、说的是这个 id 已被上传过：那条行写在 gateItems 里，并说清它分不清谁投的",
+    "已收录那一档拦下来时闸门点的是那一枚、说的是这个 id 已被上传过：那条行写在 gateItems 里，并说清它分不清谁上传的",
     recordedLine.includes("这个 id 已被上传过") &&
       recordedLine.includes("已从这一套里摘出去") &&
       recordedLine.includes("它不进 manifest") &&
       recordedLine.includes("口令那一串按剩下的") &&
-      recordedLine.includes("分不清是谁投的") &&
+      recordedLine.includes("分不清是谁上传的") &&
       recordedLine.includes("查不到还在待审的那一份") &&
       /namesOf\(recorded\)/.test(recordedLine),
     `那一段剥掉注释之后=${recordedLine.slice(0, 80).replace(/\s+/g, " ") || "(切不到)"}`
@@ -1490,7 +1490,7 @@ async function main() {
      「失败只算在这一枚上」这句旧话反过来钉一次不许回来：全有全无之下它会把零写入说成
      「别的枚已经上了」，那是另一种假话。原始目的没动 —— 界面上的结论与网络上真发生的事说同一件事。 */
   check(
-    "整套的诚实说法（§17.4 / §17.5）：一个结论说整套 + 逐枚报明细（落盘 sha256 是服务端实算那份），不许出现「一半投上了」那种状态",
+    "整套的诚实说法（§17.4 / §17.5）：一个结论说整套 + 逐枚报明细（落盘 sha256 是服务端实算那份），不许出现「一半传上了」那种状态",
     !/本次投稿已提交|已经全部提交完成/.test(appSrc) &&
       !/失败只算在这一枚上/.test(appSrc) &&
       /const \{ pr, modules \} = await submitContribution\(payload/.test(appSrc) &&
@@ -1499,7 +1499,7 @@ async function main() {
       /服务端实算 sha256/.test(appSrc) &&
       /语义全有全无/.test(appSrc) &&
       /整单拒、一个 GitHub 写入都没发生/.test(appSrc) &&
-      /页面上不会出现「一半投上了」那种状态/.test(appSrc),
+      /页面上不会出现「一半传上了」那种状态/.test(appSrc),
     `逐枚明细=${/这一次落盘的/.test(appSrc)} 全有全无那一句=${/语义全有全无/.test(appSrc)}`
   );
 
@@ -1512,8 +1512,8 @@ async function main() {
       /if \(state\.parsing\) \{\s*\n\s*state\.pendingSwitch = key;/.test(appSrc)
   );
   check(
-    "单枚不出现「本次要投 N 枚」这种噪音：队列那一行只在 cards.length > 1 时进清单",
-    /if \(state\.cards\.length > 1\) \{[\s\S]{0,260}?队列里本次要投 \$\{n\} 枚/.test(gateBody)
+    "单枚不出现「本次要上传 N 枚」这种噪音：队列那一行只在 cards.length > 1 时进清单",
+    /if \(state\.cards\.length > 1\) \{[\s\S]{0,260}?队列里本次要上传 \$\{n\} 枚/.test(gateBody)
   );
   check(
     "只有一枚时队列条退化成一行：安静档由 cards.length<=1 且没有摘出去的枚决定，标题与边界小字一起收（CSS 也在那一档）",

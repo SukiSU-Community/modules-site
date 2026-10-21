@@ -40,7 +40,7 @@ export const CHECK_STATUS = {
   recorded: {
     tone: "muted",
     label: "recorded",
-    title: "已经收录了，不需要再投",
+    title: "已经收录了，不需要再上传",
     hint: "索引里已有这个 id，且线上版本不比你的旧。",
   },
   unknown: {
@@ -115,7 +115,7 @@ export function submitContribution(batch, { onProgress } = {}) {
   }
   const modules = Array.isArray(batch.modules) ? batch.modules : [];
   if (!modules.length) {
-    return Promise.reject(new BackendError("rejected", "本次要投的整套是空的 —— 一个包都没选中，没什么可发的。"));
+    return Promise.reject(new BackendError("rejected", "本次要上传的整套是空的 —— 一个包都没选中，没什么可发的。"));
   }
   const noSha = modules.filter((m) => !SHA256_HEX_RE.test(String(m.sha256 || "")));
   if (noSha.length) {
@@ -219,11 +219,11 @@ export const SUBMIT_ERROR_TEXT = {
   },
   batch_too_large: {
     owner: "you",
-    text: "这一套的总字节超过服务端自报的整套上限。这不是你包坏了：把这一整套拆成两次上传就行（每次改一次签名、只投放得下的那几枚）。",
+    text: "这一套的总字节超过服务端自报的整套上限。这不是你包坏了：把这一整套拆成两次上传就行（每次改一次签名、只放得下的那几枚）。",
   },
   too_many_modules: {
     owner: "you",
-    text: "一次上传带的枚数超过服务端自报的上限。拆成两次投，其余的包留着下次选就行。",
+    text: "一次上传带的枚数超过服务端自报的上限。拆成两次上传，其余的包留着下次选就行。",
   },
   manifest_invalid: {
     owner: "us",
