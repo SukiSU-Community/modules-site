@@ -9,8 +9,11 @@ import {
   CHECK_STATUS,
   USER_STATUS,
   BackendError,
+  SHA256_HEX_RE,
+  SUBMIT_ERROR_TEXT,
   checkModule,
-  submitModule,
+  checkModulesBatch,
+  submitContribution,
   fetchIndex,
   fetchServiceLimits,
   fetchDispositions,
@@ -27,29 +30,58 @@ import {
 } from "./api.js";
 import { canInflateRaw, listEntries, readEntry, inspectEntries } from "./zipread.js";
 import { parseModuleProp } from "./moduleprop.js";
-import { buildProofString, makeNonce, sha256HexBytes } from "./proof.js";
+import { buildProofStringV2, canonicalProofSet, makeNonce, sha256HexBytes } from "./proof.js";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const MB = 1024 * 1024;
 
 const PREFILL_KEYS = ["id", "name", "version", "versionCode", "author", "description"];
-const REQUIRED_KEYS = ["id", "name", "version", "versionCode", "source", "uploader", "coolapkUid"];
+/**
+ * 字段按「属不属于那一枚」分成两张表 —— 批量投稿把这条界线变成了契约的一部分：
+ *   CARD_KEYS  = 每枚一份，进 manifest 的 `modules[]`（§17.3），在卡与视图之间来回搬；
+ *   SHARED_KEYS = 一次投稿一份，留在顶层 text fields（`pledge` / `nonce` / `coolapkUid` /
+ *                `uploader` / turnstile），**不进卡、不进口令集合**。
+ * 把 UID 与署名当 per-card 存是旧语义的残留（那时一枚一个请求、各自带 UID）；现在一次动作
+ * 只有一个人，队列里 A 枚的 UID 和 B 枚的 UID 必须同时消失，所以它们根本没有「哪一枚的」这件事。
+ * 判据仍然只有一份：这九个字段的 DOM 入口都在同一张表单里。
+ */
+const CARD_KEYS = [...PREFILL_KEYS, "source"];
+const SHARED_KEYS = ["uploader", "coolapkUid"];
+/** 表单里全部可编辑字段（fieldEls 就按这张表建）。 */
+const FORM_KEYS = [...CARD_KEYS, ...SHARED_KEYS];
+/** 每一枚自己必须齐的那些（ uploader / UID 是共享的，由 gateItems 单独一格判）。 */
+const CARD_REQUIRED_KEYS = ["id", "name", "version", "versionCode", "source"];
+const REQUIRED_KEYS = [...CARD_REQUIRED_KEYS, ...SHARED_KEYS];
 
 const state = {
+  /* 队列：一次投稿动作 = 一整套模块。每枚一张卡，卡上放着**它自己的**那份来源（包、整包哈希）
+     与它自己的那份结论（查重状态、后端逐枚回执）。
+     下面那几个同名单值字段（file / zip / zipSha）是「当前卡」的镜像：视图与派生渲染读的是镜像，
+     切卡时先 commitView() 把镜像写回旧卡，再 applyView() 装新卡。
+     一份值只在一个地方是真的（卡），镜像只是投影 —— 反过来做就会出「上一枚的哈希挂到下一枚上」。
+
+     nonce 与口令不在这里：v2 的口令一串覆盖整套（设计文档 §15），所以随机段是**一次投稿一份**，
+     不住在卡上。把它放回每枚一份就退回旧语义了 —— 那时 N 枚要 N 串、N 次签名、N 次提交。 */
+  cards: [],
+  active: "",
   file: null,
   zip: null, // { arrayBuffer, entries, inspect, prop }
   checkStatus: null,
   uidStatus: "idle", // idle | checking | off | verified | not_found | unavailable | self_reported | invalid
   uidInfo: null, // { uid, nickname, avatar }
-  nonce: "", // 所有权口令的随机部分
-  // 整包 sha256 = 用户选中的那个文件的全部字节的 SHA-256（与 Worker ⑤-c 的 computedSha 同口径）。
-  // 口令的两个来源是 nonce 与 zipSha 这两个**值本身**；那串文本永远由
-  // buildProofString(id, zipSha, nonce) 现算，缓存它就等于让展示串和来源脱钩。
+  // 这一次投稿那一枚一次性随机段：整套共用一句口令，所以它只有一份。
+  nonce: "",
+  // 整包 sha256 = 当前卡那个文件的全部字节的 SHA-256（与 Worker ⑤-c 的 computedSha 同口径）。
+  // 口令的两个来源是「这一整套的 (id, 整包 sha256) 集合」与 state.nonce 这**一个值**；
+  // 那串文本永远由 buildProofStringV2(items, nonce) 现算，缓存它就等于让展示串和来源脱钩。
   zipSha: "",
-  // 上限由后端自报（api.js 的 fetchServiceLimits）；config.js 那份只是问不到时的兜底。
-  maxBytes: CONFIG.MAX_UPLOAD_BYTES,
-  maxBytesFrom: "config", // config | backend | unreachable | no-field
+  /* 三个上限全部来自后端 `GET /`（§17.6）：maxBytes = 单枚、maxTotalBytes = 整套、maxModules = 枚数。
+     config.js 里不再有第二份拷贝（这个站漂过一次「前端 8MB、后端 2MB」）。问到几个算几个：
+     没自报的那一条前端**不拦**，页面上明说「后端没自报这一条」，而不是拿一个猜出来的数顶上去。 */
+  limits: { maxBytes: null, maxTotalBytes: null, maxModules: null, fields: {}, from: "pending" },
+  // 解析链最近一次失败的原因（空串 = 没有失败）。它只服务于一件事：让「拖进去没反应」变成一句看得见的真话。
+  intakeError: "",
   index: null,
   indexError: null,
   // 处置台账。ledgerTried 只用于「浏览页搜不到时顺手查一次台账」这条懒路径，
@@ -62,9 +94,22 @@ const state = {
   incOpenUid: "",
   attempted: false,
   uploading: false,
-  lastFields: null,
+  // 上一次发出去的那一整套载荷：重试要重发**同一套**，不是当前视图里的那几枚
+  //（用户在失败弹窗打开期间又改了队列的话，改完的那套和被判失败的那套就不是同一套了）。
+  lastBatch: null,
+  // 整套一次提交的那一份结果：{ ok:true, pr, modules } | { ok:false, reason, code, owner }。
+  // 它是「一次动作一个结论」那一格；卡上那份（card.ack）只装后端逐枚回执。
+  batchResult: null,
   query: "",
   turnstileToken: "",
+  // 解析期间的视图租约：一批包是一张一张解析的（applyProp 只有一份，它写的是表单），
+  // 所以解析中点别的卡先记下来，等这次解析交出租约再兑现。
+  parsing: false,
+  pendingSwitch: "",
+  skippedFiles: [], // 不合格的包不建卡，但它们被跳过这件事得说一句（见 renderQueueNote）
+  // 批量查重那一条路本轮到底走没走过（措辞要能指得出是哪一种查的法子），以及走不通的原因。
+  checkVia: "",
+  checkWhy: "",
 };
 
 /* ------------------------------------------------------------------ 小工具 */
@@ -129,10 +174,227 @@ function debounce(fn, ms) {
 }
 
 const fieldEls = {};
-for (const key of [...PREFILL_KEYS, "source", "uploader", "coolapkUid"]) {
+for (const key of FORM_KEYS) {
   fieldEls[key] = $(`[data-k="${key}"]`);
 }
 const fieldValue = (key) => (fieldEls[key] ? fieldEls[key].value.trim() : "");
+const fieldRaw = (key) => (fieldEls[key] ? fieldEls[key].value : "");
+
+/* ------------------------------------------------------- 01-a 队列：一张卡一枚模块
+   为什么要卡这个中间层：一整套中每一枚都有它自己要填的元数据、它自己的包体字节、它自己的整包哈希，
+   而这些必须各自存住 —— 表单仍只有一个（一套校验、一套派生，不许写第二份），但它的内容属于
+   「当前卡」，切卡时来回搬快照。
+   反过来，**跨枚共享的那几样一份都不能变成 N 份**：口令 v2 是一串覆盖整套（§15），
+   随机段因此一次投稿一枚；承诺只勾一次；提交只发一次 POST。这三样住在 state 与表单顶层，
+   不住在卡上。 */
+
+let cardSeq = 0;
+
+function emptyValues() {
+  const v = {};
+  for (const key of CARD_KEYS) v[key] = "";
+  return v;
+}
+
+function makeCard(file) {
+  return {
+    key: `m${++cardSeq}`,
+    file,
+    zip: null,
+    zipSha: "",
+    checkStatus: null, // /check 给的那一档；来源一换就当作没有（见 checkOf）
+    checkKey: "", // 这份结论属于哪个 (id, versionCode) 组合
+    checkRun: "", // 正在查的是哪个组合（用来区分「还没查」与「正在查」）
+    checkWhy: "", // 查不成时的原话（服务端/网络给的原因）
+    values: emptyValues(),
+    auto: {}, // 这一枚里哪些字段是被 module.prop 预填的（下一次预填可以覆盖它）
+    term: [],
+    ack: null, // 后端逐枚回执里属于它的那一条（§17.5 应答的 modules[]）
+  };
+}
+
+const activeCard = () => state.cards.find((c) => c.key === state.active) || null;
+
+/** 这一枚现在的答案：视图里正在敲的就是当前卡的值，所以当前卡一律读表单，别读它上次提交的快照。 */
+function cardValues(card) {
+  const v = emptyValues();
+  if (!card) return v;
+  if (card === activeCard()) {
+    for (const key of CARD_KEYS) v[key] = fieldRaw(key).trim();
+    return v;
+  }
+  return { ...v, ...card.values };
+}
+
+const checkKeyOf = (id, code) => `${id}\u0000${code}`;
+const viewCheckKey = () => checkKeyOf(fieldValue("id"), fieldValue("versionCode"));
+
+/**
+ * 这一枚的查重结论还算不算数：只认「结论是那一对 (id, versionCode) 查回来的」。
+ * id 或版本号一动，这个比较就当场上真 —— 不需要等下一次网络回来，也不许留着旧结论。
+ * （这条站里有历史教训：派生值和来源脱钩在屏幕上完全看不出来。）
+ */
+function checkOf(card) {
+  if (!card || !card.checkStatus) return null;
+  const v = cardValues(card);
+  return card.checkKey === checkKeyOf(v.id, v.versionCode) ? card.checkStatus : null;
+}
+
+/** 已经收录的那一枚 = 从口令、闸门清单、逐枚提交里全部摘出去的那一枚。 */
+const isRecorded = (card) => checkOf(card) === "recorded";
+
+/**
+ * 「本次要投」的那几枚 = 口令里那一套 = manifest 里那几条 = 这一次 POST 带的 N 个 file part。
+ * 闸门读数、口令那一串、提交那一层共用这**一个**判据 —— 各写一份 filter 迟早会漂成
+ * 「清单说 3 枚、manifest 写 2 条、屏幕上那一串算的是另外 3 条」，而那三种数在批量这一头
+ * 是同一个东西：口令绑的就是这套的全集（§15），少一枚都是另一串口令。
+ * 两类枚不在这里：
+ *   ① 被 /check 判为 recorded 的 —— 它不进集合、不进口令、不进 manifest；
+ *   ② 已经拿到后端回执的（card.ack）—— 那几枚的字节已经在一个 PR 里了，跟着下一次再发一遍
+ *      就是拿同一个 (id, versionCode) 撞第二次（§17.4 之外那一格：pending/CI 的重复）。
+ *      它们留在队列里当这一屏的台账，想投新的就清空或移除，新选的那枚自成下一套。
+ */
+function submitTargets() {
+  return state.cards.filter((c) => c.file && !isRecorded(c) && !c.ack);
+}
+
+/** 视图里那几行解析日志的内容；跟着当前卡走，切卡时来回搬（见 commitView / applyView）。 */
+let termSnapshot = [];
+
+/** 把视图（表单里属于这一枚的那几行 + 那三个单值字段）写回它当前所属的那张卡。 */
+function commitView() {
+  const card = activeCard();
+  if (!card) return null;
+  for (const key of CARD_KEYS) {
+    const el = fieldEls[key];
+    if (!el) continue;
+    card.values[key] = el.value;
+    if (el.dataset.auto === "1") card.auto[key] = true;
+    else delete card.auto[key];
+  }
+  card.term = termSnapshot;
+  return card;
+}
+
+/** 把一张卡装进视图。card 为 null 就是清空（没有卡时的样子和今天没选包一致）。 */
+function applyView(card) {
+  state.file = card ? card.file : null;
+  state.zip = card ? card.zip : null;
+  state.zipSha = card ? card.zipSha : "";
+  state.checkStatus = card ? checkOf(card) : null;
+  // 随机段不在这里搬：一次投稿一份、整套共用（v2 的口令覆盖全集），它不属于任何一张卡。
+  // 同样不搬的还有 uploader / coolapkUid —— 一次投稿只有一个人，那两行是顶层共享字段。
+  for (const key of CARD_KEYS) {
+    const el = fieldEls[key];
+    if (!el) continue;
+    el.value = card ? card.values[key] || "" : "";
+    if (card && card.auto[key]) {
+      el.dataset.auto = "1";
+      el.closest(".field").classList.add("is-pre");
+    } else {
+      delete el.dataset.auto;
+      el.closest(".field").classList.remove("is-pre");
+    }
+  }
+  $("#meta-src").textContent = card && card.zip && card.zip.prop ? "来自 module.prop" : "手动填写";
+  termSnapshot = card && card.term ? card.term : [];
+}
+
+function renderTerm() {
+  const lines = termSnapshot || [];
+  const box = $("#term");
+  if (!lines.length) {
+    box.hidden = true;
+    box.textContent = "";
+    return;
+  }
+  termLines(lines);
+}
+
+/** paint = 要不要动屏幕。后台那几枚的解析结果只落卡，不许占住用户正在看的那一格。 */
+function paintTerm(card, lines) {
+  card.term = lines.slice();
+  if (card === activeCard()) {
+    termSnapshot = card.term;
+    termLines(card.term);
+  }
+}
+
+function selectCardNow(key) {
+  commitView();
+  const card = state.cards.find((c) => c.key === key) || null;
+  state.active = card ? card.key : "";
+  applyView(card);
+  renderTerm();
+  renderCheck();
+  syncUploaderField();
+  runUidCheck();
+  if (card) scheduleCheck(card);
+  renderProof();
+  refreshGate();
+  renderQueue();
+}
+
+/** 用户点队列里的一行。解析期间不立刻换手（视图租约在正在解析的那枚手上）。 */
+function selectCard(key) {
+  if (!state.cards.some((c) => c.key === key)) return;
+  if (key === state.active) return;
+  if (state.parsing) {
+    state.pendingSwitch = key;
+    return;
+  }
+  selectCardNow(key);
+}
+
+function dropCard(card) {
+  const at = state.cards.indexOf(card);
+  if (at === -1) return;
+  state.cards.splice(at, 1);
+  if (state.active !== card.key) {
+    renderQueue();
+    return;
+  }
+  // 这里绝不允许先把视图写回当前卡：视图正戴在这张被删的卡上，写一次就是把它的包塞给下一枚。
+  const next = state.cards[Math.min(at, state.cards.length - 1)] || null;
+  state.active = next ? next.key : "";
+  applyView(next);
+  renderTerm();
+  renderCheck();
+  syncUploaderField();
+  renderProof();
+  refreshGate();
+  renderQueue();
+}
+
+/**
+ * 随机段：一次投稿**一份**，整套共用。
+ * v1 时代它住在卡上（一枚一串、一枚一次提交），v2 把它收回到这里 ——
+ * 一串口令覆盖一整套（§15），所以「一枚一份」现在是错形状：那会需要 N 次签名、N 次提交，
+ * 而服务端第一次就把这串烧掉，后 N-1 次全被判「口令已用过」。
+ */
+function setNonce(value) {
+  state.nonce = value;
+}
+
+/** 核实通过后补上那一份随机段；已经有了就一动不动（可能已经抄进签名里了）。 */
+function ensureNonce() {
+  if (!state.nonce) setNonce(makeNonce());
+}
+
+function setCheck(card, status, key, why) {
+  if (!card) return;
+  card.checkStatus = status || null;
+  card.checkKey = key || "";
+  card.checkWhy = why || "";
+  if (card.checkRun === key) card.checkRun = "";
+  if (card === activeCard()) state.checkStatus = status || null;
+  // 后台那一枚被 /check 判成 recorded 时，它也必须当场从「这一套」里掉出去 ——
+  // 而口令那一串是绑整套算的，集合一变串就变，所以这一句不加分支：谁的结论变了就重算一次串。
+  renderProof();
+  if (card === activeCard()) refreshGate();
+  renderQueue();
+}
+
 
 /* ------------------------------------------------------- 路由：hash 三视图 */
 
@@ -233,13 +495,17 @@ function termLines(lines) {
   for (const [cls, text] of lines) term.append(node("div", cls, text));
 }
 
-function clearFile() {
-  state.file = null;
-  state.zip = null;
-  // 包没了，这一串口令的来源就少一个：整包哈希当场归零，口令行跟着收起。
-  // 不在这里清的话，屏幕上会留着一串属于「已经不存在的那个包」的口令。
-  state.zipSha = "";
-  state.checkStatus = null;
+/** 队列清空 = 视图清空。包没了，口令的那一套来源就一起归零，口令行跟着收起 ——
+    屏幕上不许留着一串属于「已经不存在的那几枚包」的口令。 */
+function clearQueue() {
+  state.cards = [];
+  state.active = "";
+  state.skippedFiles = [];
+  // 整套的结果跟着队列一起走：清空之后再投的是另一套，不许留上一次那个 PR 链接冒充这次的。
+  state.batchResult = null;
+  state.lastBatch = null;
+  termSnapshot = [];
+  applyView(null);
   $("#file").value = "";
   $("#term").hidden = true;
   $("#check").hidden = true;
@@ -252,37 +518,124 @@ function clearFile() {
       el.closest(".field").classList.remove("is-pre");
     }
   }
+  renderQueue();
   refreshGate();
 }
 
-function rejectFile(lines) {
-  clearFile();
-  termLines(lines);
+/**
+ * 这个包不合格：不建卡（它连模块都不是，不该占队列里的一格），只把原因说清楚。
+ * 队列里还有别的枚时，那几行前面带上文件名 —— 否则「这句说的是哪个包」就没人知道了。
+ */
+function rejectCard(card, lines) {
+  const wasActive = card === activeCard();
+  const named = state.cards.length > 1 ? [[null, `${card.file.name} ——`], ...lines] : lines;
+  state.skippedFiles.push(card.file.name);
+  dropCard(card);
+  if (wasActive || !state.cards.length) {
+    termSnapshot = named;
+    termLines(named);
+  }
+  renderQueue();
+}
+
+/* ------------------------------------------------ 01-b 多选的排队与解析的租约
+   一次选 N 个包：先各建一张卡（队列立刻看得见有几枚），再一张一张解析。
+   解析期间视图的租约归正在解析的那一枚 —— applyProp() 全站只有一份，它写的是表单，
+   一边解析后台那枚一边让用户编辑另一枚，两份数据会抢同一批输入框。
+   用户在这期间点了别的卡，就记进 state.pendingSwitch，等这一次解析交出租约再兑现。 */
+let parseChain = Promise.resolve();
+
+/**
+ * 队列与换包共用这一条串行链。**每一个链接都必须自带 catch**：
+ * `p = p.then(f)` 一旦有一次 reject（包里读不出 module.prop、`POST /check` 那一次网络抖动），
+ * 这条链就永久是 rejected，之后每一次 `.then()` 都被跳过 —— 用户看到的是「拖进去没反应」，
+ * 而刷新页面之前没有任何出路。这一格不是假想：链式写法本身让失败变成静默。
+ */
+function scheduleIntake(files) {
+  if (!files || !files.length) return;
+  state.intakeError = "";
+  parseChain = parseChain.then(() => intakeBatch(files)).catch(intakeFailed);
+}
+
+function intakeFailed(e) {
+  state.intakeError = String((e && (e.message || e)) || '未知失败').slice(0, 180);
+  refreshGate();
+}
+
+async function intakeBatch(files) {
+  const prev = activeCard(); // 选这批包之前用户正在看的那一枚（没有就是空队列）
+  const fresh = files.map((file) => {
+    const card = makeCard(file);
+    state.cards.push(card);
+    return card;
+  });
+  // 核实早就通过了（先填 UID 再选包的人）：这次投稿那份随机段该在这儿补上。
+  if (state.uidStatus === "verified") ensureNonce();
+  renderQueue();
+  let pickedDuring = ""; // 用户在解析中途点过的那一枚 —— 批处理完了要还给他
+  for (const card of fresh) {
+    selectCardNow(card.key); // 解析要动视图与表单，所以一张一张来（租约见 selectCard）
+    state.parsing = true;
+    try {
+      await intake(card.file);
+    } finally {
+      state.parsing = false;
+    }
+    renderQueue();
+    if (state.pendingSwitch) {
+      pickedDuring = state.pendingSwitch;
+      state.pendingSwitch = "";
+      if (state.cards.some((c) => c.key === pickedDuring)) selectCardNow(pickedDuring);
+    }
+  }
+  // 一批解析完，视图回到用户本来在看的那一枚；中途他点过别的就回到点过的那一枚，
+  // 原来队列是空的就回到这批的第一枚 —— 别把用户扔到最后一枚那儿去。
+  const back =
+    state.cards.find((c) => c.key === pickedDuring) ||
+    (prev && state.cards.includes(prev) ? prev : fresh[0]);
+  if (back && activeCard() !== back) selectCardNow(back.key);
+  renderQueue();
+  // 早期重复拦截就排在这一句：一批包一次问完，命中「已被投稿过」的那一枚当场摘出去，
+  // 不让它跟着走完填表、抄签名、提交这三步（那三步的代价由投稿人付：一次签名修改 + 一次限流格）。
+  await runBatchCheck(fresh.filter((c) => state.cards.includes(c)));
 }
 
 async function intake(file) {
   if (!file) return;
+  const card = activeCard(); // 解析前 intakeBatch 已经把视图的租约交给这一枚
+  if (!card) return;
   const out = [];
   state.file = file;
   state.zip = null;
+  state.checkStatus = null;
   // 派生值在来源换掉的那一刻就得死：这里如果等到下面解析完才归零，读 B 的整段期间
   // 屏幕上挂的还是 A 的口令、门禁写着「已生成」，此时点提交就是 zip:B + sha256:A。
   // 同步清完立刻重画，B 的哈希到货前界面上说的是「还没选包」这句实话。
   state.zipSha = "";
+  card.zip = null;
+  card.zipSha = "";
+  card.checkStatus = null;
+  card.checkKey = "";
+  card.checkWhy = "";
   renderProof();
   refreshGate();
 
-  const limit = state.maxBytes;
+  const limit = state.limits.maxBytes; // 单枚上限，后端自报的那一个（问不到就是 null）
   out.push([null, `读取 ${file.name} · ${fmtBytes(file.size)}`]);
 
   if (!/\.zip$/i.test(file.name)) {
-    rejectFile([["miss", "这不像 zip 文件（扩展名不是 .zip）。管理器只认 zip，请先确认下载完整。"]]);
+    rejectCard(card, [
+      out[0],
+      ["miss", "这不像 zip 文件（扩展名不是 .zip）。管理器只认 zip，请先确认下载完整。"],
+    ]);
     return;
   }
-  if (file.size > limit) {
-    rejectFile([
+  // 「问到了才拦」：上限没自报时这里不拦，交给服务端（它会回 zip_too_large）。
+  // 拿一个猜出来的数字当闸，就是这条站里被钉子盯过的那种假动作。
+  if (limit !== null && file.size > limit) {
+    rejectCard(card, [
       out[0],
-      ["miss", `超过上限：${fmtBytes(file.size)} > ${fmtBytes(limit)}`],
+      ["miss", `超过单枚上限：${fmtBytes(file.size)} > ${fmtBytes(limit)}（这个数是后端自报的）`],
       ["warn", "服务端会直接拒绝。如果确实是正常模块，压缩包里多半混进了无关的大文件。"],
     ]);
     return;
@@ -292,13 +645,16 @@ async function intake(file) {
   try {
     arrayBuffer = await file.arrayBuffer();
   } catch {
-    rejectFile([out[0], ["miss", "文件读不出来，可能已经不在原来的位置了。重新选一次。"]]);
+    rejectCard(card, [
+      out[0],
+      ["miss", "文件读不出来，可能已经不在原来的位置了。重新选一次。"],
+    ]);
     return;
   }
 
-  // 解析回来的这一刻可能已经晚了：intake() 不串行，连着换两个包时两次解析会重叠，而下面那句
-  // state.zip 赋值是无条件的。比的是**这一次开始时选中的那个 file 对象**（intake 顶部刚把它记进
-  // state.file），不是名字也不是大小：中途换过包、清过、或重开过投稿，就把这一次整条丢掉。
+  // 解析回来的这一刻可能已经晚了：视图的租约中途没了（这一枚被移除、或整批被清空）。
+  // 比的是**这一次开始时选中的那个 file 对象**（intake 顶部刚把它记进 state.file），
+  // 不是名字也不是大小：中途换过包、清过、或重开过投稿，就把这一次整条丢掉。
   // 不丢的话 state.zip 会指回旧包而 state.file 已是新包，旧包的摘要随后还能通过下面那道对象
   // 标识守卫贴到新包上 —— 屏幕上那一串就成了「新包的口令、旧包的字节」。
   if (state.file !== file) return;
@@ -307,7 +663,7 @@ async function intake(file) {
   try {
     entries = listEntries(arrayBuffer);
   } catch (err) {
-    rejectFile([out[0], ["miss", err.message]]);
+    rejectCard(card, [out[0], ["miss", err.message]]);
     return;
   }
   const inspect = inspectEntries(entries);
@@ -321,30 +677,39 @@ async function intake(file) {
     } else {
       lines.push(["warn", "这个包里没有任何 module.prop，它多半不是一个模块。"]);
     }
-    rejectFile(lines);
+    rejectCard(card, lines);
     return;
   }
 
+  // 视图与这一枚指向同一个解析结果对象：口令的来源因此只有一份，不会漂成两份。
   state.zip = { arrayBuffer, entries, inspect, prop: null };
+  card.zip = state.zip;
 
   // 整包 sha256 是口令的第二个来源，每次换包都在这儿重算 —— 上一包的哈希对新包毫无意义。
   // 异步：几百毫秒内口令行按「还没算出来」显示（门禁说当时的实话），算完自己出现。
   // 算失败就留空：那一串根本不会显示，于是没人会抄一串对不上任何包的口令去填签名。
-  const zipForThisFile = state.zip;
+  const zipForThisFile = card.zip;
   state.zipSha = "";
+  card.zipSha = "";
   sha256HexBytes(arrayBuffer).then(
     (hex) => {
-      // 认对象不认值：换过包（或已清掉）就别把上一个文件的哈希贴到当前这个包上。
-      if (state.zip !== zipForThisFile) return;
-      state.zipSha = hex;
+      // 认对象不认值：这一枚已经换过包（或已清掉）就别把上一个文件的哈希贴到当前这个包上。
+      if (card.zip !== zipForThisFile) return;
+      card.zipSha = hex;
+      // 视图的租约还在这一枚上才动视图那一格；切走了就只落卡 —— 切回来时读到的是卡上这份真值，
+      // 而不是中途属于别人那枚的哈希。
+      if (state.zip === zipForThisFile) state.zipSha = hex;
       renderProof();
       refreshGate();
+      renderQueue();
     },
     () => {
-      if (state.zip !== zipForThisFile) return;
-      state.zipSha = "";
+      if (card.zip !== zipForThisFile) return;
+      card.zipSha = "";
+      if (state.zip === zipForThisFile) state.zipSha = "";
       renderProof();
       refreshGate();
+      renderQueue();
     }
   );
 
@@ -352,9 +717,10 @@ async function intake(file) {
 
   if (!canInflateRaw()) {
     out.push(["warn", "这个浏览器不支持前端解压，元数据请手填（表单照常可用）"]);
-    termLines(out);
+    paintTerm(card, out);
     refreshGate();
-    runCheck();
+    invalidateCheck(card);
+    // 查重交给这一批末尾的 runBatchCheck（一批一次问完，一枚一次问是 N 次请求）。
     return;
   }
 
@@ -369,6 +735,7 @@ async function intake(file) {
     const prop = parseModuleProp(new TextDecoder("utf-8").decode(bytes));
     state.zip.prop = prop;
     const { filled, kept } = applyProp(prop);
+    commitView(); // 预填的结果写进了视图，而这一刻视图就是这一枚的：立刻归它，别等下一次切换
     out.push([
       "found",
       `已读出 ${Object.keys(prop).length} 个字段，预填 ${filled} 项` +
@@ -382,10 +749,14 @@ async function intake(file) {
     out.push(["warn", (err && err.message) || "module.prop 解压失败，请手填元数据"]);
   }
 
-  termLines(out);
+  paintTerm(card, out);
   refreshGate();
-  runCheck();
+  // 包内 id 与用户原来填的那个 id 不一定是同一对：这一枚的查重结论当场作废。
+  // 作废之后**不**在这里补一次单枚查询 —— 一批 N 枚由 runBatchCheck 一次问完（§17.6 的 POST /check），
+  // 那条路走不通时它自己会退回逐枚 GET。在这儿顺手查一次就是两套判据各打各的请求。
+  invalidateCheck(card);
   renderProof(); // module.prop 把 id 预填进来的这一下不触发 input 事件，口令得自己重算一次
+  renderQueue();
 }
 
 function applyProp(prop) {
@@ -411,7 +782,13 @@ function applyProp(prop) {
 function bindFile() {
   const drop = $("#drop");
   const input = $("#file");
-  input.addEventListener("change", () => intake(input.files && input.files[0]));
+  // 多选：change 给的是整个 FileList。这里当场把 input 的值清掉 —— 不清的话同一个包
+  // 第二次选不中（files 没变化就不触发 change），而拖拽那条路本来就没有值可清。
+  input.addEventListener("change", () => {
+    const files = Array.from(input.files || []);
+    input.value = "";
+    scheduleIntake(files);
+  });
   paintLimit();
 
   ["dragenter", "dragover"].forEach((type) =>
@@ -429,13 +806,277 @@ function bindFile() {
   drop.addEventListener("drop", (e) => {
     // 拖到 input 本体上时浏览器会自己填 files 并触发 change，这里再调一次就是重复解析。
     if (e.target === input) return;
-    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    if (file) intake(file);
+    const files = e.dataTransfer && e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+    if (files.length) scheduleIntake(files);
   });
   // 没落在拖放区上的文件不能让整个页面被浏览器接管
   window.addEventListener("dragover", (e) => e.preventDefault());
   window.addEventListener("drop", (e) => e.preventDefault());
 }
+
+/* ----------------------------------------------------- 01-c 队列条（读与操作） */
+
+/**
+ * 这一枚现在的那一句状态。
+ * 读数与「这一套里有几枚」用的是同一份判据（checkOf / submitTargets）—— 界面上说了 N 枚，
+ * manifest 里就得是 N 条、口令得是这 N 条算出来的那一串。
+ */
+function statusOf(card) {
+  if (state.uploading && submitTargets().includes(card)) return { tone: "idle", text: "随这套提交中" };
+  if (card.ack) return { tone: "ok", text: "后端已回执" };
+  const status = checkOf(card);
+  if (status === "recorded") return { tone: "muted", text: "已被投稿过 · 摘出" };
+  if (status === "version_update") return { tone: "warn", text: "版本更新" };
+  if (status === "new") return { tone: "ok", text: "没收录 · 可投" };
+  if (status === "unknown") return { tone: "warn", text: "查重未确认" };
+  if (card.checkRun) return { tone: "idle", text: "查重中" };
+  if (card.checkWhy) return { tone: "warn", text: "查重没成" };
+  return { tone: "muted", text: "待查重" };
+}
+
+/**
+ * 这一枚离「能进这一套」还差什么：它自己的必填元数据 + 它的包体哈希 + 它有没有超单枚上限。
+ * 整套一次提交 ⇒ 任何一枚没齐，整套就发不出去（服务端也是全有全无，§15 第 3 条）。
+ * 这里点名到枚，是因为「还差一步」不说差在哪一枚就等于没说。
+ */
+function cardGaps(card) {
+  const v = cardValues(card);
+  const gaps = [];
+  for (const key of CARD_REQUIRED_KEYS) if (!v[key]) gaps.push(FIELD_NAMES[key]);
+  if (v.versionCode && !/^\d+$/.test(v.versionCode)) gaps.push("版本号不是整数");
+  if (v.source && !normalizeCoolapkUrl(v.source)) gaps.push("出处不是酷安站内链接");
+  if (!card.zipSha) gaps.push(card.zip ? "整包哈希还没算完" : "包体没解析成功");
+  const limit = state.limits.maxBytes;
+  if (limit !== null && card.file && card.file.size > limit) gaps.push(`超出单枚上限 ${fmtBytes(card.file.size)}`);
+  return gaps;
+}
+
+const FIELD_NAMES = {
+  id: "模块 ID",
+  name: "名称",
+  version: "版本字符串",
+  versionCode: "版本号",
+  source: "模块出处",
+};
+
+function queueRow(card) {
+  const li = node("li", "qrow" + (card === activeCard() ? " is-current" : ""));
+  li.dataset.key = card.key;
+
+  const pick = node("button", "qrow__pick");
+  pick.type = "button";
+  pick.setAttribute("aria-label", "编辑这一枚模块");
+  const v = cardValues(card);
+  pick.append(node("span", "qrow__id", v.id || "（还没解析出模块 ID）"));
+  pick.append(node("span", "qrow__nm", v.name || "—"));
+  pick.append(node("span", "qrow__code", v.versionCode ? `code ${v.versionCode}` : "code —"));
+  const st = statusOf(card);
+  pick.append(
+    node("span", `chip qrow__st${st.tone === "ok" ? " chip--ok" : st.tone === "warn" ? " chip--warn" : st.tone === "bad" ? " chip--bad" : st.tone === "idle" ? " chip--idle" : ""}`, st.text)
+  );
+  pick.addEventListener("click", () => selectCard(card.key));
+  li.append(pick);
+
+  // 这一枚的两句实话：差哪些字段（红字）/ 它在不在这一套里（口令那一串到底按几枚算）。
+  const sub = node("div", "qrow__sub");
+  const gaps = cardGaps(card);
+  if (gaps.length && !isRecorded(card)) {
+    sub.append(node("span", "qrow__why", `还差：${gaps.join("、")}`));
+  } else if (isRecorded(card)) {
+    sub.append(node("span", "qrow__skip", "这一枚不进这一套：口令按剩下的枚算，manifest 里也没有它"));
+  } else if (card.zipSha && submitTargets().includes(card)) {
+    sub.append(node("span", "qrow__in", "在这套里 · " + fmtBytes(card.file ? card.file.size : 0)));
+  }
+  if (card.ack) {
+    const bits = [];
+    if (card.ack.versionCode !== undefined) bits.push(`code ${card.ack.versionCode}`);
+    if (card.ack.assetName) bits.push(card.ack.assetName);
+    if (card.ack.sha256) bits.push(`${String(card.ack.sha256).slice(0, 12)}…`);
+    sub.append(node("span", "qrow__ack", `服务端落盘口径：${bits.join(" · ") || "已受理"}`));
+  }
+  if (sub.childNodes.length) li.append(sub);
+
+  const acts = node("div", "qrow__acts");
+  const swap = node("button", "qrow__swap", "重选这个包");
+  swap.type = "button";
+  swap.setAttribute("aria-label", `给 ${v.id || "这一枚"} 重新选一个 zip`);
+  swap.addEventListener("click", () => requestSwap(card));
+  acts.append(swap);
+
+  const rm = node("button", "qrow__rm", "移除");
+  rm.type = "button";
+  rm.setAttribute("aria-label", "把这枚从队列里移除");
+  rm.addEventListener("click", () => {
+    commitView();
+    dropCard(card);
+  });
+  acts.append(rm);
+  li.append(acts);
+  return li;
+}
+
+/**
+ * 单独给一枚换包：借一个隐藏的 file input，换完只重解析那一枚。
+ * 换包必须让口令那一串当场死掉 —— 那一枚的整包哈希是集合口令的输入之一，
+ * 换一枚就是换一整套（§15），旧串对不上新字节，服务端会回 sha_mismatch / 口令对不上。
+ */
+let swapKey = "";
+function requestSwap(card) {
+  if (!card) return;
+  commitView();
+  swapKey = card.key;
+  const input = $("#file-swap");
+  if (!input) return;
+  input.value = "";
+  input.click();
+}
+
+function bindSwap() {
+  const input = $("#file-swap");
+  if (!input) return;
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    const card = state.cards.find((c) => c.key === swapKey);
+    swapKey = "";
+    if (!file || !card || !state.cards.includes(card)) return;
+    swapInto(card, file);
+  });
+}
+
+/** 排在同一条解析链上：换包与选新包不能并发（applyProp 只有一份，它写的是表单）。 */
+function swapInto(card, file) {
+  // 同一个 catch 的理由：这条链一旦带着 rejection，之后选包与换包全部静默失效（见 scheduleIntake）。
+  parseChain = parseChain.then(() => swapRun(card, file)).catch(intakeFailed);
+}
+
+async function swapRun(card, file) {
+  // 先动卡上的那个 file 对象，再把视图的租约交给它：intake() 认的是 activeCard() 那一张卡，
+  // 它归零的是这一枚自己的 zip / zipSha / 查重结论。名字一样但字节不同也照样重算 ——
+  // 「整包哈希绑字节」这件事不允许因为文件名没变就被跳过。
+  card.file = file;
+  selectCardNow(card.key);
+  state.parsing = true;
+  try {
+    await intake(file);
+  } finally {
+    state.parsing = false;
+  }
+  if (!state.cards.includes(card)) return; // 解析中被判不合格已经移除了，没什么可重查的
+  renderQueue();
+  await runBatchCheck([card]);
+}
+
+function renderQueue() {
+  const bar = $("#queue");
+  if (!bar) return;
+  const list = $("#queue-list");
+  if (!state.cards.length) {
+    bar.hidden = true;
+    list.textContent = "";
+    $("#queue-count").textContent = "";
+    $("#queue-note").textContent = "";
+    renderEditing();
+    return;
+  }
+  bar.hidden = false;
+  list.textContent = "";
+  for (const card of state.cards) list.append(queueRow(card));
+  paintQueueReadout();
+  renderEditing();
+}
+
+/**
+ * 02 那一屏顶部的小字：表单现在装的是第几枚、共几枚。
+ * 只有多于一枚时它才是信息 —— 单枚路径不加这种噪音（和队列条那一档 quiet 退化同一个理由）。
+ * 它读的判据就是队列用的那一个（activeCard / state.cards），不是第二份状态。
+ */
+function renderEditing() {
+  const box = $("#editing");
+  if (!box) return;
+  const cur = activeCard();
+  const at = cur ? state.cards.indexOf(cur) : -1;
+  if (!cur || state.cards.length < 2) {
+    box.hidden = true;
+    box.textContent = "";
+    return;
+  }
+  const v = cardValues(cur);
+  box.hidden = false;
+  box.textContent = "";
+  box.append(
+    node("span", null, `正在编辑第 ${at + 1} / ${state.cards.length} 枚：${v.id || cur.file.name}`),
+    " "
+  );
+  const nav = node("span", "editing__nav");
+  for (const [label, delta] of [["上一枚", -1], ["下一枚", 1]]) {
+    const b = node("button", "btn btn--ghost btn--sm", label);
+    b.type = "button";
+    const target = state.cards[at + delta];
+    b.disabled = !target; // 到头了就点不动（这不是闸，是没有下一枚）
+    if (target) b.addEventListener("click", () => selectCard(target.key));
+    nav.append(b);
+  }
+  box.append(nav);
+}
+
+/** 队列底栏那两颗：继续加包 / 清空整条队列。 */
+function bindQueueBar() {
+  const add = $("#queue-add");
+  if (add) add.addEventListener("click", () => {
+    const input = $("#file");
+    if (input) {
+      input.value = "";
+      input.click();
+    }
+  });
+  const clear = $("#queue-clear");
+  if (clear) clear.addEventListener("click", () => clearQueue());
+}
+
+/** 队列顶部那一句「这一套是几枚」；被摘出去的枚不进这里（说了 N 枚就得真发 N 个 file part）。 */
+function paintQueueReadout() {
+  const targets = submitTargets();
+  const recorded = state.cards.filter((c) => isRecorded(c));
+  const bar = $("#queue");
+  const count = $("#queue-count");
+  count.textContent = targets.length
+    ? `这一套 ${targets.length} 枚 · 一次提交`
+    : "这一套里没有要投的枚";
+  if (recorded.length) count.textContent += ` · ${recorded.length} 枚已被投稿过，摘出了`;
+  // 只有一枚、而且这一枚没被摘出去时，整条队列退化成一行：不写这套那两句边界话 ——
+  // 那两句对只投一枚的人一个字都没多说。有摘出去的枚、或有被跳过的包时它才是信息。
+  const quiet = state.cards.length <= 1 && !recorded.length && !state.skippedFiles.length;
+  bar.dataset.quiet = quiet ? "1" : "0";
+  const note = $("#queue-note");
+  if (quiet) {
+    note.textContent = "";
+    return;
+  }
+  const bits = [
+    "一次投稿 = 一整套模块：口令只有一串（绑的是这套的全集）、承诺只勾一次、签名只改一次、POST 只发一次。增删任一枚、改任一枚的模块 ID、给任一枚重选包，都会让那一串变成另一串 —— 改完要重新抄进签名。",
+    "查重这道闸只看公开索引里的模块 ID：索引里不带酷安 UID，所以它只能说「这个 id 已被投稿过」，**分不清是谁投的**；已经投稿但还没合进索引的那些今天查不到 —— 要拦那一档得后端加一档状态，这一轮没做。",
+  ];
+  if (state.skippedFiles.length) {
+    bits.unshift(
+      `刚才跳过了 ${state.skippedFiles.length} 个不合格的包：${state.skippedFiles.slice(0, 3).join("、")}${
+        state.skippedFiles.length > 3 ? " 等" : ""
+      } —— 原因见上面那几行。`
+    );
+  }
+  note.textContent = bits.join(" ");
+  const ids = state.cards.map((c) => cardValues(c).id).filter(Boolean);
+  const dupId = ids.find((id, i) => ids.indexOf(id) !== i);
+  if (dupId) {
+    note.append(
+      node(
+        "span",
+        "queue__dup",
+        ` 队列里有两枚模块 ID 都是 ${dupId}：同一套里同一个 ID 出现两次，服务端按 manifest 形状不对拒掉**整个这一次投稿**（§16 的 normalizeDeclaredSet），不是只跳过那一枚 —— 把其中一枚移掉或改成别的 ID。`
+      )
+    );
+  }
+}
+
 
 /* ----------------------------------------------------------- 02 查重 /check */
 
@@ -451,52 +1092,177 @@ function showCheck(tone, chip, title, desc) {
   $("#check-d").textContent = desc;
 }
 
-const runCheck = debounce(async () => {
-  const id = fieldValue("id");
-  const code = fieldValue("versionCode");
-  if (!id || !/^\d+$/.test(code)) {
-    state.checkStatus = null;
-    $("#check").hidden = true;
-    refreshGate();
+/**
+ * 那两档边界要说给用户听的话（recorded / version_update）。
+ * 为什么写在这儿而不是 api.js：CHECK_STATUS 是 /check 契约的措辞，本站只有后端那一份判据；
+ * 这里加的是「这道前端预拦能做到什么、做不到什么」，属于本页的说明，不是第二份判据。
+ *
+ * 措辞的边界要说真话，三句都不能少：
+ * ① 公开索引里没有投稿人 UID（build-index 的投影层故意不带）⇒ 只能说「这个 id 已被投稿过」，
+ *    **不能暗示归属** —— 说成「你投过了」或「别人投过了」都是猜；
+ * ② 正在待审（pending/ 里、还没合进索引）的同 id 今天查不到 ⇒ 这一档拦不住，得后端加一档状态；
+ * ③ 摘出之后口令那一串会变 —— 口令绑的是这套的全集，少一枚就是另一个前缀。
+ */
+const CHECK_EXTRA = {
+  recorded:
+    " 这一枚已经从本次投稿里摘出去了：不进 manifest、不进口令那一串、也不提交。" +
+    "摘出去之后屏幕上那一串口令就按剩下的那几枚重算 —— 已经抄进签名的那串要重抄一次。" +
+    "它只看公开索引里的模块 ID：索引里不带酷安 UID，所以分不清「已被投稿过」那一条是谁投的；" +
+    "还在审核里、没合进索引的投稿今天查不到。想留着看就由你留着，队列里点「移除」。",
+  version_update:
+    " 这不是重复，所以它留在这一套里照常要投 —— 只是「对已收录模块的版本更新」要走额外那一层人工审核。",
+};
+
+const checkTimers = new Map();
+
+/** 每一枚各查各的：合并同一枚的连续按键（结论要落到各自的卡上）。批量那一条路见 runBatchCheck。 */
+function scheduleCheck(card, delay = 420) {
+  if (!card) return;
+  clearTimeout(checkTimers.get(card.key));
+  checkTimers.set(
+    card.key,
+    setTimeout(() => {
+      checkTimers.delete(card.key);
+      runCheckFor(card);
+    }, delay)
+  );
+}
+
+function cancelCheck(card) {
+  clearTimeout(checkTimers.get(card.key));
+  checkTimers.delete(card.key);
+}
+
+/**
+ * 早期重复拦截（§17.6 的 `POST /check`）：一批包解析完就一次查完，命中「已被投稿过」的那一枚
+ * 当场标出来、摘出后续步骤 —— 不让它白走一遍填表、白抄一次签名、白占一次限流。
+ *
+ * 这条路走不通时（后端还没上批量那个入口、或网络失败）逐枚 `GET /check` 顶上：功能不降级，
+ * 只是多打几个请求。两种来路都要在界面上说得出是哪一种 —— 「查过了」和「用另一种法子查的」
+ * 不是同一句话，而这里说的边界（分不清归属、待审查不到）两种来路都一样。
+ */
+async function runBatchCheck(cards) {
+  const list = (cards || [])
+    .map((card) => ({ card, v: cardValues(card) }))
+    .filter(({ v }) => v.id && /^\d+$/.test(v.versionCode))
+    .map(({ card, v }) => ({ card, id: v.id, versionCode: v.versionCode }));
+  if (!list.length) return;
+  for (const row of list) cancelCheck(row.card);
+  const r = await checkModulesBatch(list.map(({ id, versionCode }) => ({ id, versionCode })));
+  state.checkVia = r.via;
+  if (r.via !== "batch") {
+    // 批量那一条没走通 ⇒ 回到逐枚那一条。原因留着给清单与说明页说（不假装查过）。
+    state.checkWhy = r.why || "";
+    for (const row of list) scheduleCheck(row.card, 0);
     return;
   }
-  showCheck("idle", "checking", "正在查重…", `检查 ${id} 是否已在公开索引里。`);
-  try {
-    const status = await checkModule(id, code);
-    state.checkStatus = status;
-    const meta = CHECK_STATUS[status];
-    showCheck(
-      meta.tone === "ok" ? "ok" : meta.tone === "warn" ? "warn" : "muted",
-      meta.label,
-      meta.title,
-      meta.hint
-    );
-  } catch (err) {
-    state.checkStatus = null;
-    showCheck(
-      "warn",
-      "未确认",
-      "现在查不了重",
-      err instanceof BackendError ? err.message : "查重请求失败，不影响你继续投稿。"
-    );
+  for (const row of list) {
+    if (!state.cards.includes(row.card)) continue;
+    const status = r.statuses.get(row.id);
+    // 后端没给这一枚的结论 == 这一枚没查到，不等于「没被投过」：交回逐枚那一条再问一次。
+    if (!status) {
+      scheduleCheck(row.card, 0);
+      continue;
+    }
+    setCheck(row.card, status, checkKeyOf(row.id, row.versionCode), "");
   }
+  renderQueue();
   refreshGate();
-}, 420);
+}
+
+/**
+ * 来源一动就先作废，不等那 420ms 的 debounce，也不等下一次网络回来。
+ * 「这一枚已经收录了」的结论挂在改了 ID 的表单上，就等于屏幕上写着一句关于上一个 ID 的话。
+ */
+function invalidateCheck(card) {
+  if (!card) return;
+  card.checkStatus = null;
+  card.checkKey = "";
+  card.checkWhy = "";
+  if (card === activeCard()) {
+    state.checkStatus = null;
+    $("#check").hidden = true;
+  }
+  renderQueue();
+  if (card === activeCard()) refreshGate();
+}
+
+async function runCheckFor(card) {
+  if (!card || !state.cards.includes(card)) return;
+  const v = cardValues(card);
+  const id = v.id;
+  const code = v.versionCode;
+  const isActive = card === activeCard();
+  if (!id || !/^\d+$/.test(code)) {
+    setCheck(card, null, "", "");
+    if (isActive) $("#check").hidden = true;
+    return;
+  }
+  const key = checkKeyOf(id, code);
+  if (card.checkStatus && card.checkKey === key) {
+    if (isActive) renderCheck();
+    return; // 这一对 (id, versionCode) 已经查过了，切回来不再打一次
+  }
+  card.checkRun = key;
+  card.checkWhy = "";
+  if (isActive) showCheck("idle", "checking", "正在查重…", `检查 ${id} 是否已在公开索引里。`);
+  renderQueue();
+  let status = null;
+  let why = "";
+  try {
+    status = await checkModule(id, code);
+  } catch (err) {
+    why = err instanceof BackendError ? err.message : "查重请求失败，不影响你继续投稿。";
+  }
+  // 这一枚在等回包期间被移除了就什么都不做；结论落卡，视图只在租约还在时跟着动。
+  if (!state.cards.includes(card)) return;
+  setCheck(card, status, key, why);
+  if (isActive) {
+    if (status) {
+      const meta = CHECK_STATUS[status];
+      showCheck(
+        meta.tone === "ok" ? "ok" : meta.tone === "warn" ? "warn" : "muted",
+        meta.label,
+        meta.title,
+        meta.hint + (CHECK_EXTRA[status] || "")
+      );
+    } else {
+      showCheck("warn", "未确认", "现在查不了重", why);
+    }
+  }
+  renderQueue();
+}
+
+/** 视图切到某一枚之后，把它的查重结论原样画回那一格（没有就收起）。 */
+function renderCheck() {
+  const card = activeCard();
+  const status = card ? checkOf(card) : null;
+  if (!status) {
+    $("#check").hidden = true;
+    return;
+  }
+  const meta = CHECK_STATUS[status];
+  showCheck(
+    meta.tone === "ok" ? "ok" : meta.tone === "warn" ? "warn" : "muted",
+    meta.label,
+    meta.title,
+    meta.hint + (CHECK_EXTRA[status] || "")
+  );
+}
 
 function bindCheck() {
   for (const key of ["id", "versionCode"]) {
-    fieldEls[key].addEventListener("input", runCheck);
+    // 第一下就作废旧结论，然后再排一次查询 —— 顺序反了就会有一段时间屏幕上挂着旧的那句。
+    fieldEls[key].addEventListener("input", () => {
+      const card = commitView();
+      invalidateCheck(card);
+      renderProof();
+      scheduleCheck(card);
+    });
   }
-  // 口令文本是 (id, 整包 sha256, nonce) 的派生值，id 一动就得重算 —— 与 runCheck 同一个触发点。
+  // 口令文本是 (id, 整包 sha256, nonce) 的派生值，id 一动就得重算 —— 与查重同一个触发点。
   // 另一个来源（包）在 intake 里到货，那里算完哈希自己再渲染一次。
   fieldEls.id.addEventListener("input", renderProof);
-  $("#proof-copy").addEventListener("click", async () => {
-    const t = $("#proof-text").textContent;
-    if (!t || t === "…") return;
-    await navigator.clipboard.writeText(t);
-    $("#proof-copy").textContent = "已复制";
-    setTimeout(() => ($("#proof-copy").textContent = "复制"), 1500);
-  });
   fieldEls.coolapkUid.addEventListener("input", () => {
     // 「这个昵称属于上一串 UID」在按键那一刻就已经成立，等不到 debounce 后的核实结果
     syncUploaderField();
@@ -537,13 +1303,29 @@ function bindCheck() {
 
 /* -------------------------------------------------- 04 门禁清单与校验状态 */
 
+/**
+ * 整套那份齐没齐 —— 一次提交一整套，所以这里判的是「这一套发得出去吗」，不是「当前这一枚」。
+ * 当前卡的那份单值镜像（state.zip / state.zipSha）只用来决定屏幕上那一串现不现（见 gateItems
+ * 里那条 shown），**它不是判据**：判据是每一枚各自的卡，判据只有一份（cardGaps）。
+ */
 function collect() {
-  const zipOk = Boolean(state.zip && state.zip.inspect.ok);
-  const missing = REQUIRED_KEYS.filter((k) => !fieldValue(k));
-  const badCode = fieldValue("versionCode") && !/^\d+$/.test(fieldValue("versionCode"));
+  const targets = submitTargets();
+  const missing = SHARED_KEYS.filter((k) => !fieldValue(k));
   const badUid = fieldValue("coolapkUid") && !isCoolapkUid(fieldValue("coolapkUid"));
-  const badSource = fieldValue("source") && !normalizeCoolapkUrl(fieldValue("source"));
-  return { zipOk, missing, badCode, badUid, badSource };
+  return {
+    zipOk: targets.length > 0 && targets.every((c) => c.zip && c.zip.inspect && c.zip.inspect.ok),
+    missing,
+    badCode: targets.some((c) => {
+      const v = cardValues(c);
+      return v.versionCode && !/^\d+$/.test(v.versionCode);
+    }),
+    badUid: Boolean(badUid),
+    badSource: targets.some((c) => {
+      const v = cardValues(c);
+      return v.source && !normalizeCoolapkUrl(v.source);
+    }),
+    targets,
+  };
 }
 
 function uidBlocked() {
@@ -554,7 +1336,8 @@ function uidBlocked() {
   return false;
 }
 
-/* 口令只在「UID 核实通过」那一刻拿到随机段（runUidCheck 里那一行是唯一赋值点），所以这条没过时，
+/* 口令只在「UID 核实通过」那一刻拿到随机段（赋值集中在 setNonce 这一个函数里：核实通过补空缺、
+   口令烧掉换串两个调用点），所以这条没过时，
    原因可能在站点这边（核实根本没接），也可能在流程还没走完（正在查 / 还没查）。两者写成同一句
    「口令没生成」，被拦住的人就只剩一个说不清为什么的坏按钮 —— 状态文案必须说清卡在谁手上。
    随机段就位之后还差两个来源：模块 ID 和整包 sha256。口令串绑的是它们三个（设计文档 §14.1），
@@ -570,18 +1353,74 @@ const NONCE_WHY = {
 };
 
 function gateItems() {
-  const { zipOk, missing, badCode, badUid, badSource } = collect();
+  const targets = submitTargets();
+  const recorded = state.cards.filter((c) => isRecorded(c));
+  const acked = state.cards.filter((c) => c.ack);
+  const spent = acked.length > 0;
+  const missingShared = SHARED_KEYS.filter((k) => !fieldValue(k));
+  const badUid = fieldValue("coolapkUid") && !isCoolapkUid(fieldValue("coolapkUid"));
+  const badSource = targets.filter((c) => {
+    const v = cardValues(c);
+    return v.source && !normalizeCoolapkUrl(v.source);
+  });
+  const incomplete = targets.filter((c) => cardGaps(c).length > 0);
   const metaKeys = ["id", "name", "version", "versionCode"];
-  const metaMissing = missing.filter((k) => metaKeys.includes(k));
+  // 这一整套的 (id, 整包 sha256) 能不能算出规范串 —— `canonicalProofSet` 拒「同一个模块 id 出现
+  // 两次」（服务端 normalizeDeclaredSet 同样整单拒，§16）。这种时候屏幕上那一格写的是「这一套
+  // 现在算不出口令」，所以底栏那句「全部就绪」与下面那条清单都得跟着这同一个判据走 ——
+  // 判据只有一份，不在这里另发明第二条闸（按钮的 enable 条件一个字不动）。
+  const idsInSet = targets.map((c) => cardValues(c).id).filter(Boolean);
+  const dupId = new Set(idsInSet).size !== idsInSet.length;
+  const metaBad = targets.filter((c) => {
+    const v = cardValues(c);
+    return metaKeys.some((k) => !v[k]) || (v.versionCode && !/^\d+$/.test(v.versionCode));
+  });
+  const overCount = overModuleCount(targets.length);
+  const overTotal = overTotalBytes(targets);
+
+  // 下面每一格说的都是**这一整套**，不是「当前这一枚」—— 因为提交是整套一次。
+  // 所以每一格都要点不出「是哪一枚」（枚数一多，「还差一步」不说差在哪一枚就等于没说）。
   const items = [
-    { ok: zipOk, text: "zip 已选择，且根目录含 module.prop" },
+    // 解析链的失败必须自己说话。这一格存在的理由写在 scheduleIntake 的注释里：
+    // 链一旦 reject 过，之后每一次选包都会被静默跳过 —— 没有这一行，用户的界面就是「点了没反应」。
+    ...(state.intakeError
+      ? [
+          {
+            ok: false,
+            text:
+              `刚才那一批包没被队列收下：${state.intakeError}。` +
+              "把那个包再拖一次就行；反复出现请把这一句原样发给站点（这是浏览器侧的解析失败，不是你的包被判了恶意）。",
+          },
+        ]
+      : []),
     {
-      ok: !metaMissing.length && !badCode,
-      text: "模块 ID / 名称 / 版本 / 版本号 齐全（版本号为整数）",
+      ok: targets.length > 0 && incomplete.length === 0,
+      text: incomplete.length
+        ? `这一套里有 ${incomplete.length} 枚还没齐：${namesOf(incomplete)} —— 每枚的模块 ID / 名称 / 版本 / 版本号 / 出处都要填，整包哈希也要算出来`
+        : targets.length
+        ? `这一套 ${targets.length} 枚的 zip 都选了、根目录都含 module.prop、元数据都齐了`
+        : "还没选包：一次投稿可以只投一枚，也可以一整套一起投，先把包拖进来",
     },
-    { ok: !missing.includes("source") && !badSource, text: "模块出处是酷安站内链接" },
-    { ok: !missing.includes("uploader"), text: "投稿人酷安昵称已取得" },
-    { ok: !missing.includes("coolapkUid") && !badUid, text: "酷安 UID 已填，且是 4-12 位纯数字" },
+    {
+      ok: metaBad.length === 0 && targets.length > 0,
+      text: metaBad.length
+        ? `版本号要整数、四个必填都要有：${namesOf(metaBad)}`
+        : "每一枚的模块 ID / 名称 / 版本 / 版本号 齐全（版本号为整数）",
+    },
+    {
+      ok: badSource.length === 0 && targets.length > 0,
+      text: badSource.length
+        ? `出处必须是酷安站内链接：${namesOf(badSource)}`
+        : "每一枚的模块出处都是酷安站内链接",
+    },
+    {
+      ok: !missingShared.includes("uploader"),
+      text: "投稿人酷安昵称已取得（一次投稿一份署名，这套里每一枚都用它）",
+    },
+    {
+      ok: !missingShared.includes("coolapkUid") && !badUid,
+      text: "酷安 UID 已填，且是 4-12 位纯数字（一次投稿一份，不用逐枚填）",
+    },
   ];
   if (IS_UID_VERIFY_ON) {
     const label =
@@ -594,33 +1433,131 @@ function gateItems() {
         : "酷安用户核实（这一条不拦你；口令要核实通过才生成）";
     items.push({ ok: !uidBlocked(), text: label });
   }
-  const proofId = fieldValue("id");
-  let nonceText;
-  if (!state.nonce) {
-    nonceText =
-      NONCE_WHY[state.uidStatus] ||
-      "投稿口令还没生成 —— UID 核实通过、填上模块 ID、包也选好了，这一串才出现";
-  } else if (!proofId) {
-    nonceText = "口令还差：填上模块 ID —— 随机段已生成，但这一串要模块 ID 和整包哈希才算得出";
-  } else if (!state.zipSha) {
-    // 两句各说一个来源缺哪一样：没选包是「还没得选」，选了包是「正在算 / 没算出来」。
-    // 都不写「正在算」的肯定语气 —— 算失败时那句话就成假话了。
-    nonceText = state.zip
-      ? "口令还差：整包哈希还没算完 —— 随机段已生成，这一串要等它（稍等会自己出现；一直没出现就重新选一次包）"
-      : "口令还差：还没选包 —— 口令绑的是这个包的字节，先把包选上，这一串才算得出来";
-  } else {
-    nonceText = "投稿口令已生成（填进酷安签名）";
+  // 三条上限全部来自后端自报（§17.6）：问到才拦，问不到就不假装拦 —— 前端猜一个数字当闸，
+  // 就是这个站漂过「前端 8MB、后端 2MB」那一类的形状。
+  if (overCount !== null) {
+    items.push({
+      ok: false,
+      text: `这一套有 ${targets.length} 枚，超过后端自报的单次枚数上限（${overCount} 枚）—— 拆成两次投稿。`,
+    });
   }
-  // shown 说的是「屏幕上现在有没有一串可抄进签名」，三个来源齐了才有。
-  // 它不参与 ready，也就不参与按钮 —— 全局约束是前端不加第二条闸，判据在 Worker。
-  // 它只改底栏那两句：少一个来源时那里写的是这一条的实话，而不是「全部就绪，可以确认」。
-  items.push({
-    ok: Boolean(state.nonce),
-    shown: Boolean(state.nonce && proofId && state.zipSha),
-    text: nonceText,
-  });
+  if (overTotal !== null) {
+    items.push({
+      ok: false,
+      text: `这一套合计 ${fmtBytes(totalBytes(targets))}，超过后端自报的整套上限（${fmtBytes(overTotal)}）—— 把大的一枚拆到下一次投稿去。`,
+    });
+  }
+  if (spent && !targets.length) {
+    // 这一套已经提交掉了（每一枚都拿到回执）：口令在服务端记过账了，再发只会回一句「用过」。
+    // 随机段在成功那一刻就换过了，所以这里说的不是「你不能再用这一串」，而是「这一套已经交了」。
+    items.push({
+      ok: false,
+      text: `${namesOf(acked)} 已经随这一次投稿提交掉了（PR 已开）—— 同一套不能连发两次；要投别的包就再选一批进来。`,
+    });
+  } else {
+    const card = activeCard();
+    const proofId = fieldValue("id");
+    let nonceText;
+    if (!state.nonce) {
+      nonceText =
+        NONCE_WHY[state.uidStatus] ||
+        "投稿口令还没生成 —— UID 核实通过、填上模块 ID、包也选好了，这一串才出现";
+    } else if (recorded.length && !targets.length) {
+      nonceText = "这一套里没有要投的枚了：都被「已被投稿过」那一档摘出去了，所以没有口令可生成，签名里也不用抄任何东西。";
+    } else if (!proofId && card && !isRecorded(card)) {
+      nonceText = "口令还差：填上模块 ID —— 随机段已生成，但这一串要模块 ID 和整包哈希才算得出";
+    } else if (incomplete.length) {
+      // 两句各说一个来源缺哪一样：没选包是「还没得选」，选了包是「正在算 / 没算出来」。
+      // 都不写「正在算」的肯定语气 —— 算失败时那句话就成假话了。
+      const noZip = incomplete.filter((c) => !c.zip);
+      const noSha = incomplete.filter((c) => c.zip && !c.zipSha);
+      nonceText = noZip.length
+        ? "口令还差：还没选包 —— 口令绑的是这套的字节，先把包选上，这一串才算得出来"
+        : noSha.length
+        ? `口令还差：整包哈希还没算完 —— 随机段已生成，这一串要等它（稍等会自己出现；一直没出现就给${namesOf(noSha)}重选一次包）`
+        : `口令还差：${namesOf(incomplete)} 的模块信息没齐 —— 口令是按整套算的，少任何一枚的信息就没有可抄的一串`;
+    } else if (dupId) {
+      // 三个来源都在，但这一套的形状本身算不出串：两枚模块 ID 相同 ⇒ canonicalProofSet 抛。
+      // 这一句必须存在，否则下面那句「共用一串口令已生成」就成了屏幕上的一句假话。
+      nonceText =
+        "口令还差：队列里有两枚的模块 ID 是同一个 —— 同一套里同一个 ID 出现两次时这一串算不出来" +
+        "（服务端也会按 manifest 形状不对拒掉整个这一次投稿），把其中一枚移掉或改成别的 ID";
+    } else {
+      nonceText = state.cards.length > 1
+        ? `这一套 ${targets.length} 枚共用一串口令已生成（填进酷安签名，只改这一次）`
+        : "投稿口令已生成（填进酷安签名）";
+    }
+    // shown 说的是「屏幕上现在有没有一串可抄进签名」。v2 那一串的来源是「整套的 (id, 整包 sha256)」
+    // 加这一枚随机段，所以当前这枚少 id 或少哈希时屏幕上根本没有可抄的东西 —— 那一格不许自称就绪。
+    // 集合形状不对（两枚同一个模块 ID）时同样没有：renderProof 那时候画的是「算不出口令」那一行，
+    // 而下面这格还在说「已生成」—— 那就正是这条钉子要抓的现场。
+    // 它不参与 ready，也就不参与按钮 —— 全局约束是前端不加第二条闸，判据在 Worker。
+    // 它只改底栏那两句：少一个来源时那里写的是这一条的实话，而不是「全部就绪，可以确认」。
+    items.push({
+      ok: Boolean(state.nonce),
+      shown: Boolean(state.nonce && proofId && state.zipSha) && targets.length > 0 && incomplete.length === 0 && !dupId,
+      text: nonceText,
+    });
+  }
   items.push({ ok: IS_API_CONFIGURED, text: "后端 API_BASE 已配置" });
+  if (recorded.length) {
+    // 早期重复拦截：这几枚已经被摘出这一套 —— 不进 manifest、不进口令那一串、也不提交。
+    // 判据是后端 /check 给的那一档，前端没有另判一份「这个包合不合规」。
+    // 措辞的边界：只能说「这个 id 已被投稿过」—— 公开索引里没有投稿人 UID，分不清是谁投的；
+    // 还在待审（pending/）里的同 id 今天查不到，那一档这一轮拦不住。
+    //
+    // `ok: true` 是这一格的关键，不是笔误：要的是「不再参与接下来的步骤」，不是「把剩下几枚
+    // 一起扣下」。`ready = items.every(i => i.ok)` 是唯一的就绪判据，这里写 ok:false 就等于
+    // 让一枚已收录的老模块挡住整套提交 —— 而这一句明明写着「已摘出、不进这次提交」，
+    // 红着灯说这句话是自相矛盾的。它得看得见，所以走 note 那一档：黄点、不拦人、也不算通过。
+    items.push({
+      ok: true,
+      note: true,
+      text: `${namesOf(recorded)}：这个 id 已被投稿过，已从这一套里摘出去 —— 它不进 manifest，` +
+        `口令那一串按剩下的 ${targets.length} 枚算（所以摘之前抄进签名的那串要重抄一次）；` +
+        `这道闸分不清是谁投的，也查不到还在待审的那一份。`,
+    });
+  }
+  if (state.cards.length > 1) {
+    // 队列读数与「这一套有几枚」必须是同一个判据（submitTargets）：说 3 枚就得真在 manifest 里
+    // 写 3 条、真发 3 个 file part、口令真按 3 枚算 —— 差一枚就是界面在骗人。
+    const n = submitTargets().length;
+    items.push({
+      ok: true,
+      shown: n > 0,
+      text: n
+        ? `队列里本次要投 ${n} 枚 —— 一整套一次提交：口令一串、签名改一次、POST 发一次`
+        : "队列里没有要投的枚：都被已收录那一档摘出去了，或者已经投完",
+    });
+  }
   return items;
+}
+
+/** 点名的时候要说得出是哪一枚 —— 卡上填的那个 id，没解析出来就用文件名。 */
+function namesOf(cards) {
+  return cards
+    .map((c) => {
+      const v = cardValues(c);
+      return v.id || (c.file ? c.file.name : c.key);
+    })
+    .join("、");
+}
+
+function totalBytes(cards) {
+  return cards.reduce((n, c) => n + (c.file ? Number(c.file.size) || 0 : 0), 0);
+}
+
+/** 超出后端自报的枚数上限时返回那个上限，否则 null（没自报 == 不判，而不是判成一个猜的数）。 */
+function overModuleCount(n) {
+  const max = state.limits.maxModules;
+  return max !== null && n > max ? max : null;
+}
+
+/** 超出后端自报的整套上限时返回那个上限，否则 null。 */
+function overTotalBytes(cards) {
+  const max = state.limits.maxTotalBytes;
+  if (max === null) return null;
+  return totalBytes(cards) > max ? max : null;
 }
 
 function refreshGate() {
@@ -628,7 +1565,10 @@ function refreshGate() {
   const items = gateItems();
   list.textContent = "";
   for (const item of items) {
-    const li = node("li", item.ok ? "pass" : "", item.text);
+    // 三档而不是两档：note 那一格不拦提交（它的 ok 为真），但画成 ✓ 就成了「这一项通过了」，
+    // 而它讲的是「有一枚被摘出去了」。
+    const cls = item.note ? "note" : item.ok ? "pass" : "";
+    const li = node("li", cls, item.text);
     list.append(li);
   }
   const ready = items.every((i) => i.ok);
@@ -762,23 +1702,169 @@ function syncUploaderField() {
       : UPLOADER_FALLBACK[state.uidStatus] || "这次没从酷安取到昵称，请自己填一个署名。";
 }
 
-// 派生显示：口令 = sha256(当前 id + 整包 sha256) 前 8 位 + "-" + state.nonce，
-// 每次都在这里现算三个来源，界面上那串字符串永远跟着输入框里的 id 和当前这个包的字节走 ——
-// 缓存派生值迟早和来源脱钩，而换包不换口令正是这条闸要封死的那件事。
+/**
+ * 这一套的口令来源：每一枚的 (模块 ID, 整包 sha256)，加那一枚共用的一次性随机段。
+ * 被 recorded 摘出去的、以及这一次已经提交掉的那些都不在这里：它们不进 manifest，
+ * 让它们留在集合里等于骗人抄一串永远用不上的字符 —— 而 v2 那一串绑的就是「这套的全集」，
+ * 多一枚、少一枚算出来的都是另一个前缀（§15）。
+ * 当前卡读视图（用户刚敲的那一下就是它的值），其余读它自己那张卡的快照。
+ */
+function proofTargets() {
+  const out = [];
+  const cur = activeCard();
+  for (const card of submitTargets()) {
+    const live = card === cur;
+    const id = live ? fieldValue("id") : cardValues(card).id;
+    const zipSha = live ? state.zipSha : card.zipSha;
+    out.push({ card, id, zipSha, live });
+  }
+  return out;
+}
+
+/** 这一套现在能不能算出口令：每一枚都得有 id 与整包哈希，少一枚都算不出那一串。 */
+function setSources() {
+  const targets = proofTargets();
+  return {
+    targets,
+    items: targets.map((t) => ({ id: t.id, zipSha: t.zipSha })),
+    incomplete: targets.filter((t) => !t.id || !SHA256_HEX_RE.test(String(t.zipSha || ""))),
+    nonce: state.nonce,
+  };
+}
+
+// 派生显示：口令 = sha256("sukisu-proof-v2:" + 规范串) 前 12 位 + "-" + 那一枚随机段，
+// 每次都在这里现算整套的来源，屏幕上那一串永远跟着队列里当前这几枚的 id 与字节走 ——
+// 缓存派生值迟早和来源脱钩，而「换了包还拿着旧口令抄」正是这条闸要封死的那件事。
+// v2 的规范串按 **id 升序（同 id 再按整包哈希升序）**排，与用户选的次序无关（§15）：
+// 前端按选的次序、Worker 按 multipart 到达的次序，两边不同序就会算出两个前缀，
+// 而「对不上」在那条闸里读起来跟「你不是本人」一模一样。
 async function renderProof() {
   const box = $("#proof-field");
   const id = fieldValue("id");
   const zipSha = state.zipSha;
   const nonce = state.nonce;
-  if (!nonce || !id || !zipSha) {
+  const set = setSources();
+  if (!nonce || !set.targets.length) {
+    // 随机段来自 UID 核实，没有它就没有任何一串；整套是空的也没有可绑的东西。整格收起。
     box.hidden = true;
+    $("#proof-cap").textContent = "";
     return;
   }
-  const text = await buildProofString(id, zipSha, nonce);
-  // 三个来源里任何一个在 await 期间动过都不许贴这一串：连打 id / 连着换包时先发的请求可能后到，
+  if (!id || !zipSha) {
+    // 当前卡这两个来源少任何一个，就没有属于这一枚的那一份 ⇒ 那一串算不出来。
+    // （别的枚齐不齐不影响这一句：口令绑的是全集，少一枚就没有串。）
+    if (!set.items.length) {
+      box.hidden = true;
+      $("#proof-cap").textContent = "";
+      return;
+    }
+  }
+  // 来源一动就得当场把那一行抹掉，不等下面 await 回来换串 ——
+  // 那几十毫秒里屏幕上挂着一串属于上一个 id / 上一个包的口令，正是这条闸要封死的那件事。
+  killStaleProofRows();
+  let text = "";
+  let bad = "";
+  if (set.incomplete.length) {
+    // 这一套还没齐：不拿「齐了的那几枚」算一串出来 —— 那一串对不上将要提交的那一套，
+    // 用户抄进签名就是白改一次签名，而且提交会撞 sha/集合对不上。
+    text = "";
+    bad = `这套里还差 ${set.incomplete.length} 枚的模块 ID 或整包哈希（${namesOf(set.incomplete.map((t) => t.card))}）`;
+  } else {
+    try {
+      text = await buildProofStringV2(set.items, nonce);
+    } catch (err) {
+      // canonicalProofSet 那三条拒绝（空集 / 形状不对的 sha / 同 id 两次）都是客户端可控的输入，
+      // 不是内部不可能状态：这里必须把它显示成一句人话，而不是让那一串停在旧值上。
+      bad = `这一套现在算不出口令：${(err && err.message) || "集合形状不对"}`;
+    }
+  }
+  // 来源在 await 期间动过都不许贴这一串：连打 id / 连着换包时先发的请求可能后到，
   // 而失败换串（showFailure 里那次重掷）也可能正好落在等待中间（runUidCheck 里同一类竞态踩过一次）。
-  if (fieldValue("id") !== id || state.zipSha !== zipSha || state.nonce !== nonce) return;
-  $("#proof-text").textContent = text;
+  const now = setSources();
+  if (
+    state.nonce !== nonce ||
+    now.targets.length !== set.targets.length ||
+    now.items.some((it, i) => !set.items[i] || it.id !== set.items[i].id || it.zipSha !== set.items[i].zipSha)
+  ) {
+    return;
+  }
+  paintProofs(now, text, bad);
+}
+
+/** 那一行记住自己是按哪一套算的：整套的规范串 + 随机段。这两个东西一换，那一行就当场死。 */
+function proofSrc(canonical, nonce) {
+  return `${canonical}\u0000${nonce}`;
+}
+
+function setFingerprint(items, nonce) {
+  try {
+    return proofSrc(canonicalProofSet(items), nonce);
+  } catch {
+    // 形状不对时没有「规范串」可记 —— 用不可能等于任何合法来源串的那个值，
+    // 于是那一行一定被抹掉，屏幕上不会留一串属于别的集合的口令。
+    return "\u0000invalid\u0000";
+  }
+}
+
+/**
+ * 那一行按 data-src 记住自己是按哪一套算出来的；来源一换，那一行当场消失，不等下一次渲染。
+ * 被摘出去的枚、已经提交掉的那一套同样在这里当场没 —— 集合一变就是另一串，屏幕上不许留上一串。
+ */
+function killStaleProofRows() {
+  const list = $("#proof-list");
+  const set = setSources();
+  const src = set.incomplete.length ? "\u0000invalid\u0000" : setFingerprint(set.items, state.nonce);
+  for (const row of Array.from(list.children)) {
+    if (String(row.dataset.src || "") !== src) row.remove();
+  }
+}
+
+function paintProofs(set, text, bad) {
+  const list = $("#proof-list");
+  const box = $("#proof-field");
+  list.textContent = "";
+
+  const row = node("div", "proof");
+  row.dataset.src = text ? setFingerprint(set.items, state.nonce) : "\u0000invalid\u0000";
+  if (text) {
+    const code = node("code", "mono proof__txt", text);
+    row.append(code);
+    const copy = node("button", "btn btn--ghost btn--sm proof__copy", "复制这一串");
+    copy.type = "button";
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        copy.textContent = "已复制";
+      } catch {
+        copy.textContent = "浏览器不让复制，请自己选中";
+      }
+      setTimeout(() => (copy.textContent = "复制这一串"), 1500);
+    });
+    row.append(copy);
+  } else {
+    row.append(node("span", "proof__pending", bad || "这一套现在还算不出口令。"));
+  }
+  list.append(row);
+
+  // 口令绑的是这一套的全集 ⇒ 必须把这 N 枚点名出来，否则「这一串顶的是哪几枚」没人知道，
+  // 而摘进/摘出一枚就会悄悄换掉屏幕上这一串。
+  const roster = node("div", "proof__set");
+  roster.append(node("span", "proof__set-k", `这一串绑的是这套 ${set.targets.length} 枚`));
+  for (const t of set.targets) {
+    roster.append(node("span", "proof__m", t.id || (t.card.file ? t.card.file.name : "（没 ID）")));
+  }
+  const rec = state.cards.filter((c) => isRecorded(c));
+  if (rec.length) roster.append(node("span", "proof__out", `不含：${namesOf(rec)}`));
+  list.append(roster);
+
+  const cap = $("#proof-cap");
+  // 容量这一格说现行的事实：一串 19 字符、覆盖整套、与枚数无关（§15 第 4 条把前缀从 8 位扩到 12 位
+  // 正是为了这个）。旧那份「一次大约放 3 条、改一次投一枚」的读数是 v1 的账，已经作废 ——
+  // 留着它就是让界面在用户已经不需要改 N 次签名的时候继续骗他改 N 次。
+  cap.textContent =
+    `这一串 ${text.length || 19} 个字符，覆盖本次这一整套（${set.targets.length} 枚），酷安签名上限实测 60 个字符 —— ` +
+    "只改一次签名、一次提交整套。它绑的是这套的全集：增删任一枚、改任一枚的模块 ID、给任一枚重选包，" +
+    "这一串就变成另一串，要重新抄进签名并保存；签名里还是旧的那串时，服务端会按「签名里没有本次口令」拒。";
   box.hidden = false;
 }
 
@@ -792,6 +1878,13 @@ const runUidCheck = debounce(async () => {
     refreshGate();
     return;
   }
+  // 同一个 UID 刚核实过（切回另一枚、或把这枚改回原值）就别再打一次网络：
+  // 结果本来就只认「这一串 UID 反查回来的那一份」（见 syncUploaderField）。
+  if (state.uidStatus === "verified" && state.uidInfo && state.uidInfo.uid === uid) {
+    syncUploaderField();
+    refreshGate();
+    return;
+  }
   state.uidStatus = "checking";
   showUid("idle", "checking", "正在核实酷安用户…", `查询 UID ${uid} 是否对应一个真实账号。`);
   refreshGate();
@@ -800,7 +1893,9 @@ const runUidCheck = debounce(async () => {
   // 用户在你等回包的时候又改了 UID，就别把旧结果贴上去
   if (fieldValue("coolapkUid") !== uid) return;
   state.uidStatus = result.status;
-  if (result.status === "verified" && !state.nonce) state.nonce = makeNonce();
+  // 核实通过才发随机段，而且**一次投稿一份**：这一整套共用一串口令（v2 绑的是全集）。
+  // 一枚一份是 v1 的形状，那时 N 枚要 N 条不同口令、N 次各自带凭据的 POST。
+  if (result.status === "verified") ensureNonce();
   state.uidInfo = result.status === "verified" ? result : null;
   const meta = USER_STATUS[result.status] || USER_STATUS.unavailable;
   const desc =
@@ -826,7 +1921,9 @@ let lastFocus = null;
 
 function openConfirm() {
   const { zipOk } = collect();
-  if (!zipOk || !IS_API_CONFIGURED) return;
+  const targets = submitTargets();
+  if (!zipOk || !IS_API_CONFIGURED || !targets.length) return;
+  commitView();
   lastFocus = document.activeElement;
   const layer = $("#layer-confirm");
   layer.hidden = false;
@@ -834,25 +1931,84 @@ function openConfirm() {
   document.body.style.overflow = "hidden";
   $$("#layer-confirm input[type=checkbox]").forEach((c) => (c.checked = false));
   $("#confirm-go").disabled = true;
+  $("#confirm-go").textContent =
+    targets.length > 1 ? `确认并上传这一整套（${targets.length} 枚）` : "确认并上传";
 
   const sum = $("#warn-sum");
   sum.textContent = "";
-  const rows = [
-    ["文件", `${state.file ? state.file.name : "—"} · ${state.file ? fmtBytes(state.file.size) : "—"}`],
-    ["条目", state.zip ? `${state.zip.entries.length}` : "—"],
-    ["模块", `${fieldValue("name")} (${fieldValue("id")})`],
-    ["版本", `${fieldValue("version")} · versionCode ${fieldValue("versionCode")}`],
-    ["作者", fieldValue("author") || "未填"],
-    ["出处", fieldValue("source")],
+  // 一次动作只有一个人、一个承诺、一枚口令 —— 这三样在整套之上，逐枚列就是把它们说成 N 份。
+  const shared = [
     ["投稿人酷安昵称", fieldValue("uploader")],
     ["酷安 UID", uidLine()],
+    ["口令的随机段", state.nonce || "（还没生成）"],
+    ["本次要提交", `${targets.length} 枚 · 合计 ${fmtBytes(totalBytes(targets))} · 一个 PR`],
   ];
-  for (const [k, v] of rows) {
-    const line = node("div");
+  for (const [k, v] of shared) {
+    const line = node("div", "warn__shared");
     line.append(`${k}: `, node("b", null, v));
     sum.append(line);
   }
+  // 逐枚那一份：确认之前必须能看见「这一次发出去的是哪几枚、每一枚发的是什么字段」。
+  // manifest 就按这份写、file part 就按这份数 —— 这里说 3 枚，线上就得是 3 条 + 3 个包。
+  for (const [i, card] of targets.entries()) {
+    const v = cardValues(card);
+    const block = node("div", "warn__mod");
+    const head = node("div", "warn__mod-hd");
+    head.append(node("b", null, `第 ${i + 1} 枚 · ${v.id || "（没 ID）"}`));
+    head.append(node("span", null, `${v.name || "—"} · ${v.version || "—"} · code ${v.versionCode || "—"} · ${card.file ? fmtBytes(card.file.size) : "—"}`));
+    block.append(head);
+    block.append(node("div", "warn__mod-sub", `文件 ${card.file ? card.file.name : "—"} · 出处 ${v.source || "—"}`));
+    block.append(node("div", "warn__mod-sub", `整包 sha256 ${card.zipSha ? `${card.zipSha.slice(0, 16)}…` : "还没算出来"}`));
+    sum.append(block);
+  }
+  // 口令是提交前最后一道能核对的东西：整套就这一串，列一次，别让人以为还要逐枚抄。
+  const proofVal = node("b", null, "…");
+  const proofLine = node("div", "warn__proof");
+  proofLine.append("这一整套共用的口令: ", proofVal);
+  sum.append(proofLine);
+  proofTextOf().then((t) => {
+    proofVal.textContent = t || "这一套还差来源（某一枚的模块 ID / 整包哈希 / 随机段），现在没有可抄的一串";
+  });
+  const rec = state.cards.filter((c) => isRecorded(c));
+  if (rec.length) {
+    sum.append(
+      node(
+        "p",
+        "warn__queue",
+        `队列里另有 ${rec.length} 枚（${namesOf(rec)}）被「已被投稿过」那一档摘出了：它们不进这一次提交，` +
+          "口令那串里也没有它们。要留着看就留着，要重投就先移除再重选包。"
+      )
+    );
+  }
   $("#confirm-back").focus();
+}
+
+/**
+ * 上传前确认那一格要说清这一整套用的是哪一串：口令是「整套的 (id, 整包 sha256) 集合 + 随机段」
+ * 的现算派生值，不缓存 —— 所以这里算完还要再认一次来源，中途动过就不许写进确认格。
+ */
+async function proofTextOf() {
+  const set = setSources();
+  if (!set.nonce || !set.targets.length || set.incomplete.length) return "";
+  const items = set.items.map((i) => ({ ...i }));
+  const nonce = set.nonce;
+  let text;
+  try {
+    text = await buildProofStringV2(items, nonce);
+  } catch {
+    return "";
+  }
+  // 这中间用户又改了某一枚的 id / 换了包 / 重掷了串，就不许把这行写进上传前确认
+  //（它已经不属于现在这份载荷了）。
+  const now = setSources();
+  if (
+    now.nonce !== nonce ||
+    now.items.length !== items.length ||
+    now.items.some((it, i) => it.id !== items[i].id || it.zipSha !== items[i].zipSha)
+  ) {
+    return "";
+  }
+  return text;
 }
 
 function closeConfirm() {
@@ -895,29 +2051,45 @@ function bindConfirm() {
   });
   $("#confirm-go").addEventListener("click", () => {
     closeConfirm();
-    upload(currentFields());
+    uploadBatch();
   });
 }
 
-function currentFields() {
+/**
+ * 这一整套的载荷。发给服务端的字段集合与请求形状是后端契约（§17.3），一个都不许多、
+ * 一个都不能换形状（见 api.js 的 submitContribution 与它的 multipart 字段），要加东西得先改后端。
+ * 派生的口令串不发：后端自己按这一套重算，前端这份只用来显示。
+ *
+ * 逐枚那四样（zip / id / name / version / versionCode / author / description / source + sha256）
+ * 进 manifest 的 `modules[]`；共享那几样（uploader / coolapkUid / pledge / nonce / turnstile）
+ * 留在顶层 —— 一次投稿只有一个人、一个承诺、一枚口令，这是 §17.3 的分工，不是排版偏好。
+ */
+function batchPayload() {
+  const targets = submitTargets();
   return {
-    zip: state.file,
-    id: fieldValue("id"),
-    name: fieldValue("name"),
-    version: fieldValue("version"),
-    versionCode: fieldValue("versionCode"),
-    author: fieldValue("author"),
-    description: fieldValue("description"),
-    source: normalizeCoolapkUrl(fieldValue("source")) || fieldValue("source"),
+    modules: targets.map((card) => {
+      const v = cardValues(card);
+      return {
+        card: card.key,
+        zip: card.file,
+        id: v.id,
+        name: v.name,
+        version: v.version,
+        versionCode: v.versionCode,
+        author: v.author,
+        description: v.description,
+        source: normalizeCoolapkUrl(v.source) || v.source,
+        // 闸前移之后这一枚的声明值就是口令前缀的输入之一（§16 第 1 句），所以它**必须有**：
+        // 缺任何一枚的 sha256，api.js 那一层直接不发这个请求（发出去也必然是 manifest_invalid）。
+        // 落盘口径不在这里 —— 服务端逐枚实算，公开记录里只落实算那一份。
+        sha256: card.zipSha,
+      };
+    }),
     uploader: fieldValue("uploader"),
     coolapkUid: fieldValue("coolapkUid"),
-    // 承诺文本的版本号 + 整包 sha256 + 口令的随机部分。派生串不在这里算 —— 后端自己重算，
-    // 前端算出来的那份只用来显示。
-    // sha256 交出去的理由：Worker 的 ⑤-c 会拿它和实算值对一遍。前端把自己算的哈希交过去，
-    // 是为了让「口令对不上」和「哈希对不上」保持成两种可分辨的失败，而不是第三种。
-    // 哈希还没算出来时发的是空串 —— ⑤-c 对空串跳过（老客户端同一条路），判不判由服务端定。
+    // 承诺文本的版本号：一次整套勾一次那四条，所以它是顶层那一个字段，不逐枚重复。
     pledge: "pledge-v1",
-    sha256: state.zipSha,
+    // 口令的随机部分：一次投稿一份，覆盖这一整套。派生串不在这里算 —— 后端自己重算。
     nonce: state.nonce,
     turnstile: state.turnstileToken,
   };
@@ -950,14 +2122,28 @@ function closeRun() {
   document.body.style.overflow = "";
 }
 
-async function upload(fields) {
+/**
+ * 提交**这一整套**：一次 POST、一个 manifest、N 个 zip、一串口令、一个 PR。
+ * 语义是「全有全无」（§15 第 3 条已拍）：任一枚不过 ⇒ 整单拒、零 GitHub 写入、口令不烧。
+ * 所以这一层不再有「这一枚成功了、那一枚失败了」那种半屏结果 —— 一个动作就一个结论。
+ *
+ * Turnstile 那一层反而更顺了：部件给的令牌是一次性的，旧那份逐枚提交要在 N 次 POST 之间
+ * 续 N 次题（而这件事在本地验不了，本站不许拿真投稿去验）；现在整套一次提交只解一次。
+ */
+async function uploadBatch() {
+  if (state.uploading) return;
+  const payload = batchPayload();
+  if (!payload.modules.length) return;
   state.attempted = true;
-  state.lastFields = fields;
+  state.lastBatch = payload;
   state.uploading = true;
-  openRun("UPLOADING", "正在上传…");
+  state.batchResult = null;
+  for (const card of state.cards) card.ack = null;
+  renderQueue();
+  openRun("UPLOADING", `正在上传这一整套（${payload.modules.length} 枚）…`);
 
   try {
-    const { pr } = await submitModule(fields, {
+    const { pr, modules } = await submitContribution(payload, {
       onProgress: (loaded, total) => {
         const pct = total ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
         $("#run-fill").style.width = `${pct}%`;
@@ -967,12 +2153,74 @@ async function upload(fields) {
     });
     $("#run-fill").style.width = "100%";
     $("#run-pct").textContent = "100%";
-    showSuccess(pr);
+    state.batchResult = { ok: true, pr, modules, at: Date.now() };
+    // 逐枚回执按 id 落回各自的卡：应答里那个 sha256 是**服务端实算**的那一份（§16 第 3 句），
+    // 落在卡上投稿人才拿得到「我这个字节被算成了什么」，而不是只对着一句「已受理」。
+    const acked = new Map();
+    for (const m of modules || []) if (m && typeof m.id === "string") acked.set(m.id, m);
+    for (const entry of payload.modules) {
+      const card = state.cards.find((c) => c.key === entry.card);
+      if (card) card.ack = acked.get(entry.id) || { id: entry.id };
+    }
+    // 这一次成功了 ⇒ 这一串口令在服务端记过账了（用过即废）。随机段当场换掉：
+    // 留着它，下一套（新选的包）会拿一串已经烧掉的口令去提交，永远回同一句「用过」。
+    if (state.nonce) setNonce(makeNonce());
+    showSuccess(state.batchResult);
   } catch (err) {
+    state.batchResult = { ok: false, reason: failReason(err), code: errCode(err), owner: errOwner(err) };
     showFailure(err);
   } finally {
     state.uploading = false;
+    renderQueue();
+    // 提交掉的那一套不该再出现在口令那一格里：那串已经在服务端记过账了，
+    // 屏幕上留着一串还能提交的字符就是让它被再烧一次。
+    renderProof();
+    refreshGate();
   }
+}
+
+/** 失败原因一律用服务端原话（api.js 已经把 error/message/reason/detail 都捞出来了）。 */
+function failReason(err) {
+  return err instanceof BackendError
+    ? err.message
+    : err && err.message
+    ? err.message
+    : "未知的失败，服务端没给原因。";
+}
+
+/** 后端回的机器可读码（api.js 从响应体的 code 取；不是 JSON 就没有）。 */
+function errCode(err) {
+  return err instanceof BackendError ? err.code : "";
+}
+
+/** 这一句该谁去修：'you' 改这一套 / 'us' 改本站或后端 / 'both' / 'unknown'。 */
+function errOwner(err) {
+  if (err instanceof BackendError) {
+    if (err.kind === "network" || err.kind === "not-configured" || err.kind === "bad-response") return "us";
+    return err.owner || "unknown";
+  }
+  return "unknown";
+}
+
+const OWNER_LABEL = {
+  you: { chip: "是你的包或字段的问题", cls: "chip--bad" },
+  us: { chip: "是我们这一侧的问题", cls: "chip--warn" },
+  both: { chip: "两边都要看一眼", cls: "chip--warn" },
+  unknown: { chip: "归属没能判定", cls: "" },
+};
+
+function retryBatch() {
+  // 重试发的是**上一次那一套**（state.lastBatch）还是当前队列那一套？
+  // 答案：当前队列 —— 但必须重新凑齐才发得出去。用 lastBatch 重试的风险是它里面的 File 对象
+  // 可能已经被换掉/移除，那时发出去的集合与口令那串不是同一套（闸前移之后声明进判据，
+  // 这种错位就是 sha_mismatch / batch_incomplete 的来源）。凑不齐就回表单去，不硬发。
+  const targets = submitTargets();
+  if (!targets.length) {
+    closeRun();
+    openConfirm();
+    return;
+  }
+  uploadBatch();
 }
 
 function resultBody() {
@@ -983,16 +2231,16 @@ function resultBody() {
   return box;
 }
 
-function showSuccess(pr) {
-  const url_ = safeUrl(pr);
+function showSuccess(res) {
+  const url_ = safeUrl(res.pr);
+  const n = (res.modules && res.modules.length) || (state.lastBatch ? state.lastBatch.modules.length : 0);
   $("#run-kicker").textContent = "PR OPENED";
   const ttl = $("#run-ttl");
-  ttl.textContent = "投稿已受理，PR 已开";
+  ttl.textContent = n > 1 ? `这一整套 ${n} 枚已受理，一个 PR 已开` : "投稿已受理，PR 已开";
   ttl.classList.add("ok");
 
   const box = resultBody();
-  const p = node("p", null, "服务端已经存下这个包，并自动开了一个只含元数据 JSON 的 PR：");
-  box.append(p);
+  box.append(node("p", null, "服务端已经存下这一整套的每一个包，并自动开了一个只含元数据 JSON 的 PR："));
   const link = node("a", null, url_ || "（没拿到 PR 链接）");
   if (url_) {
     link.href = url_;
@@ -1001,19 +2249,34 @@ function showSuccess(pr) {
     link.className = "mono";
   }
   box.append(link);
+  // 逐枚回执：这一格要说得出「哪一枚落成了什么」。服务端应答里的 sha 是**它自己实算**那一份
+  //（§16 第 3 句：公开记录只落实算），把它显示出来，用户才能拿它对着自己那个文件核一遍。
+  if (res.modules && res.modules.length) {
+    const ul = node("ul", "run__mods");
+    for (const m of res.modules) {
+      const bits = [];
+      if (m.versionCode !== undefined) bits.push(`code ${m.versionCode}`);
+      if (m.assetName) bits.push(m.assetName);
+      if (m.sha256) bits.push(`服务端实算 sha256 ${String(m.sha256).slice(0, 16)}…`);
+      ul.append(node("li", null, `${m.id || "（没给 id）"} · ${bits.join(" · ") || "已受理"}`));
+    }
+    box.append(node("p", "done__kicker", `这一次落盘的 ${res.modules.length} 枚`));
+    box.append(ul);
+  }
 
   const ul = node("ul", "next");
   for (const text of [
-    "点进 PR 能看到审核进度，以及这个投稿的完整元数据。",
+    "点进 PR 能看到审核进度，以及这一整套每一枚的完整元数据。",
     "新模块若风险较低可能自动通过；对已收录模块的版本更新一律人工审核，可能要等。",
-    "PR 合并之后，这个模块才会出现在公开索引里，所有人才能在管理器里搜到并一键安装。",
+    "PR 合并之后，这些模块才会出现在公开索引里，所有人才能在管理器里搜到并一键安装。",
+    "这一串口令已经随这一次投稿记账了（用过即废）。要再投别的包，页面会给你新的一串 —— 签名要再改一次。",
   ])
     ul.append(node("li", null, text));
   box.append(node("p", "done__kicker", "接下来"));
   box.append(ul);
 
   const ft = $("#run-ft");
-  const again = node("button", "btn btn--go", "再投一个");
+  const again = node("button", "btn btn--go", "清掉这一套，投下一套");
   again.type = "button";
   again.addEventListener("click", () => {
     closeRun();
@@ -1025,6 +2288,7 @@ function showSuccess(pr) {
   stay.addEventListener("click", closeRun);
   ft.append(stay);
 }
+
 
 /**
  * 服务端只有两种说法意味着这一串口令真的被烧掉了：用过它，或者它可能已经变成了一条投稿。
@@ -1067,30 +2331,43 @@ function proofWasSpent(err, reason) {
 function showFailure(err) {
   $("#run-kicker").textContent = "REJECTED";
   const ttl = $("#run-ttl");
-  ttl.textContent = "这次没提交上去";
+  const n = state.lastBatch ? state.lastBatch.modules.length : 0;
+  ttl.textContent = n > 1 ? `这一整套 ${n} 枚都没提交上去` : "这次没提交上去";
   ttl.classList.add("bad");
 
   const box = resultBody();
-  const reason =
-    err instanceof BackendError
-      ? err.message
-      : err && err.message
-      ? err.message
-      : "未知的失败，服务端没给原因。";
+  const reason = failReason(err);
+  const owner = errOwner(err);
+  const label = OWNER_LABEL[owner] || OWNER_LABEL.unknown;
+  // 先说这一句该谁去修，再贴服务端原话。「是你的包的问题」与「是我们的服务的问题」
+  // 混成同一句是这个站写过的那种假话：两种失败要用户做的事正好相反。
+  const head = node("div", "reason__hd");
+  head.append(node("span", `chip${label.cls ? " " + label.cls : ""}`, label.chip));
+  const code = errCode(err) || (err && err.code) || "";
+  if (code) head.append(node("span", "reason__code", `code: ${code}`));
+  box.append(head);
   box.append(node("p", null, "后端返回的原因："));
   box.append(node("div", "reason", reason));
 
+  // 全有全无不是「保守起见」那种口彩，是 §15 第 3 条拍下的语义：说清楚它意味着什么。
+  box.append(
+    node(
+      "p",
+      "run__scope",
+      `这一次是**整套一次提交**，语义全有全无：任何一枚没过 ⇒ 整单拒、一个 GitHub 写入都没发生、` +
+        `口令也没被烧掉。所以${n > 1 ? `这 ${n} 枚` : "这一枚"}要么一起上线、要么一起还留在你手上 —— 页面上不会出现「一半投上了」那种状态。`
+    )
+  );
+
   let proofRotated = false;
   if (proofWasSpent(err, reason)) {
-    // 这一串确实烧掉了：重掷随机段，口令行现算新的一串，门禁清单跟着刷新。
-    state.nonce = makeNonce();
+    // 这一串确实烧掉了：重掷那**一份**随机段（整套就一份），口令行现算新的一串，清单跟着刷新。
+    setNonce(makeNonce());
     // 重试按钮复用上一份载荷，不同步的话它会带着已经烧掉的那串再打一次，永远回同一句指控。
-    // 整包哈希一并同步：上一份可能是在哈希到货之前取的，那时发出去的是空串。
-    if (state.lastFields) {
-      state.lastFields = { ...state.lastFields, nonce: state.nonce, sha256: state.zipSha };
-    }
+    if (state.lastBatch) state.lastBatch = { ...state.lastBatch, nonce: state.nonce };
     renderProof();
     refreshGate();
+    renderQueue();
     proofRotated = true;
   }
 
@@ -1102,12 +2379,20 @@ function showFailure(err) {
       " 里的 API_BASE 填了、后端 Worker 在跑，并且它已经给响应加上 Access-Control-Allow-Origin。"
     );
     box.append(hint);
+  } else if (owner === "us") {
+    box.append(
+      node(
+        "p",
+        null,
+        "这一句不该由你改包来修：包、字段、签名都不用动。稍后重试一次，还是这样就这一屏的内容找站点 —— 表单与选中的包本页都给你留着。"
+      )
+    );
   } else {
     box.append(
       node(
         "p",
         null,
-        "表单内容我都留着了，改完可以直接重试，不用重新填一遍、也不用重新选文件。"
+        "表单内容与选中的包我都留着了，改完可以直接重试这一整套，不用重新填一遍、也不用重新选文件。"
       )
     );
   }
@@ -1119,21 +2404,15 @@ function showFailure(err) {
         "p",
         null,
         "口令换了一串 —— 表单里「投稿口令」那一行现在是新的，上一串已经作废。" +
-          "先把新串抄进酷安签名并保存，再回来点重试；签名没改就重试，后端还会说这一串不对。"
+          "先把新串抄进酷安签名并保存，再回来点重试；签名没改就重试，后端还会说这一串不对。" +
+          "换的是这一整套共用的那**一串**：一次投稿只改一次签名。"
       )
     );
 
   const ft = $("#run-ft");
-  const retry = node("button", "btn btn--go", "重试提交");
+  const retry = node("button", "btn btn--go", n > 1 ? `重试这一整套（${n} 枚）` : "重试提交");
   retry.type = "button";
-  retry.addEventListener("click", () => {
-    if (state.lastFields && state.lastFields.zip) {
-      upload(state.lastFields);
-    } else {
-      closeRun();
-      openConfirm();
-    }
-  });
+  retry.addEventListener("click", () => retryBatch());
   ft.append(retry);
   const back = node("button", "btn btn--ghost", "返回修改");
   back.type = "button";
@@ -1155,12 +2434,12 @@ function uidLine() {
 
 function resetForm() {
   $("#form").reset();
-  clearFile();
+  clearQueue();
   state.attempted = false;
   state.uidStatus = "idle";
   state.uidInfo = null;
   state.nonce = "";
-  state.zipSha = ""; // 两个来源一起归零：nonce 与整包哈希（clearFile 那份是包没了就清，这里是换投稿）
+  state.zipSha = ""; // 两个来源一起归零：nonce 与整包哈希（clearQueue 那份是包没了就清，这里是换投稿）
   $("#uid-check").hidden = true;
   renderProof(); // nonce 清空后这一行跟着收起，别留一串还能提交的旧口令在屏幕上
   syncUploaderField(); // 顺手把 readOnly / 标签 / 说明一起还原，别留一个锁着的空框
@@ -1688,11 +2967,24 @@ function machineLayer(item, ev) {
   const pledge = pend && pend.pledge ? pend.pledge : null;
   const own = pend && pend.ownership ? pend.ownership : null;
   if (pledge || own) {
+    /* 「验证方式」那一格要说人话：pending 里存的是机器可读码 —— `bio` 是今天那条单枚口令（v1），
+       `bio-set` 是 §15/§16 那套「一次投稿共用一串集合口令」。把 `bio-set` 原样印到公示页，
+       读者只会当成一个没见过的错误码，而这一格存在的意义正是让人核对「凭什么说这是你」。
+       未知值不编说法：原样印出来并标一句不认识 —— 新值出现的正确反应是改这张表，
+       不是让页面替后端猜一个听起来合理的解释。 */
+    const VIA_LABELS = {
+      bio: "酷安个性签名（单枚口令 v1）",
+      "bio-set": "酷安个性签名（整套共用一串口令 v2）",
+    };
+    const viaRaw = own && own.via ? String(own.via) : "";
+    const viaText = !viaRaw
+      ? "没写"
+      : VIA_LABELS[viaRaw] || `${viaRaw}（不认识的验证方式，原样列出）`;
     left.append(kvRow("ec__kv--1", [
       ["承诺文本", pledge && pledge.version ? String(pledge.version) : "没写版本", ""],
       ["承诺时刻", pledge && pledge.atMs ? fmtDate(msOf(pledge.atMs)) : "没写", ""],
       ["所有权证明前缀", own && own.proofPrefix ? String(own.proofPrefix) : "没写（这条早于口令方案）", ""],
-      ["验证方式", own && own.via ? String(own.via) : "没写", ""],
+      ["验证方式", viaText, ""],
       ["核验时刻", own && own.verifiedAt ? fmtDate(msOf(own.verifiedAt)) : "没写", ""],
     ]));
   } else {
@@ -2109,12 +3401,17 @@ function renderAbout() {
       ok: IS_TURNSTILE_CONFIGURED,
     },
     {
-      k: "上传上限",
+      k: "上传上限（三个数都只从后端读）",
+      v: limitsReadout(),
+      ok: state.limits.from === "backend",
+    },
+    {
+      k: "批量投稿形状",
       v:
-        state.maxBytesFrom === "backend"
-          ? `${fmtBytes(state.maxBytes)}（后端自报，与服务端一致）`
-          : `${fmtBytes(state.maxBytes)}（后端未自报 maxBytes，这里用的是 config.js 的兜底值，可能与服务端实际值不一致）`,
-      ok: state.maxBytesFrom === "backend",
+        "前端发的是 §17.3 那份 manifest + N 个 name=\"zip\" 的 file part（manifest 排第一个 part），口令走 v2 集合串。" +
+        "⚠ 这条要求后端已经认 `manifest`（§17.1）—— 还没上线时这一套会被旧版单枚逻辑读成缺字段，" +
+        "失败不是静默的，会原样回 4xx 与 code。",
+      ok: true,
     },
     {
       k: CONFIG.COOLAPK_UID_FIELD,
@@ -2179,31 +3476,66 @@ function renderAbout() {
 /* -------------------------------------------------------------------- 启动 */
 
 /**
- * 把「当前生效的上限」画到界面上。上限是问后端要的，异步到货，
- * 所以两处显示（拖放区提示与投稿规格）都必须能从这一个函数重画。
+ * 把「当前生效的三个上限」画到界面上。数字是问后端要的，异步到货，
+ * 所以三处显示（拖放区提示、投稿规格、说明页状态）都必须能从这一个函数重画。
+ * 问不到的那一条写「后端没自报」而不是写一个猜出来的数 —— 页面上的数字是用户行动的依据。
  */
 function paintLimit() {
-  const mb = Math.round(state.maxBytes / MB);
+  const L = state.limits;
+  const one = L.maxBytes === null ? null : Math.round(L.maxBytes / MB);
+  const total = L.maxTotalBytes === null ? null : Math.round(L.maxTotalBytes / MB);
   const hint = $("#drop-hint");
-  if (hint) hint.textContent = `上限 ${mb} MB · 不要多套一层文件夹`;
+  if (hint) {
+    hint.textContent =
+      (one === null ? "单枚上限：后端没自报" : `单枚上限 ${one} MB`) +
+      (total === null ? "" : ` · 整套 ${total} MB`) +
+      (L.maxModules === null ? "" : ` · 一次最多 ${L.maxModules} 枚`) +
+      " · 不要多套一层文件夹";
+  }
+  // 投稿规格那一格只有地方放两个数（四格 2×2 是钉住的布局），所以写「单枚 + 一次几枚」，
+  // 整套那一格由拖放区提示与闸门清单说。
   const spec = $("#spec-max");
-  if (spec) spec.replaceChildren(node("b", null, mb), " MB");
+  if (spec) {
+    spec.replaceChildren(
+      one === null ? node("span", null, "问后端中…") : node("b", null, one),
+      one === null ? "" : " MB / 枚",
+      ...(one === null ? [] : L.maxModules !== null ? [` · 一次最多 `, node("b", null, L.maxModules), ` 枚`] : [])
+    );
+  }
+}
+
+/** 说明页那一行：三个数各自到没到货，逐条说清 —— 「后端自报了上限」这一句在只自报一条时是假的。 */
+function limitsReadout() {
+  const L = state.limits;
+  if (L.from !== "backend") {
+    return `没问到（${L.from === "not-configured" ? "API_BASE 未配置" : L.from === "unreachable" ? "后端没应答" : "后端应答里没有这三个字段"}）—— 单枚 / 整套 / 枚数三条前端都不拦，全部由服务端拒。`;
+  }
+  const bits = [
+    L.fields.maxBytes ? `单枚 ${fmtBytes(L.maxBytes)}` : "单枚上限后端没自报",
+    L.fields.maxTotalBytes ? `整套 ${fmtBytes(L.maxTotalBytes)}` : "整套上限后端没自报（这一条前端不拦）",
+    L.fields.maxModules ? `一次 ${L.maxModules} 枚` : "枚数上限后端没自报（这一条前端不拦）",
+  ];
+  return `${bits.join(" · ")} —— 数字只有后端一个定义处，config.js 里没有拷贝。`;
 }
 
 /**
- * 问后端它自己的真实上限。
+ * 问后端它自己的三个上限。
  *
- * 这一步存在的理由很具体：前端曾经抄了一份 8MB，而后端常量是 2MB，
- * 于是用户按页面上的数字传到一半被 400 拒掉，界面还写着「允许 8MB」。
- * 抄来的常量一定会漂移，所以让它只有后端一个定义处，前端这份退化成兜底。
+ * 这一步存在的理由很具体：前端曾经抄了一份 8MB，而后端常量是 2MB，于是用户按页面上的数字
+ * 传到一半被 400 拒掉，界面还写着「允许 8MB」。抄来的常量一定会漂移，所以这次连兜底值都删了：
+ * 三个数只有 Worker 一份，问到几条算几条，没问到的那条前端**不拦**。
  */
 async function syncLimits() {
   const r = await fetchServiceLimits();
-  const changed = r.maxBytes !== state.maxBytes || r.from !== state.maxBytesFrom;
-  state.maxBytes = r.maxBytes;
-  state.maxBytesFrom = r.from;
+  const changed =
+    r.maxBytes !== state.limits.maxBytes ||
+    r.maxTotalBytes !== state.limits.maxTotalBytes ||
+    r.maxModules !== state.limits.maxModules ||
+    r.from !== state.limits.from;
+  state.limits = r;
   if (!changed) return;
   paintLimit();
+  refreshGate(); // 枚数与整套字节这两格依赖它，到货之后清单要说真话
   renderAbout();
 }
 
@@ -2239,11 +3571,14 @@ function init() {
   }
 
   bindFile();
+  bindSwap();
+  bindQueueBar();
   bindCheck();
   bindConfirm();
   bindSearch();
   bindIncSearch();
   bindTheme();
+  renderQueue(); // 一开始是空队列：整条收起，投稿页与今天一模一样
   renderAbout();
   renderRoute();
 

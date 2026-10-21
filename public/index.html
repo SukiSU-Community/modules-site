@@ -118,15 +118,15 @@
             <div class="spec" aria-label="投稿硬性条件">
               <div class="spec__cell">
                 <span class="spec__k">大小上限</span>
-                <span class="spec__v" id="spec-max"><b>8</b> MB</span>
+                <span class="spec__v" id="spec-max">正在问后端…</span>
               </div>
               <div class="spec__cell">
                 <span class="spec__k">zip 形态</span>
                 <span class="spec__v">根目录含 <b>module.prop</b></span>
               </div>
               <div class="spec__cell">
-                <span class="spec__k">溯源</span>
-                <span class="spec__v">酷安出处 + 投稿人 <b>UID</b></span>
+                <span class="spec__k">投稿要求</span>
+                <span class="spec__v">投稿人酷安等级 <b>≥ 2</b></span>
               </div>
               <div class="spec__cell">
                 <span class="spec__k">提交之后</span>
@@ -146,7 +146,9 @@
             </div>
             <p class="panel__note">
               选好 zip 后浏览器会当场解一次包：根据根目录下的
-              <code>module.prop</code> 自动填充模块信息到下面。
+              <code>module.prop</code> 自动填充模块信息到下面。一次可以选<b>多个</b> zip ——
+              每个包在队列里占一张卡，点哪一张就编辑哪一张；<b>一次投稿只改一次酷安签名、只提交一次</b>，
+              口令那一串绑的是这一整套，不是一枚一串。
             </p>
 
             <label class="drop" id="drop">
@@ -154,10 +156,30 @@
                 <path d="M12 3 3 7.5v9L12 21l9-4.5v-9L12 3Z" />
                 <path d="M3 7.5 12 12l9-4.5M12 12v9" />
               </svg>
-              <span class="drop__t">拖入模块 zip，或点击选择文件</span>
+              <span class="drop__t">拖入模块 zip（可一次多个），或点击选择文件</span>
               <span class="drop__s" id="drop-hint">上限以服务端自报为准，正在确认…</span>
-              <input type="file" id="file" name="zip" accept=".zip,application/zip" />
+              <input type="file" id="file" name="zip" accept=".zip,application/zip" multiple />
             </label>
+
+            <!-- 队列条：一次投稿动作 = 一整套模块。每行一枚（模块 id / 名称 / versionCode / 查重状态），
+                 点一行就把表单装成它那一份（切走前先写回它自己那张卡）。
+                 查重判为「已被投稿过」的那一枚在这一行就摘出去：不进 manifest、不进口令那一串、不提交，
+                 但人还在队列里，想删由你删。每行还有「重选这个包」—— 换一枚的字节就等于换一整套，
+                 口令那一串会当场作废重算。 -->
+            <div class="queue" id="queue" hidden>
+              <div class="queue__hd">
+                <span class="queue__t">本次这一套</span>
+                <span class="queue__n" id="queue-count"></span>
+              </div>
+              <ul class="queue__list" id="queue-list" aria-label="本次投稿动作里的模块队列"></ul>
+              <div class="queue__ft">
+                <button type="button" class="btn btn--ghost btn--sm" id="queue-add">再往这一套里加几枚</button>
+                <button type="button" class="btn btn--ghost btn--sm" id="queue-clear">清空队列</button>
+              </div>
+              <p class="queue__note" id="queue-note"></p>
+            </div>
+            <!-- 逐枚换包用那一个不显示的 input：一次只换一个文件，换完只重解析那一枚 -->
+            <input type="file" id="file-swap" accept=".zip,application/zip" hidden />
 
             <div class="term" id="term" hidden aria-live="polite"></div>
           </section>
@@ -169,9 +191,13 @@
               <h2 id="p2t">模块元数据</h2>
               <span class="panel__tag" id="meta-src">手动填写</span>
             </div>
+            <!-- 这一屏编的是「当前那一枚」：多枚时先在 01 的队列里点到哪一枚，这里就是哪一枚。
+                 读数与队列用的是同一份判据（activeCard），不是第二个状态；只有一枚时这一行不出现。 -->
+            <div class="editing" id="editing" hidden></div>
             <p class="panel__note" id="meta-note">
               这些信息应来自 zip 内 <code>module.prop</code>。改了这里不等于改了包里的文件，
-              请照实填写，服务端与审核都按包内内容为准。
+              请照实填写，服务端与审核都按包内内容为准。<b>每一枚都要填一遍</b> —— 这一整套里
+              任何一枚没齐，这一次提交就整单发不出去（服务端也是全有全无）。
             </p>
 
             <div class="grid2">
@@ -226,15 +252,15 @@
               <span class="panel__tag">traceability</span>
             </div>
             <p class="panel__note">
-              这两项是<b style="color: var(--amber)">硬性要求</b>：出处说明包从哪来，UID 说明是谁带上来的。
-              溯源是日后追责和审核的唯一抓手，缺一项服务端就会拒收。
+              这两项是<b style="color: var(--amber)">硬性要求</b>：出处说明包从哪来，UID 说明是谁带上来的，方便以后审核、追责。
+              出处<b>每一枚一份</b>（在 02 那一屏里跟着当前这一枚改）；UID 与署名是<b>一次投稿一份</b>，
+              这一整套共用它 —— 一次动作只有一个人。
             </p>
             <div class="field">
-              <div class="field__lab"><label for="f-source">模块出处<span class="req">*</span></label></div>
+              <div class="field__lab"><label for="f-source">模块出处（酷安帖子链接）<span class="req">*</span></label></div>
               <input class="mono" type="text" id="f-source" data-k="source" placeholder="https://www.coolapk.com/feed/65432100" autocomplete="off" spellcheck="false" required />
               <p class="field__help">
-                只收<b>酷安站内链接</b>：原帖 <code>coolapk.com/feed/…</code> 或原作者主页
-                <code>coolapk.com/u/…</code> 都行。网盘下载链会失效，别填网盘。
+                强烈建议附上这个模块的<b>酷安帖子链接</b>，如果没有，可以为它发一个帖子留作存档同时也起到宣传作用。
               </p>
               <p class="field__err" data-err="source">请填写酷安站内链接</p>
             </div>
@@ -269,15 +295,16 @@
             </div>
             <div class="field" id="proof-field" hidden>
               <span class="field__lab">投稿口令<span class="req">*</span></span>
-              <div class="proof">
-                <code class="mono" id="proof-text">…</code>
-                <button type="button" class="btn btn--ghost btn--sm" id="proof-copy">复制</button>
-              </div>
+              <!-- 整套一串：v2 的口令绑的是「这一整套的 (模块 ID + 整包 sha256) 全集」，
+                   长度恒 19 字符、与枚数无关。下面那一行小字点名这一串到底绑了哪几枚 ——
+                   增删任一枚、改任一枚的 ID、重选任一枚的包，这一串就变成另一串。 -->
+              <div class="proofs" id="proof-list"></div>
+              <p class="field__help" id="proof-cap"></p>
               <p class="field__help">
-                打开酷安「我的 → 编辑资料 → 签名」，把上面这串填进去并保存，再回来提交。
+                打开酷安「我的 → 编辑资料 → 签名」，把上面那一串填进去并保存，再回来提交。
                 这是为了证明这个账号归你 —— 公示与追责只认这个锚点。
-                这串绑的是<b>模块 ID 加上你此刻要上传的那个包</b>：换 ID 或换包它都会变成另一串，
-                所以它只对这一个包有效；提交没成功要重新填一次。
+                这一串绑的是<b>本次这一整套模块</b>：少一枚、多一枚、换任何一枚的包都会算出另一串，
+                所以它只对这一次提交的那一套有效；提交没成功要重新填一次。
               </p>
             </div>
           </section>
@@ -290,7 +317,7 @@
               <span class="panel__tag">irreversible</span>
             </div>
             <p class="panel__note">
-              上传是<b style="color: var(--amber)">公开且长期保留</b>的动作，所以下面四项确认要逐条勾过，一条都不能跳。
+              上传是<b style="color: var(--amber)">公开且长期保留</b>的动作，所以下面清单要逐条确认。
             </p>
 
             <ul class="gate" id="gate" aria-label="提交前自检"></ul>
@@ -492,7 +519,7 @@
           </svg>
           <div>
             <div class="warn__ttl" id="warn-ttl">Confirm Upload</div>
-            <p class="warn__sub">四项全部勾上，「上传」按钮才会亮 —— 少一项都传不出去。</p>
+            <p class="warn__sub">四项全部勾上，「上传」按钮才会亮 —— 少一项都传不出去。勾的是<b>这一次这一整套</b>，不是某一枚。</p>
           </div>
         </div>
         <div class="warn__body">

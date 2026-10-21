@@ -876,6 +876,173 @@ textarea:focus {
   cursor: pointer;
 }
 
+/* 队列条：一次投稿动作里的多枚模块。每行一枚（模块 id / 名称 / versionCode / 状态），
+   点一行就把表单装成它那一份。空队列时整条 hidden，投稿页与单枚时代一模一样。 */
+.queue {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--void-2);
+  overflow: hidden;
+}
+.queue__hd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.queue__t {
+  font: 600 10.5px/1.6 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.queue__n {
+  font: 600 12px/1.6 var(--mono);
+  color: var(--amber);
+}
+.queue__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* 只有一枚且没被摘出去：这一条退化成一行 —— 标题行与那三句边界话都不出现。
+   单枚路径的形状因此和队列之前一样，多枚时才展开成清单。 */
+.queue[data-quiet="1"] .queue__hd,
+.queue[data-quiet="1"] .queue__note {
+  display: none;
+}
+.qrow {
+  display: grid;
+  gap: 4px;
+  padding: 2px 0 2px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.qrow:last-child {
+  border-bottom: 0;
+}
+/* 当前那一枚靠左边一条琥珀实线认，不靠底色：底色在日间主题下会糊成一片 */
+.qrow.is-current {
+  border-left: 2px solid var(--amber);
+  background: var(--amber-wash);
+}
+.qrow__pick {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) auto auto;
+  gap: 4px 10px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px 8px 2px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.qrow__pick:hover {
+  background: var(--btn-hover);
+}
+.qrow__pick:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+.qrow__id {
+  font: 500 12.5px/1.6 var(--mono);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.qrow__nm {
+  font: 400 12.5px/1.6 var(--sans);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.qrow__code {
+  font: 500 11.5px/1.6 var(--mono);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.qrow .chip {
+  justify-self: end;
+}
+.qrow__res {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 0 10px 8px 2px;
+  font: 400 12px/1.7 var(--mono);
+  color: var(--ink-2);
+}
+.qrow__pr {
+  color: var(--mint);
+  overflow-wrap: anywhere;
+}
+.qrow__why {
+  color: var(--red);
+  overflow-wrap: anywhere;
+}
+.qrow__rm {
+  justify-self: start;
+  align-self: start;
+  margin: 0 0 8px;
+  padding: 3px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  background: none;
+  color: var(--ink-3);
+  font: 500 11px/1.6 var(--mono);
+  cursor: pointer;
+}
+.qrow__rm:hover {
+  color: var(--red);
+  border-color: var(--red-line);
+}
+.queue__note {
+  margin: 0;
+  padding: 10px 12px 11px;
+  border-top: 1px solid var(--line);
+  font: 400 11.5px/1.8 var(--mono);
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.queue__dup {
+  color: var(--amber);
+}
+
+/* 口令列表：一枚一串。只有一枚时它就是原来那一格，形状不变。 */
+.proofs {
+  display: grid;
+  gap: 8px;
+}
+.proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.proof__k {
+  font: 500 11.5px/1.6 var(--mono);
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.proof .mono {
+  padding: 7px 10px;
+  border: 1px solid var(--amber-line);
+  border-radius: var(--r);
+  background: var(--well);
+  color: var(--amber);
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
+}
+.proof__copy {
+  flex: none;
+}
+
 /* 解析读数 */
 .term {
   margin-top: 14px;
@@ -1091,6 +1258,16 @@ textarea:focus {
 .gate li.pass::before {
   content: "✓";
   color: var(--mint);
+}
+/* 闸门清单的第三档：「有一枚已被投稿过、从这一套里摘出去了」那一格用的。
+   它不该是 ✗（那会把整套提交一起扣住，而这句话明明说「剩下的照投」），
+   也不该是 ✓（那是在说这一项通过了，而它说的是一件损失）。所以单独一档：黄点、不拦人。 */
+.gate li.note {
+  color: var(--ink-2);
+}
+.gate li.note::before {
+  content: "!";
+  color: var(--amber);
 }
 
 /* 进度 */
@@ -2488,8 +2665,8 @@ mark {
    断点地图（全站档位一览，新增档位也来这里登记）
    · ≥1100px  桌面宽屏：hero 文案与规格铭牌左右并列（下面 min-width 档）
    · ≤760px   手机主档：单列、底部 dock、panel 标签收起（中段大档）
-   · ≤620px   小手机：顶栏收装饰、规格格收字号、搜索行折两行
-   · ≤380px   窄屏：规格值再收字号、名条 9px
+   · ≤620px   小手机：顶栏收装饰、规格格收字号、搜索行折两行、队列行折两行（id+名称一行，code+状态一行）
+   · ≤380px   窄屏：规格值再收字号、名条 9px、口令行的模块 ID 独占一行让位给串
    · ≤360px   极窄：承诺行折行
    · 触控档（pointer: coarse 或 ≤760px）：可点目标补到 44px
    ============================================================ */
@@ -2532,6 +2709,14 @@ mark {
     padding: 3px 2px;
     margin: -3px -2px;
   }
+  /* 队列行整行就是「切到这一枚」的按钮，移除那颗只有 22px 高：都补到 44 的下限。 */
+  .qrow__pick {
+    min-height: 44px;
+  }
+  .qrow__rm {
+    min-height: 44px;
+    padding: 8px 12px;
+  }
 }
 
 /* 搜索行折两行：窄屏下输入框和计数挤在一行时，输入框被压到 210px 下限、
@@ -2540,6 +2725,38 @@ mark {
   .search {
     flex: 1 1 100%;
     min-width: 0;
+  }
+  /* 队列行折两行：id 与名称占第一行，versionCode 与状态占第二行。
+     四列在 360px 上会把 id 压到断字断到读不出来，而这一行的用途就是让人一眼认出是哪枚。 */
+  .qrow__pick {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 10px;
+    padding: 9px 8px 9px 2px;
+  }
+  .qrow__id {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .qrow__nm {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .qrow__code {
+    grid-column: 2;
+    grid-row: 2;
+    text-align: right;
+  }
+  .qrow .chip {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+}
+
+@media (max-width: 380px) {
+  /* 极窄：口令那一行的模块 ID 让位给串本身（串是要抄进签名的，ID 只是认哪一枚） */
+  .proof__k {
+    flex: 1 1 100%;
   }
 }
 

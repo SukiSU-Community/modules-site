@@ -7,13 +7,20 @@ import {
 } from "./config.js";
 
 export class BackendError extends Error {
-  constructor(kind, message, detail) {
+  constructor(kind, message, detail, extra) {
     super(message);
     this.name = "BackendError";
     this.kind = kind; // 'not-configured' | 'network' | 'rejected' | 'bad-response'
     this.detail = detail || "";
+    // 后端回的机器可读码，与由此判出的归属（'you' 改包 / 'us' 改服务 / 'both' / 'unknown'）。
+    // 放这儿是因为 app.js 的失败格要说清「这一句该谁去修」，而不是因为它好取。
+    this.code = extra && typeof extra.code === "string" ? extra.code : "";
+    this.owner = (extra && extra.owner) || "unknown";
   }
 }
+
+/** 整包 sha256 的形状：64 位小写十六进制。批量声明里逐枚强制（§16 第 1 句）。 */
+export const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 
 // /check 的四种 status，以及对应的界面提示。
 // 这个端点任何情况都返回 HTTP 200，客户端只读 status，不看状态码。
@@ -48,6 +55,10 @@ const NETWORK_HINT =
   "连不上后端。可能是 config.js 里的 API_BASE 还没填、Worker 没启动，" +
   "或它还没返回 Access-Control-Allow-Origin（跨域被浏览器拦下）。";
 
+/**
+ * 单枚查重：`GET /check?id=&versionCode=` —— §17.6 明写「一字不改」，因为 App 在读它，
+ * 而这个端点任何情况都回 HTTP 200、客户端只读 status。批量那一头见下面的 checkModulesBatch。
+ */
 export async function checkModule(id, versionCode) {
   if (!IS_API_CONFIGURED) {
     throw new BackendError("not-configured", "后端地址还没配置，暂时无法查重。");
@@ -73,89 +84,239 @@ export async function checkModule(id, versionCode) {
 }
 
 /**
- * 提交投稿。用 XMLHttpRequest 而不是 fetch，只有一个原因：
- * fetch 拿不到上传进度，而这里最大要传 8MB，没有进度条用户会以为页面卡死。
- * 故意不设置任何自定义请求头，让 POST 保持「CORS 简单请求」形态（multipart/form-data
- * 本身在允许列表里），这样后端只需要补 Access-Control-Allow-Origin，
- * 连 OPTIONS 预检都不会触发。请不要在这里加 header 来「试试」。
+ * 提交**一整套**（§17.1：`POST /submit` 里存在名为 `manifest` 的 text field ⇒ 走批量）。
+ * 形状逐条对着设计文档 §17.2 / §17.3，一个字段都不许多、一个都不能换形状。
+ *
+ * 为什么一次动作只发一个请求（而不是像以前那样一枚发一次）：口令 v2 把绑的对象从
+ * 「(模块 id, 整包 sha256) 这一对」换成「这一次投稿的整套」，而 `used-nonce` 用过即废 ⇒
+ * 一串口令只有在**一个请求带整套**时语义才干净。拆成 N 次的话要么第一次就把这串烧掉
+ * （后 N-1 次全被判「口令已用过」），要么把记账降成一枚一次，那攻击者读到串就能逐枚预占。
+ * 这条不是省事，是 §15 写下来的硬约束：「不能只做前端」。
+ *
+ * 三条规矩各自守一件会静默坏掉的事：
+ * ① manifest 排成 FormData 的**第一个 part** —— §17.2：闸前移之后口令的输入来自这份声明，
+ *    解析器若在读到 manifest 之前就看见 file part ⇒ 400 `manifest_late`。FormData 的插入序
+ *    就是线上的 part 序（浏览器按 append 顺序编码边界，实测过，见本文件末尾那条注释），
+ *    所以这一条在客户端能真做到，不是「应该没问题」。
+ * ② 逐枚必须带 sha256，缺一枚就不发请求 —— §16 第 1 句：声明从「顺手上报的元信息」升级成
+ *    「判据的输入」，缺声明的批量在服务端是 `manifest_invalid`，而那种失败在页面上完全看不出
+ *    是哪一枚没算出来。这里拦的是「已知必然被拒的请求」，不是后端的一条安全闸（判定仍在 Worker）。
+ * ③ 一个 `zip` file part 都不缺 —— 少一枚是 `batch_incomplete`（少递），整单拒、零 GitHub 写入。
+ *    客户端在发之前就凑不齐，说明这一枚的字节根本还没读进来，那发出去就是白烧一次限流格。
+ *
+ * ⚠ 线上部署次序（§15「换代次序」）：Worker 先读 v1∪v2 并上线，**前端这份才能切过来** ——
+ *   现在这份发给还没接 `manifest` 的后端会失败。失败不是静默的：本函数会原样回 4xx 与 code。
  */
-export function submitModule(fields, { onProgress } = {}) {
+export function submitContribution(batch, { onProgress } = {}) {
   if (!IS_API_CONFIGURED) {
     return Promise.reject(
       new BackendError("not-configured", "后端地址还没配置：请在 config.js 填入 API_BASE 后再提交。")
     );
   }
+  const modules = Array.isArray(batch.modules) ? batch.modules : [];
+  if (!modules.length) {
+    return Promise.reject(new BackendError("rejected", "本次要投的整套是空的 —— 一个包都没选中，没什么可发的。"));
+  }
+  const noSha = modules.filter((m) => !SHA256_HEX_RE.test(String(m.sha256 || "")));
+  if (noSha.length) {
+    return Promise.reject(
+      new BackendError(
+        "rejected",
+        `有 ${noSha.length} 枚的整包 sha256 还没算出来（${noSha.map((m) => m.id || "（没模块 ID）").join("、")}）—— ` +
+          "批量投稿逐枚必须声明整包哈希，缺任何一枚服务端都会按 manifest 不合法拒掉这一整套。"
+      )
+    );
+  }
+  const noFile = modules.filter((m) => !m.zip);
+  if (noFile.length) {
+    return Promise.reject(
+      new BackendError("rejected", "队列里有枚还没拿到包体字节，这一整套发不出去 —— 重新选一次那个文件。")
+    );
+  }
 
   const form = new FormData();
-  form.append("zip", fields.zip, fields.zip.name);
-  form.append("id", fields.id);
-  form.append("name", fields.name);
-  form.append("version", fields.version);
-  form.append("versionCode", fields.versionCode);
-  form.append("author", fields.author || "");
-  form.append("description", fields.description || "");
-  form.append("source", fields.source);
-  form.append("uploader", fields.uploader);
-  // 署名昵称与酷安 UID 分两个字段：前者给人看，后者是唯一可追责的标识。
-  form.append(CONFIG.COOLAPK_UID_FIELD, fields.coolapkUid);
-  // 所有权口令：发随机段 nonce 与承诺版本，派生串不发 —— 后端自己重算，
-  // 前端算出来的那份只用来显示，发过去就等于让前端替后端定结论。
-  // sha256 是前端对自己那个文件算的整包摘要（口径同 Worker 的 contentId）。交出去的理由：
-  // ⑤-c 会拿它和服务端实算的值对一遍 —— 于是「哈希对不上」是 400、「口令对不上」是 403，
-  // 两种可分辨的失败，而不是混成第三种没人看得懂的拒绝。留空时 ⑤-c 跳过，判定仍在服务端。
-  form.append("sha256", fields.sha256 ?? "");
-  form.append("pledge", fields.pledge ?? "");
-  form.append("nonce", fields.nonce ?? "");
+  // ① manifest 必须是第一个 part，早于任何一个 file part。
+  form.append("manifest", buildManifest(modules));
+  // 共享字段留在顶层，不进 manifest（§17.3）：一次投稿只有一个人、一个承诺、一枚口令。
+  form.append("uploader", batch.uploader || "");
+  form.append(CONFIG.COOLAPK_UID_FIELD, batch.coolapkUid || "");
+  form.append("pledge", batch.pledge || "");
+  form.append("nonce", batch.nonce || "");
   // Turnstile 预留位：没接入时也是发空字符串，不做任何前端假验证码。
-  form.append(CONFIG.TURNSTILE_FIELD, IS_TURNSTILE_CONFIGURED ? fields.turnstile || "" : "");
+  // 一次 POST 一份令牌 —— 整套一次提交只需要解一次题，比逐枚提交少 N-1 次。
+  form.append(CONFIG.TURNSTILE_FIELD, IS_TURNSTILE_CONFIGURED ? batch.turnstile || "" : "");
+  // ③ N 个 name="zip" 的 file part，按 manifest 的顺序追加（配对不看顺序、看包内 module.prop
+  //   的 id，§17.3；但顺序一致能让失败文案里的「第几枚」对得上用户认得出的那一枚）。
+  let totalBytes = 0;
+  for (const m of modules) {
+    form.append("zip", m.zip, m.zip.name);
+    totalBytes += Number(m.zip.size) || 0;
+  }
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url("/submit"));
     xhr.responseType = "text";
+    // 进度按**这一整套**的字节数走（xhr.upload 给的就是整个请求体的进度），
+    // 所以那根条现在说的是这一批，不再假装是一枚。
     xhr.upload.addEventListener("progress", (event) => {
-      if (event.lengthComputable && onProgress) onProgress(event.loaded, event.total);
+      if (event.lengthComputable && onProgress) onProgress(event.loaded, event.total, totalBytes);
     });
     xhr.addEventListener("load", () => {
       const body = (xhr.responseText || "").trim();
-      if (xhr.status >= 200 && xhr.status < 300) {
-        let json;
-        try {
-          json = JSON.parse(body);
-        } catch {
-          reject(
-            new BackendError("bad-response", "后端返回了看不懂的响应（HTTP " + xhr.status + "）。", body)
-          );
-          return;
-        }
-        if (json && json.ok === true && json.pr) {
-          resolve({ pr: json.pr });
-        } else {
-          reject(new BackendError("rejected", readReason(json) || "服务端没有接受这次投稿。", body));
-        }
-        return;
-      }
-      // 失败：服务端给的是中文原因，原样显示，别改写成英文兜底句。
-      let json;
+      let json = null;
       try {
         json = JSON.parse(body);
       } catch {
         json = null;
       }
-      const reason = (json && readReason(json)) || stripHtml(body);
-      reject(
-        new BackendError(
-          "rejected",
-          reason || `服务端拒绝了这次投稿（HTTP ${xhr.status}）。`,
-          body
-        )
-      );
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (json && json.ok === true && json.pr) {
+          // §17.5：应答是 { ok, pr, modules:[{ id, versionCode, sha256, assetName }] }。
+          // `pr` 键名与今天逐字兼容；单枚批量时 `modules` 也有一份 ⇒ 前端只写一条处理路径。
+          resolve({ pr: json.pr, modules: Array.isArray(json.modules) ? json.modules : [] });
+        } else {
+          reject(backendFailure(xhr.status, json, body));
+        }
+        return;
+      }
+      reject(backendFailure(xhr.status, json, body));
     });
     xhr.addEventListener("error", () => reject(new BackendError("network", NETWORK_HINT)));
     xhr.addEventListener("abort", () => reject(new BackendError("network", "上传已中断。")));
     xhr.send(form);
   });
 }
+
+/** §17.3 那份 JSON：`{ version:'batch-v1', modules:[{ id, sha256, name, version, versionCode, author, description, source }] }`。 */
+function buildManifest(modules) {
+  return JSON.stringify({
+    version: "batch-v1",
+    modules: modules.map((m) => ({
+      id: String(m.id || "").trim(),
+      sha256: String(m.sha256 || "").trim().toLowerCase(),
+      name: String(m.name || "").trim(),
+      version: String(m.version || "").trim(),
+      versionCode: Number(m.versionCode),
+      author: String(m.author || ""),
+      description: String(m.description || ""),
+      source: String(m.source || ""),
+    })),
+  });
+}
+
+/* ------------------------------------------------ §17.4 错误码 → 说人话
+   这张表守的是一句很具体的话：**「是你的包的问题」与「是我们的服务的问题」不许混成同一句**。
+   两者要用户做的事相反 —— 前者改包/改字段再来一次，后者什么都别改、等站点修好再来一次。
+   混起来写过一次：网关没接 CORS 时页面说「提交内容不合法」，用户来回改了半小时字段。
+   所以每条带 owner：'you'（这一套里要改的东西）/ 'us'（本站或后端要动的东西）/ 'both'。
+   后端没回 code（旧网关的 HTML、纯文本、还没发码的旧部署）时不许编一条原因 ——
+   那时只能用服务端原话，并明说是「我们没能把它归到哪一种」。 */
+export const SUBMIT_ERROR_TEXT = {
+  zip_too_large: {
+    owner: "you",
+    text: "这一套里有枚超过服务端自报的单枚上限，服务端在收字节的这一格就拒了。哪一枚超了页面上已经标出来 —— 换那一枚的包，或者把它拆成单独一次投稿。",
+  },
+  batch_too_large: {
+    owner: "you",
+    text: "这一套的总字节超过服务端自报的整套上限。这不是你包坏了：把这一整套拆成两次投稿就行（每次改一次签名、只投放得下的那几枚）。",
+  },
+  too_many_modules: {
+    owner: "you",
+    text: "一次投稿带的枚数超过服务端自报的上限。拆成两次投，其余的包留着下次选就行。",
+  },
+  manifest_invalid: {
+    owner: "us",
+    text: "服务端没能把这份 manifest 读成它要的形状。**这一条多半是我们的问题**：前端的字段形状与设计文档 §17.3 不一致，或后端还没上线批量这一条路。你不需要改包，也别再抄签名 —— 把这一句原样发给站点。",
+  },
+  manifest_late: {
+    owner: "us",
+    text: "服务端说 manifest 没排在第一个文件之前 —— 而前端是把 manifest 作为第一个 part 发出去的（FormData 的插入序）。两边对不上时是后端解析器的问题，你什么都不用改。",
+  },
+  batch_incomplete: {
+    owner: "you",
+    text: "声明的那一套与递上来的字节对不上：少一枚、多一枚、同一枚重复都会回这一句，服务端整单拒。先在页面上核对队列里有几枚、模块 ID 分别是什么，再重试；还不行就是前端把集合算错了，把这一句发给站点。",
+  },
+  sha_mismatch: {
+    owner: "you",
+    text: "某一枚的字节与声明的整包 sha256 不一致：选完之后那个文件被改过、或下载不完整最常见。把那一枚重新选一次文件再来。若你确定包没动过，那是前端哈希口径与后端不一致 —— 属于站点的 bug，把这一句一起发出来。",
+  },
+  proof_used: {
+    owner: "you",
+    text: "这一串口令已经在服务端记过账了（用过即废）。前端会自动换一新一串，你需要先把新串抄进酷安签名并保存，再回来点重试 —— 签名没改就重试，还会撞同一句。",
+  },
+};
+
+/**
+ * 把服务端的失败分成三格：你的包 / 我们的服务 / 说不清。
+ * 归类只认后端回的 code（机器可读），中文文案原样跟着显示，**不在这里改写它**。
+ */
+function backendFailure(status, json, body) {
+  const code = json && typeof json.code === "string" ? json.code : "";
+  const known = SUBMIT_ERROR_TEXT[code];
+  const reason = (json && readReason(json)) || stripHtml(body) || "";
+  const detail = known ? known.text : serviceSideHint(status, reason);
+  return new BackendError(
+    "rejected",
+    `${detail}${reason ? ` —— 服务端原话：「${reason}」` : `（HTTP ${status}，服务端没给原因）`}`,
+    body,
+    { code, owner: known ? known.owner : status >= 500 ? "us" : "unknown" }
+  );
+}
+
+/** 没有 code 时**不许替用户猜原因**：按 HTTP 段说是哪一侧的问题，剩下的交回服务端原话。 */
+function serviceSideHint(status, reason) {
+  if (status >= 500) {
+    return "后端自己出错了（5xx）。**这是我们的问题**：你的包与签名都不用动，稍后再试一次，一直这样就把这一句发给站点。";
+  }
+  if (reason) return "服务端拒了这一次投稿，这一条我们没能归到具体哪一种。";
+  return "服务端拒绝了这次投稿。";
+}
+
+/**
+ * 批量查重（§17.6）：`POST /check` 收 `{ modules:[{ id, versionCode }] }` ⇒ `{ results:[{ id, status }] }`，
+ * `status` 沿用今天那四个值。上面那条 `GET /check` 一字没动 —— App 在读它。
+ *
+ * 读回来的形状逐条判过才认：非 2xx、不是 JSON、results 不是数组、status 不在那四个值里，
+ * 任何一种都算「这一档没判成」而不是「没重复」。失效方向必须是**不拦**：
+ * 把「读不懂」说成「已被投稿过」，就是把一个查不到的东西说成查到了。
+ * 逐枚落状态用 `single` 那条路兜底（上面那个端点今天就在跑），所以后端还没上批量这一条时
+ * 这里退回逐枚 GET，功能不降级、只是多打几个请求。
+ */
+export async function checkModulesBatch(modules) {
+  if (!IS_API_CONFIGURED) {
+    return { statuses: new Map(), why: "后端地址还没配置，查重没打成 —— 已收录那一条暂时拦不了。", via: "single" };
+  }
+  const payload = {
+    modules: (Array.isArray(modules) ? modules : [])
+      .filter((m) => m && String(m.id || "").trim())
+      .map((m) => ({ id: String(m.id).trim(), versionCode: m.versionCode })),
+  };
+  if (!payload.modules.length) return { statuses: new Map(), why: "", via: "single" };
+  try {
+    const res = await fetch(url("/check"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      // 404/405 最常见的原因是后端还没上这一条路 ⇒ 交回逐枚那条，不是「查不到」。
+      return { statuses: new Map(), why: `批量查重回 HTTP ${res.status}`, via: "single" };
+    }
+    const json = await res.json();
+    const rows = json && Array.isArray(json.results) ? json.results : null;
+    if (!rows) return { statuses: new Map(), why: "批量查重的响应里没有 results 数组", via: "single" };
+    const statuses = new Map();
+    for (const row of rows) {
+      if (!row || typeof row.id !== "string") continue;
+      if (typeof row.status === "string" && CHECK_STATUS[row.status]) statuses.set(row.id, row.status);
+    }
+    return { statuses, why: "", via: "batch" };
+  } catch {
+    return { statuses: new Map(), why: NETWORK_HINT, via: "single" };
+  }
+}
+
 
 function readReason(json) {
   if (!json || typeof json !== "object") return "";
@@ -283,35 +444,56 @@ export async function lookupCoolapkUser(uid) {
 }
 
 /**
- * 问后端要它自己的真实上限。
+ * 问后端要它自己的三个上限（§17.6）：
+ *   `maxBytes` = **单枚**上限（键名不动，今天的前端在读）、`maxTotalBytes` = 整套、`maxModules` = 枚数。
  *
  * 为什么要问而不是在 config.js 里抄一份：抄出来的那一份一定会有人对不上 ——
- * 前端写过 8MB、Worker 实际 2MB，于是用户按 8MB 传，传到一半被 400 拒掉，
- * 而页面上明明还写着「允许 8MB」。现在上限只有 Worker 一个定义处，
- * config.js 的那份退化成「问不到时的兜底值」。
+ * 前端写过 8MB、Worker 实际 2MB，于是用户按 8MB 传，传到一半被 400 拒掉，而页面上明明还写着
+ * 「允许 8MB」。这一轮把那个兜底值也删了：三个数**只有后端一个定义处**，问到几个算几个。
  *
- * 失败不抛错：这个站要能在后端没接的时候照常浏览与填表，问不到就用兜底值。
+ * 问不到就是问不到，不许拿一个好看的数字顶上去：`fields` 逐条记着哪一条自报了、哪一条没有。
+ * 没自报的那一条前端**不拦**（拦就是替服务端编一个上限），页面上写「后端没自报这一条，
+ * 由服务端拒」—— 这一句是真话，而「按 8MB 兜底」不是。
+ *
+ * 失败不抛错：这个站要能在后端没接的时候照常浏览与填表。
  * from 字段给说明页的「这个站自己的状态」用，让人看得出接线到哪一档。
  */
 export async function fetchServiceLimits() {
-  const fallback = { maxBytes: CONFIG.MAX_UPLOAD_BYTES, from: "config" };
-  if (!IS_API_CONFIGURED) return fallback;
+  const empty = { maxBytes: null, maxTotalBytes: null, maxModules: null, fields: {}, from: "not-configured" };
+  if (!IS_API_CONFIGURED) return empty;
   let res;
   try {
     res = await fetch(url("/"), { method: "GET", headers: { Accept: "application/json" } });
   } catch {
-    return { ...fallback, from: "unreachable" };
+    return { ...empty, from: "unreachable" };
   }
-  if (!res.ok) return { ...fallback, from: "unreachable" };
+  if (!res.ok) return { ...empty, from: "unreachable" };
   let json;
   try {
     json = await res.json();
   } catch {
-    return { ...fallback, from: "unreachable" };
+    return { ...empty, from: "unreachable" };
   }
-  const n = Number(json?.maxBytes);
-  if (!Number.isFinite(n) || n <= 0) return { ...fallback, from: "no-field" };
-  return { maxBytes: Math.floor(n), from: "backend" };
+  // 只收「正整数」那一种值：NaN、字符串、0、负数都算没自报，不算「上限 0」。
+  const pick = (key) => {
+    const n = Number(json?.[key]);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+  };
+  const out = {
+    maxBytes: pick("maxBytes"),
+    maxTotalBytes: pick("maxTotalBytes"),
+    maxModules: pick("maxModules"),
+    from: "backend",
+  };
+  out.fields = {
+    maxBytes: out.maxBytes !== null,
+    maxTotalBytes: out.maxTotalBytes !== null,
+    maxModules: out.maxModules !== null,
+  };
+  // 三条一条都没有 == 后端根本没自报上限（旧部署），from 要说成 no-field 而不是 backend，
+  // 否则说明页会写「与后端一致」而其实什么都没一致。
+  if (!Object.values(out.fields).some(Boolean)) return { ...empty, from: "no-field" };
+  return out;
 }
 
 function httpUrl(value) {
