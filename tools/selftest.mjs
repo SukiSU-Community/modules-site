@@ -401,6 +401,7 @@ async function main() {
     normalizeDispositions,
     dispositionsUrl,
     byLink,
+    bySeal,
     evidenceUrlFor,
     fetchEvidence,
     LEDGER_EVIDENCE_FILE_RE,
@@ -516,6 +517,22 @@ async function main() {
       "https://github.com/o/r/pull/33#issuecomment-1",
       "https://github.com.evil.tld/o/r/issues/33#issuecomment-1",
     ].map((v) => `${v}->${byLink(v)}`).join(" ")
+  );
+  // 机器章那一格：**不给链接**。`ci:audit@<sha>` 里不带 owner/repo，硬拼一个 commit 地址
+  // 就是公示页在替一个它并不知道的仓库发跳转 —— 认得出 sha 是给人复验用的，不是用来点的。
+  check("机器章认得出 sha，而 byLink 一律不给它编链接",
+    bySeal("ci:audit@" + "ab".repeat(20)) === "ab".repeat(20) &&
+      byLink("ci:audit@" + "ab".repeat(20)) === "" &&
+      [
+        "ci:audit@" + "ab".repeat(19),       // 39 位
+        "ci:audit@" + "ab".repeat(21),       // 41 位
+        "ci:audit@" + "AB".repeat(20),       // 大写
+        "ci:audit@pending",                  // 待盖值不是章
+        "CI:AUDIT@" + "ab".repeat(20),
+        "",
+        undefined,
+      ].every((v) => bySeal(v) === ""),
+    ["ci:audit@" + "ab".repeat(19), "ci:audit@pending"].map((v) => `${v}->${bySeal(v) || "(空)"}`).join(" ")
   );
 
   // 前端不判台账（判据在仓库那份），所以这里只钉两件事：视图接上了，
@@ -2139,36 +2156,50 @@ async function main() {
     const frontSel = SELECTOR_KEYS.filter((k) => repoSel.includes(k));
     check("公示页取的选择器与仓库那份归一化结果同名同集合", frontSel.length === SELECTOR_KEYS.length && SELECTOR_KEYS.every((k) => repoSel.includes(k)), repoSel.join(","));
 
-    // 证据指针的形状：写入端（revoke.mjs）与展示端（byLink）必须判得完全一致。
+    // 证据指针的形状：写入端（revoke.mjs）与展示端（bySeal / byLink）必须判得完全一致。
     // 漂移的两种后果都不是红，而是台账里出现「写着像链接却点不开」或「能点却不给点」。
     const revokePath = resolve(dirname(dispPath), "revoke.mjs");
     const revoke = existsSync(revokePath) ? await import(pathToFileURL(revokePath).href) : null;
-    if (!revoke?.PROOF_URL_RE) {
+    if (!revoke?.MACHINE_SEAL_RE) {
       // 写入端还没有这条规则 == contrib/repo 的工作树停在还没合入它的分支上。
       // 跳过而不是放行：skip 会出现在总结里，而 --require-backend 会把它升级成失败。
-      skip("指针形状两端一致", "写入端 revoke.mjs 还没有导出 PROOF_URL_RE（索引仓库那边尚未合入）");
+      skip("指针形状两端一致", "写入端 revoke.mjs 还没有导出 MACHINE_SEAL_RE（索引仓库那边尚未合入）");
     } else {
-      const PROOF = "https://github.com/o/r/issues/33#issuecomment-123456";
-      check("写入端接受的证据链接，公示页一定点得开", revoke.PROOF_URL_RE.test(PROOF) && byLink(PROOF) === PROOF);
+      const SEAL = "ci:audit@" + "ab".repeat(20);
+      const LEGACY = "https://github.com/o/r/issues/33#issuecomment-123456";
+      check("写入端认的机器章，公示页一定认得出 sha", revoke.MACHINE_SEAL_RE.test(SEAL) && bySeal(SEAL) === "ab".repeat(20));
+      // main 上还有 5 条旧形状的记录：读的一侧必须继续把它们点得开，
+      // 否则公示页会把已经发生过的处置念成「没有证据」（那是丢历史，不是收紧）。
+      check("旧版评论 URL 在公示页仍然点得开（那 5 条已在 main 上的记录）", byLink(LEGACY) === LEGACY);
       const drift = [
-        PROOF,
+        SEAL,
+        "ci:audit@" + "ab".repeat(19),
+        "ci:audit@" + "AB".repeat(20),
+        revoke.SEAL_PENDING_BY,
+        "ci:audit@head",
+        LEGACY,
         "gh:me@issuecomment-123456",
         "https://github.com/o/r/issues/33",
-        "https://github.com/o/r/issues/abc#issuecomment-1",
-        "http://github.com/o/r/issues/33#issuecomment-1",
         "https://github.com.evil.tld/o/r/issues/33#issuecomment-1",
         "https://evil.example.com/o/r/issues/33#issuecomment-1",
-        "https://github.com/o/r/pull/33#issuecomment-1",
         "",
-      ].filter((s) => revoke.PROOF_URL_RE.test(s) !== Boolean(byLink(s)));
-      check("指针形状在写入端与公示页判得完全一致", drift.length === 0, drift.join(" | "));
+      ].filter((s) => revoke.MACHINE_SEAL_RE.test(s) !== Boolean(bySeal(s)));
+      check("机器章形状在写入端与公示页判得完全一致", drift.length === 0, drift.join(" | "));
+      // 待盖值能过写入端（台账 PR 的第一枚提交要用它），但它永远不算一枚章 ——
+      // 公示页把它认成章就等于把「还没盖」显示成「已被一次运行钉死」。
+      check("待盖值在写入端合法、在两端都不算章",
+        revoke.SEAL_PENDING_BY === "ci:audit@pending" &&
+          !revoke.MACHINE_SEAL_RE.test(revoke.SEAL_PENDING_BY) &&
+          bySeal(revoke.SEAL_PENDING_BY) === "" &&
+          byLink(revoke.SEAL_PENDING_BY) === ""
+      );
     }
   }
 
-  /* ------------------------------------------------ P4：申诉入口与双签文案
-     公示页那段「不服去哪儿说话」把审核端的标记原样抄给了用户。用户照抄的那串字符必须
-     就是 assertMergeApproved 认的那串 —— 文案漂了不会有任何报错，只会让人写一条没人读的评论，
-     而他已经等在那儿了。 */
+  /* ------------------------------------------------ P4：申诉入口与「只有机器审核」的文案
+     公示页那段「不服去哪儿说话」以前抄的是审核端的标记（#human-approved）。标记删了，
+     这一格的对账换个方向继续钉：**站内不许再出现任何「有人可以签它进来」的说法**，
+     而审核端与写入端那套机器章的字面必须一字不差。 */
   const html = readFileSync(resolve(here, "../public/index.html"), "utf8");
   check(
     "公示页的申诉段存在，地址由脚本从 config 填",
@@ -2191,7 +2222,42 @@ async function main() {
     "证据取不到时说的是取不到，不是一片空白",
     /es--miss/.test(appSrc) && /取不到 \$\{ref\.file\}（\$\{res\.reason\}）|—— \$\{res\.reason\}/.test(appSrc)
   );
+  // 03 那一层的语义整块换掉了（人工结论 → 机器章），而它对 main 上那 5 条旧形状的记录
+  // 必须说不同的话：给一条评论 URL 戴上「机器章」的帽子，就是公示页在替它编一个不存在的凭据。
   const cssSrc = readFileSync(resolve(here, "../public/styles/panel.css"), "utf8");
+  check(
+    "03 那一层按 by 的形状分两支：机器章说章、旧版评论说评论，且人工那一层不再存在",
+    /bySeal\(item\.by\)/.test(appSrc) &&
+      /机器章：哪一次运行把这条处置钉死的/.test(appSrc) &&
+      /旧版处置的证据：一条能点开的评论/.test(appSrc) &&      !/ec__layer--human/.test(appSrc) &&
+      !/人工结论/.test(appSrc) &&
+      !/function humanLayer/.test(appSrc),
+    (appSrc.match(/ec__layer--human|人工结论|humanLayer/g) || []).join(",") || "形状齐"
+  );
+  check(
+    "03 那一层的样式跟着改名一起换（改了类名没改 CSS = 那一层没有左边框）",
+    /\.ec__layer--seal \{/.test(cssSrc) && !/\.ec__layer--human/.test(cssSrc)
+  );
+  // LEGEND 那一格是很多人读这一页的唯一一段解释。它如果还说「看那条评论的作者」，
+  // 就是在替新版台账编一个并不存在的署名 —— 而这一页下面那 5 条旧记录确实还是评论，
+  // 所以两种形状都要说到，缺一种就是假陈述。
+  check(
+    "LEGEND 讲 by 的那一格：机器章与旧版评论两种形状都说到，且不再说「看那条评论的作者」",
+    /机器章/.test(appSrc) && /main 上还有换代前留下的记录/.test(appSrc) && !/看那条评论的作者/.test(appSrc),
+    (appSrc.match(/看那条评论的作者/g) || []).length + " 处旧说法还在"
+  );
+  check(
+    "申诉段不再指人「去 by 那条 issue 回帖」，也不承诺有人来签",
+    !html.includes("「证据」指向的 issue") &&
+      html.includes("在 issue 里说明这一条哪里不对") &&
+      html.includes("这里没有人可以签东西进来"),
+    "申诉段形状不对"
+  );
+  check(
+    "说明页管线里那一格的强调类改名了也还在（.flow .human → .flow .gate，漏一边就是那一行没有底色）",
+    /\.flow \.gate \{/.test(cssSrc) && html.includes('<li class="gate">') && !/\.flow \.human/.test(cssSrc) &&
+      !html.includes('class="human"')
+  );
   check(
     "高仿头卡固定用那套配色，不跟随站点主题（spec §6.2）",
     /\.ck__cover \{[\s\S]{0,400}?#131a22/.test(cssSrc) && /\.ck__lv \{[\s\S]{0,200}?#23c76a/.test(cssSrc)
@@ -2215,20 +2281,32 @@ async function main() {
   if (!pubPath) {
     const msg = `找不到索引仓库的盖章脚本（试过：${pubCandidates.join(" / ")}）`;
     if (REQUIRE_BACKEND) check("索引仓库盖章脚本必须存在（--require-backend）", false, msg);
-    else skip("双签文案与审核端一致性校验", msg, 2);
+    else skip("机器审核文案与审核端一致性校验", msg, 3);
   } else {
-    console.log(`  双签契约另一端：${pubPath}`);
+    console.log(`  机器审核契约另一端：${pubPath}`);
     const pub = await import(pathToFileURL(pubPath).href);
+    // 审核端**没有**人工签这一格 == 站内那句「只有机器审核」是真的。
+    // 这一条的方向要读对：它不是「文案抄审核端」，而是「谁把人工签加回审核端，就必须同时回来
+    // 改站内的承诺」—— 加了人不改文案，用户会继续以为没人能签；这比少一根钉子严重。
     check(
-      "文案里让用户写的标记就是审核端认的那个",
-      html.includes(pub.HUMAN_APPROVAL_MARKER),
-      pub.HUMAN_APPROVAL_MARKER
+      "审核端确实没有人工签那一格（站内因此可以写「只有机器审核」）",
+      pub.findHumanApprovals === undefined &&
+        pub.REQUIRED_SIGNERS === undefined &&
+        pub.HUMAN_APPROVAL_MARKER === undefined,
+      `findHumanApprovals=${typeof pub.findHumanApprovals} REQUIRED_SIGNERS=${pub.REQUIRED_SIGNERS} HUMAN_APPROVAL_MARKER=${pub.HUMAN_APPROVAL_MARKER}`
     );
-    const CN_NUM = { 1: "一", 2: "两", 3: "三", 4: "四", 5: "五" };
     check(
-      "文案里的人数就是当前要求的签数",
-      html.includes(`${CN_NUM[pub.REQUIRED_SIGNERS] ?? pub.REQUIRED_SIGNERS}个不同的人`),
-      `REQUIRED_SIGNERS=${pub.REQUIRED_SIGNERS}`
+      "站内不许再出现「有人可以签它进来」那三种说法",
+      !html.includes("#human-approved") && !html.includes("两个不同的人") && !html.includes("人工审核"),
+      ["#human-approved", "两个不同的人", "人工审核"].filter((s) => html.includes(s)).join(" | ")
+    );
+    // 公示页写的机器章字面必须与写入端导出的常量同源：抄一份字面就会漂，
+    // 而漂了的那一份是给用户看的，没人会去对。
+    const revokeForCopy = await import(pathToFileURL(resolve(dirname(pubPath), "revoke.mjs")).href).catch(() => null);
+    check(
+      "公示页讲的机器章字面就是写入端那个前缀（不抄第二本账）",
+      !revokeForCopy || html.includes(revokeForCopy.MACHINE_SEAL_PREFIX),
+      revokeForCopy ? `MACHINE_SEAL_PREFIX=${revokeForCopy.MACHINE_SEAL_PREFIX}` : "没有写入端可比"
     );
   }
 

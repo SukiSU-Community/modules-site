@@ -1835,10 +1835,10 @@ mark {
   color: var(--ink);
   display: block;
 }
-.flow .human {
+.flow .gate {
   background: var(--amber-wash);
 }
-.flow .human i {
+.flow .gate i {
   color: var(--amber-2);
 }
 
@@ -2455,7 +2455,7 @@ mark {
      一层读不出来的东西比没有那一层更糟（本地逐主题量 computed style 时抓到的）。 */
   background: var(--panel-3);
 }
-.ec__layer--human {
+.ec__layer--seal {
   border: 1px solid var(--line);
   border-left: 3px solid var(--amber);
   background: var(--amber-wash);

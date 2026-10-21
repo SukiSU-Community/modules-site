@@ -21,6 +21,7 @@ import {
   evidenceUrlFor,
   dispositionsUrl,
   byLink,
+  bySeal,
   KIND_LABELS,
   REASON_LABELS,
   SELECTOR_LABELS,
@@ -1120,7 +1121,7 @@ const CHECK_EXTRA = {
     "它只看公开索引里的模块 ID：索引里不带酷安 UID，所以分不清「已被上传过」那一条是谁上传的；" +
     "还在审核里、没合进索引的上传今天查不到。想留着看就由你留着，队列里点「移除」。",
   version_update:
-    " 这不是重复，所以它留在这一套里照常要上传 —— 只是「对已收录模块的版本更新」要走额外那一层人工审核。",
+    " 这不是重复，所以它留在这一套里照常要上传 —— 只是「对已收录模块的版本更新」不会被自动合进索引。",
 };
 
 const checkTimers = new Map();
@@ -2277,7 +2278,7 @@ function showSuccess(res) {
   const ul = node("ul", "next");
   for (const text of [
     "点进 PR 能看到审核进度，以及这一整套每一枚的完整元数据。",
-    "新模块若风险较低可能自动通过；对已收录模块的版本更新一律人工审核，可能要等。",
+    "新模块若未命中拦截名单可能自动通过；对已收录模块的版本更新不会自动合入，本站没有人工放行这一格。",
     "PR 合并之后，这些模块才会出现在公开索引里，所有人才能在管理器里搜到并一键安装。",
     "这一串口令已经随这一次上传记账了（用过即废）。要再上传别的包，页面会给你新的一串 —— 签名要再改一次。",
   ])
@@ -3000,7 +3001,7 @@ function renderIncLegend() {
   const rows = [
     ["下架 / 拒收", "下架挡住的是这一段内容（按模块 ID、ID+versionCode 或包的 sha256 命中）；拒收挡住的是一个人或一个 ID 未来上传的任何包。"],
     ["命中条件", "同一条里的多个条件是「且」的关系，不是「或」——写了 ID 又写 versionCode，就只命中那一个版本。"],
-    ["证据（by）", "指向一条公开可查的评论，谁下的处置看那条评论的作者 —— 名字不在台账里重复一份，因为那是个会过期的抄本。形状不对的指针原样显示成文本，不猜成链接。这一页显示的就是台账原文，判定发生在索引推导与 CI 里，前端不另判一份。"],
+    ["证据（by）", "新版是一枚机器章：`ci:audit@<提交>`，写的是这条处置被哪一次运行钉死，旁边那条复核命令任何人都能重跑一遍。它不是链接 —— 章里不带仓库地址，硬拼一个点得开的地址就是这一页在替它编一个它并不知道的去向。main 上还有换代前留下的记录，那一类的 by 是一条能点开的评论，照旧给链接。两种形状都认，因为只认新的那一种会把已经发生过的处置念成「没有证据」。形状不对的指针原样显示成文本。这一页显示的就是台账原文，判定发生在索引推导与 CI 里，前端不另判一份。"],
     ["复核（verify）", "有这一项时任何人都能自己跑一遍确认这条处置成立，而不是只能相信页面上写的。"],
     ["时间", "带时区的那一刻，不是「大概哪天」。"],
   ];
@@ -3303,15 +3304,32 @@ function machineLayer(item, ev) {
   return box;
 }
 
-function humanLayer(item) {
-  const box = layer("ec__layer--human", "03", "HUMAN", "人工结论，由两个有写权限的人签");
+function sealLayer(item) {
+  // 这一层原来那个版位写的是「03 HUMAN」——两个人看过并签了。本站已没有这一格，但版位不能空着：
+  // 它现在讲的是**这条处置被哪一次运行钉死**，语义整个换掉了，不是把旧文案改个词。
+  const sha = bySeal(item.by);
   const href = byLink(item.by);
+  // main 上还有 5 条旧形状的记录，标题不能替它们说「机器章」——那是它们没有的东西。
+  const box = layer(
+    "ec__layer--seal",
+    "03",
+    sha ? "SEAL" : "PROOF",
+    sha ? "机器章：哪一次运行把这条处置钉死的" : "旧版处置的证据：一条能点开的评论（换代之前下的那一条）"
+  );
   const pairs = [
     ["处置", KIND_LABELS[item.kind] || item.kind || "未知的种类", ""],
     ["理由分类", REASON_LABELS[item.reason] || item.reason || "没写理由分类", ""],
     ["说明", item.note || "没写", ""],
     ["时间", item.atMs === null ? item.at || "没写" : fmtDate(item.atMs), ""],
-    ["证据评论", href ? item.by : item.by || "没写", href],
+    [
+      "证据",
+      sha
+        ? `机器章钉在提交 ${sha.slice(0, 12)} 上 —— 要点开看，用下面那条命令`
+        : href
+          ? item.by
+          : item.by || "没写",
+      href,
+    ],
     ["复核命令", item.verify || "这条没留可复验命令", ""],
   ];
   box.append(kvRow("ec__kv--1", pairs));
@@ -3374,7 +3392,7 @@ function dispositionCard(item, q) {
   card.append(hd);
   card.append(factsLayer(item, null));
   card.append(machineLayer(item, null));
-  card.append(humanLayer(item));
+  card.append(sealLayer(item));
   const holder = node("div", "ec__seals");
   card.append(holder);
   // 证据文件是**按需**取的：一张卡最多几条引用，而每条几十 KB。

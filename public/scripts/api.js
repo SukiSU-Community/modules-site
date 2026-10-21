@@ -35,7 +35,7 @@ export const CHECK_STATUS = {
     tone: "warn",
     label: "version_update",
     title: "已有同名模块，你的是更新版本",
-    hint: "可以上传，但「对已收录模块的版本更新」一律需要人工审核，不会提交完就立刻上线。",
+    hint: "可以上传，但「对已收录模块的版本更新」不会被自动合进索引 —— 本站只有机器审核，没有人可以签它进来。",
   },
   recorded: {
     tone: "muted",
@@ -786,11 +786,31 @@ export function normalizeDispositions(json) {
  *
  * 只有「GitHub 上某条 issue 评论的永久链接」这一种形状才给链接。其它一律原样显示成文本：
  * 猜出来的链接比不链接更坏 —— 点进去是 404 或别人的讨论，等于公示页在替一条它并不知道的
- * 证据背书。形状与索引仓库的写入端（scripts/revoke.mjs 的 PROOF_URL_RE）由 selftest 对一遍。
+ * 证据背书。
+ *
+ * 这一条今天只服务**旧台账**：main 上还有 5 条 `by` 是评论 URL 的记录（2026-10-21 之前下的），
+ * 新版写入端改的是机器章（见下面的 bySeal），读的一侧因此必须同时认两种形状 ——
+ * 只认新的那一种，公示页就会把已经发生过的处置念成「没有证据」。
  */
 export function byLink(value) {
   const s = String(value || "").trim();
   return /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+#issuecomment-\d+$/.test(s) ? s : "";
+}
+
+/**
+ * 处置指针 → 机器章。返回那一枚 commit 的 sha，不是章就返回空串。
+ *
+ * 形状的定义只有**写入端那一处**（索引仓库 `scripts/revoke.mjs` 的 `MACHINE_SEAL_RE`）；
+ * 这里抄一份是因为跨仓库拿不到它（fork 里没有 contrib），漂移由 modules-web 的 selftest
+ * 在两条仓库都在的机器上对一次。
+ *
+ * 章不是链接：`ci:audit@<sha>` 里不带 owner/repo，公示页拼不出一个能点的地址。
+ * 所以这一格显示的是「哪一次运行钉的」这串文字，点开要看的是同一条记录里的 `verify` 命令 —— 把
+ * 它做成一个看起来像链接的东西，比不给链接更坏。
+ */
+export function bySeal(value) {
+  const m = /^ci:audit@([0-9a-f]{40})$/.exec(String(value || "").trim());
+  return m ? m[1] : "";
 }
 
 /**
