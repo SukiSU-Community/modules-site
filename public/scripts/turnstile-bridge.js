@@ -22,7 +22,16 @@
 //  这里没有 secret：只有公开 sitekey（config.js），也没有任何其它网络请求。
 // ===========================================================================
 
-import { CONFIG } from "./config.js";
+// config.js 用动态 import：静态 import 一旦 404，整个模块直接不执行，
+// 连 onError 都送不出去，App 只能干等到自己的超时。
+let CONFIG = null;
+
+async function loadConfig() {
+  if (CONFIG) return CONFIG;
+  const mod = await import("./config.js");
+  CONFIG = mod.CONFIG;
+  return CONFIG;
+}
 
 const API_SRC =
   "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=__turnstileReady";
@@ -33,7 +42,6 @@ const retryBtn = document.getElementById("retry");
 const noBridge = document.getElementById("no-bridge");
 
 let widgetId = null;
-let apiLoading = false;
 let lastError = "";
 
 // --- 与 App 的桥 ------------------------------------------------------------
@@ -66,9 +74,9 @@ function setStatus(text, tone) {
   statusEl.classList.toggle("is-bad", tone === "bad");
 }
 
-function fail(message) {
+function fail(message, { retry = true } = {}) {
   setStatus(message, "bad");
-  retryBtn.hidden = false;
+  retryBtn.hidden = !retry;
   // error-callback 与 timeout-callback 可能连着来；同一条消息只报一次。
   if (message !== lastError) {
     lastError = message;
@@ -77,47 +85,45 @@ function fail(message) {
 }
 
 // --- 加载 Cloudflare 脚本（显式渲染，只加载一次）-----------------------------
-function loadApi() {
-  return new Promise((resolve, reject) => {
-    if (window.turnstile) {
-      resolve();
-      return;
-    }
-    if (apiLoading) {
-      // 已经有一份在飞：等它把 window.turnstile 挂上来。
-      const wait = setInterval(() => {
-        if (window.turnstile) {
-          clearInterval(wait);
-          resolve();
-        }
-      }, 100);
-      return;
-    }
-    apiLoading = true;
+let apiPromise = null;
 
+function loadApi() {
+  if (window.turnstile) return Promise.resolve();
+  // 只留一份在飞：重试时不能每点一次就多塞一个 script 标签。
+  if (apiPromise) return apiPromise;
+
+  apiPromise = new Promise((resolve, reject) => {
     let settled = false;
-    const done = (fn, arg) => {
+    let script = null;
+
+    const done = (ok, err) => {
       if (settled) return;
       settled = true;
       clearTimeout(watchdog);
-      apiLoading = false;
-      fn(arg);
+      if (!ok) {
+        // 失败的标签留着只会让下一次重试再等一遍同一个死连接。
+        script?.remove();
+        script = null;
+        apiPromise = null;
+      }
+      if (ok) resolve();
+      else reject(err);
     };
 
     // 脚本被拦时 onerror 不一定来（DNS 黑洞就是一直挂着），兜一层硬超时。
-    const watchdog = setTimeout(() => done(reject, new Error("timeout")), 15000);
+    const watchdog = setTimeout(() => done(false, new Error("timeout")), 15000);
 
-    window.__turnstileReady = () => {
-      done(resolve);
-    };
+    window.__turnstileReady = () => done(true);
 
-    const s = document.createElement("script");
-    s.src = API_SRC;
-    s.async = true;
-    s.defer = true;
-    s.onerror = () => done(reject, new Error("network"));
-    document.head.append(s);
+    script = document.createElement("script");
+    script.src = API_SRC;
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => done(false, new Error("network"));
+    document.head.append(script);
   });
+
+  return apiPromise;
 }
 
 // --- 渲染部件 ---------------------------------------------------------------
@@ -177,7 +183,12 @@ retryBtn.addEventListener("click", () => {
       window.turnstile.reset(widgetId);
       return;
     } catch {
-      // reset 失败就整块重来
+      // reset 失败就整块重来；先把旧部件摘掉，别让第二个叠在同一个槽里。
+      try {
+        window.turnstile.remove(widgetId);
+      } catch {
+        // 已经不在 DOM 里也无所谓
+      }
       widgetId = null;
       slot.textContent = "";
     }
@@ -186,19 +197,32 @@ retryBtn.addEventListener("click", () => {
 });
 
 // --- 启动：先等 App 注入桥，再向 Cloudflare 要题 ------------------------------
+async function begin() {
+  try {
+    await loadConfig();
+  } catch (err) {
+    console.error("[turnstile] config.js 加载失败", err);
+    slot.hidden = true;
+    // 重试也读不到同一份配置，给一个按钮只会让用户原地转圈。
+    fail("校验页配置加载失败，请更新 App 后重试。", { retry: false });
+    return;
+  }
+  if (!CONFIG.TURNSTILE_SITEKEY.trim()) {
+    slot.hidden = true;
+    fail("站点还没配置 Turnstile sitekey，暂时无法校验。", { retry: false });
+    return;
+  }
+  slot.hidden = false;
+  start();
+}
+
 (function boot() {
   let waited = 0;
   const tick = setInterval(() => {
     if (hasBridge()) {
       clearInterval(tick);
       noBridge.hidden = true;
-      if (!CONFIG.TURNSTILE_SITEKEY.trim()) {
-        slot.hidden = true;
-        fail("站点还没配置 Turnstile sitekey，暂时无法校验。");
-        return;
-      }
-      slot.hidden = false;
-      start();
+      void begin();
       return;
     }
     waited += 250;
