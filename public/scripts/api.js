@@ -319,6 +319,46 @@ function serviceSideHint(status, reason) {
 }
 
 /**
+ * GET /reports（举报队列的读数）。
+ *
+ * 返回 `null` 的意思是「这一格现在没有可信的数」—— 后端没配、网络失败、HTTP 非 2xx、
+ * 以及后端自己回 `available:false`（定时器还没跑过第一轮 / 那一格读不懂 / 不是定时器写的）
+ * 全归到这里来。调用方拿 null 就**什么都不显示**。
+ *
+ * 为什么这里不许兜一个 0：这一格的用处是让人看出「自动下架那条链还在动」。
+ * 一个假的 0 与一个真的空在页面上长得一模一样，于是它把「下架停住了」伪装成「没人被举报」。
+ * 数字的来源只有那一定时器（`by` 不是它就整格作废），这条链上没有第二个能写它的人。
+ */
+export async function fetchReportQueue() {
+  if (!IS_API_CONFIGURED) return null;
+  let json = null;
+  try {
+    const res = await fetch(url("/reports"), { method: "GET", headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    json = await res.json();
+  } catch {
+    return null;
+  }
+  if (!json || json.available !== true) return null;
+  // 来源与版本也在这儿认一遍：后端 `reportQueueStats` 已经挡过一次，但这一格要写进一个
+  // 对公众的页面 —— 万一后端那层校验哪天漂了，页面不该跟着把一个来路不明的数显示成结论。
+  if (json.schema !== "sukisu-report-queue-v1" || json.by !== "ledger-cron") return null;
+  const n = (v) => (Number.isInteger(Number(v)) && Number(v) >= 0 ? Number(v) : null);
+  const artifacts = n(json.artifacts);
+  const reports = n(json.reports);
+  // 两个数缺任何一个都不显示：这一页宁可少说一句，也不把「我们不知道」说成一个数。
+  if (artifacts === null || reports === null) return null;
+  return {
+    artifacts,
+    reports,
+    opened: n(json.opened) ?? 0,
+    at: typeof json.at === "string" ? json.at : "",
+    pr: typeof json.pr === "string" ? json.pr : "",
+    truncated: json.truncated === true,
+  };
+}
+
+/**
  * POST /report（04 那一屏的举报）。成功形状：
  * `{ ok, established, verdict, owner, reportId, publicAction, nextStep }` —— 判定成立与否都在 200 里，
  * 因为「不成立」不是请求失败，而是一条要如实展示的结论（把不成立报成 HTTP 4xx 会让人以为没提交成功）。

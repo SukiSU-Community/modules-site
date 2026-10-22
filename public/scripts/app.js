@@ -29,6 +29,7 @@ import {
   isCoolapkUid,
   normalizeCoolapkUrl,
   reportModule,
+  fetchReportQueue,
 } from "./api.js";
 import { canInflateRaw, listEntries, readEntry, inspectEntries } from "./zipread.js";
 import { parseModuleProp } from "./moduleprop.js";
@@ -2841,7 +2842,8 @@ async function submitReport() {
     report.nonce = makeNonce();
     paintReportResult();
     $("#rp-readout").textContent = json.established
-      ? "这条举报成立并记下了待办；公开索引没动，下一步由机器 seal 那片。"
+      ? "这条举报成立并记下了待办；公开索引这一刻还没动。下架由本站的自动流程按批提出（没有人工签字那一步），" +
+        "排到哪一格看「处置公示」那一页顶部的队列读数 —— 那一格没显示数字就是读数还没到位，不等于没受理。"
       : "这条举报没有成立，但同样留下了待办记录；下面那句是服务端给的下一步。";
   } catch (err) {
     report.result = null;
@@ -3472,6 +3474,53 @@ function renderPersonDetail(person, q) {
   for (const it of [...person.items].sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0))) host.append(dispositionCard(it, q));
 }
 
+/* ------------------------------------------------------- 下架队列那一格
+   数据只有一个来源：服务端定时器每跑完一轮写下的那一次读数（`GET /reports`）。
+   为什么这一格值得占公示页一行：「举报了但没人管」与「举报了，正在排下一轮」在页面上
+   原本长得一模一样 —— 前者是本站失信，后者是本站在动。写出来之后，停住的时候用户看得见
+   （那个「截至」停在昨天），本站也没法假装它还在动。
+   拿不到可信的数时这里**什么都不显示**：一个兜出来的 0 与真的空在页面上无法区分，
+   而那两句是相反的话。 */
+
+const reportQueue = { loading: false, data: null, loaded: false };
+
+async function loadReportQueue(force = false) {
+  if (reportQueue.loading) return;
+  if (reportQueue.loaded && !force) {
+    paintReportQueue();
+    return;
+  }
+  reportQueue.loading = true;
+  const q = await fetchReportQueue();
+  reportQueue.data = q;
+  reportQueue.loaded = true;
+  reportQueue.loading = false;
+  paintReportQueue();
+}
+
+function paintReportQueue() {
+  const box = document.getElementById("inc-queue");
+  if (!box) return;
+  box.textContent = "";
+  box.classList.remove("bad");
+  box.hidden = true;
+  const q = reportQueue.data;
+  if (!q) return;
+  const bits = [];
+  // 报的是**枚数**（要摘几个包），后面括一句这是几条举报压出来的：同一枚包可以被几个人举报，
+  // 两个数不一样时不说清就像「有三个人的模块要下架」。
+  bits.push(
+    q.artifacts === 0
+      ? "下架队列：现在没有排队的模块"
+      : `下架队列：还有 ${q.artifacts} 枚在等下架（由 ${q.reports} 条成立的举报压过来）`
+  );
+  const at = Number(Date.parse(q.at));
+  bits.push(`截至 ${Number.isFinite(at) ? fmtDate(at) : "（读数没给时刻）"}`);
+  if (q.truncated) bits.push("队列比这一轮翻到的更长，这两个数只到这儿");
+  box.append(bits.join(" · "));
+  box.hidden = false;
+}
+
 function renderIncidents() {
   const list = $("#inc-groups");
   const shell = $("#inc-state");
@@ -3479,6 +3528,9 @@ function renderIncidents() {
   const count = $("#inc-count");
   renderIncLegend();
   renderIncAppeal();
+  // 队列那一格独立于台账：它说的是「下架那条链还在不在动」，而台账读失败的时候恰恰最需要这句话。
+  // 放在最前面，是为了让下面那几条 early return（没配台账地址 / 台账读失败 / 正在加载）都不把它一起带走。
+  loadReportQueue();
 
   const clear = () => {
     list.textContent = "";

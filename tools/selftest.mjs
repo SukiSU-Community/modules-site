@@ -671,10 +671,20 @@ async function main() {
     /if \(latest && SHA256_HEX_RE\.test\(String\(latest\.sha256 \|\| ""\)\)\) \{[\s\S]{0,220}#\/report\?id=/.test(appSrc)
   );
   check(
-    "举报页把「这一片不动公开状态」写在界面上，而不是只写在服务端应答里",
+    "举报页把「这一发不动索引」与「之后由逐字复验决定下架」都写在界面上，且不承诺有人在签",
     /publicAction: none/.test(rpHtml) &&
-      /举报不会让任何模块下架/.test(rpHtml) &&
+      /逐字节/.test(rpHtml) &&
+      /实名 \+ 包内逐字定位到/.test(rpHtml) &&
+      /全程没有人工签字那一步/.test(rpHtml) &&
       /与上传那 5 格\/小时是分开的两本账/.test(rpHtml)
+  );
+  // 反向那一格是这次改版的全部内容：那句话在上一版是真话，在这一版是假话（队列真的会被人摘下来）。
+  check(
+    "举报页不再说「举报不会让任何模块下架」，也不再把下一步写成内部路线图",
+    !rpHtml.includes("举报不会让任何模块下架") &&
+      !rpHtml.includes("下一步才是机器 seal") &&
+      !appSrc.includes("下一步由机器 seal 那片"),
+    "「不会下架」与「下一步是某片代码」都不该出现在给用户看的那一屏上"
   );
   check(
     "硬性条件是 2×2 四格，且 app.js 要写的 #spec-max 还在其中一格",
@@ -2307,6 +2317,96 @@ async function main() {
       "公示页讲的机器章字面就是写入端那个前缀（不抄第二本账）",
       !revokeForCopy || html.includes(revokeForCopy.MACHINE_SEAL_PREFIX),
       revokeForCopy ? `MACHINE_SEAL_PREFIX=${revokeForCopy.MACHINE_SEAL_PREFIX}` : "没有写入端可比"
+    );
+  }
+
+  /* ------------------------------------------ 下架队列那一格（公示页唯一说「链还在动」的读数）
+     行为判据：给 fetchReportQueue 灌几种应答，看它什么时候给数、什么时候该闭嘴。
+     这一格里最要不得的是「兜一个 0」：那格存在的理由就是说「我们不知道」，
+     兜成 0 等于把「自动下架停住了」伪装成「没人被举报」——两句相反的话在页面上长得一样。 */
+  {
+    const { fetchReportQueue } = await import("../public/scripts/api.js");
+    const realFetch = globalThis.fetch;
+    const answer = async (body, status = 200) => {
+      globalThis.fetch = async () =>
+        new Response(typeof body === "string" ? body : JSON.stringify(body), {
+          status,
+          headers: { "content-type": "application/json" },
+        });
+      try {
+        return await fetchReportQueue();
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    };
+    const ok = (o) => o && typeof o === "object";
+    try {
+      const good = await answer({
+        ok: true, available: true, schema: "sukisu-report-queue-v1", by: "ledger-cron",
+        at: "2026-10-22T03:00:00.000Z", atMs: 1, scanned: 12, reports: 3, artifacts: 2,
+        opened: 2, pr: "https://x/pull/3", blocked: "", truncated: false,
+      });
+      check(
+        "available:true 且两个数都在 ⇒ 读出 artifacts/reports/at",
+        ok(good) && good.artifacts === 2 && good.reports === 3 && good.at === "2026-10-22T03:00:00.000Z",
+        JSON.stringify(good)
+      );
+      const empty = await answer({
+        ok: true, available: true, schema: "sukisu-report-queue-v1", by: "ledger-cron",
+        at: "2026-10-22T03:00:00.000Z", atMs: 1, scanned: 0, reports: 0, artifacts: 0,
+        opened: 0, pr: "", blocked: "", truncated: false,
+      });
+      check(
+        "真的空队列读出 0，不并被当成「拿不到数」",
+        ok(empty) && empty.artifacts === 0,
+        JSON.stringify(empty)
+      );
+      const neg = [];
+      for (const body of [
+        { ok: true, available: false, reason: "定时器还没跑过第一轮" },
+        "{ 坏掉的",
+        { ok: true, available: true, schema: "v0", by: "ledger-cron", at: "x", reports: 1, artifacts: 1 },
+        { ok: true, available: true, schema: "sukisu-report-queue-v1", by: "某个人", at: "x", reports: 1, artifacts: 1 },
+        { ok: true, available: true, schema: "sukisu-report-queue-v1", by: "ledger-cron", at: "x", reports: -1, artifacts: 1 },
+        { ok: true, available: true, schema: "sukisu-report-queue-v1", by: "ledger-cron", at: "x", reports: "x", artifacts: 1 },
+        { ok: true, available: true, schema: "sukisu-report-queue-v1", by: "ledger-cron", at: "x", artifacts: 1 },
+        { ok: true, available: true, schema: "sukisu-report-queue-v1", by: "ledger-cron", at: "x", reports: 1 },
+      ]) {
+        neg.push(await answer(body));
+      }
+      for (const st of [404, 500, 503]) neg.push(await answer({ ok: true, available: true, reports: 1, artifacts: 1 }, st));
+      globalThis.fetch = async () => { throw new Error("网络断了"); };
+      let threw = null;
+      try { threw = await fetchReportQueue(); } catch (e) { threw = "抛出来了"; } finally { globalThis.fetch = realFetch; }
+      neg.push(threw);
+      check(
+        "八种不可用 + 三种 HTTP 非 2xx + 网络抛错 ⇒ 一律 null，一个数字都不带出来",
+        neg.every((x) => x === null),
+        JSON.stringify(neg.map((x) => (x === null ? "null" : typeof x === "object" ? `obj:${x.artifacts}` : String(x))))
+      );
+      check("网络失败不往上抛（那一格是附属信息，不该把整页拖成失败态）", threw === null, String(threw));
+    } catch (e) {
+      check("fetchReportQueue 的行为判据能跑起来", false, String((e && e.message) || e));
+    }
+    check(
+      "队列只打 GET /reports：路径由 url() 拼，不抄第二本 API_BASE",
+      /fetch\(url\("\/reports"\), \{ method: "GET"/.test(apiSrc),
+      apiSrc.split("\n").filter((l) => l.includes('"/reports"')).join(" ⏎ ")
+    );
+    const paintBody = (/function paintReportQueue\(\) \{([\s\S]*?)\n\}/.exec(appSrc) || [, ""])[1];
+    check(
+      "公示页那一格三件齐：容器在 html 里、渲染点不是注释、画的顺序是「先藏起来，只有拿到数才亮」",
+      html.includes('id="inc-queue"') &&
+        /^(?! *\/\/) *loadReportQueue\(\);/m.test(appSrc) &&
+        paintBody.includes('box.hidden = true;') &&
+        paintBody.indexOf("box.hidden = true;") < paintBody.indexOf("if (!q) return;") &&
+        paintBody.indexOf("box.hidden = true;") < paintBody.indexOf("box.hidden = false;") &&
+        /^ {2}box\.hidden = false;/m.test(paintBody),
+      `画的函数体${paintBody ? "找到了" : "没找到"}；少一件就是页面上永远没有那一行，而 selftest 照样绿`
+    );
+    check(
+      "那一格说的两件事都在文案里：按枚数说、以及「截至」那一轮的时刻",
+      /还有 \$\{q\.artifacts\} 枚在等下架/.test(appSrc) && /截至 /.test(appSrc) && /由 \$\{q\.reports\} 条成立的举报/.test(appSrc)
     );
   }
 
