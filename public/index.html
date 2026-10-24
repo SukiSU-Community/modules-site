@@ -38,6 +38,9 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23ffb020'/%3E%3Cpath d='M7 25V7L16 18.4L25 7V25' fill='none' stroke='%231a1000' stroke-width='3.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
     />
+    <!-- 首屏一定会打一次后端 GET /（取服务端自报的上限），提前把连接建起来。
+         人机校验那个第三方域**故意不**预连：它按需加载，预连等于又把懒加载省下的时间还回去。 -->
+    <link rel="preconnect" href="https://sukisu-module-api.pages.dev" crossorigin />
     <link rel="stylesheet" href="./fonts/fonts.css" />
     <link rel="stylesheet" href="./styles/panel.css" />
     <script type="module" src="./scripts/app.js"></script>

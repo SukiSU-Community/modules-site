@@ -2126,7 +2126,7 @@ mark {
   flex-wrap: wrap;
 }
 .pc-wall__t {
-  font: 700 14px/1.5 var(--mono);
+  font: 600 14px/1.5 var(--mono);
   letter-spacing: -0.01em;
 }
 .pc-wall__s {
@@ -2176,7 +2176,7 @@ mark {
   border: 2px solid rgba(255, 255, 255, 0.86);
   background: #202633;
   color: #fff;
-  font: 700 15px/1 var(--mono);
+  font: 600 15px/1 var(--mono);
 }
 .pc__names {
   min-width: 0;
@@ -2200,7 +2200,7 @@ mark {
   border-radius: 999px;
   background: #23c76a;
   color: #04160b;
-  font: 700 11px/1.6 var(--mono);
+  font: 600 11px/1.6 var(--mono);
 }
 .pc__meta {
   display: flex;
@@ -2212,7 +2212,7 @@ mark {
   color: var(--ink-3);
 }
 .pc__n {
-  font: 700 11.5px/1.6 var(--mono);
+  font: 600 11.5px/1.6 var(--mono);
   color: var(--amber);
 }
 .pc__kind {
@@ -2256,7 +2256,7 @@ mark {
   flex-wrap: wrap;
 }
 .pc-detail__t {
-  font: 700 13px/1.5 var(--mono);
+  font: 600 13px/1.5 var(--mono);
 }
 
 .inc__layerhead {
@@ -2269,7 +2269,7 @@ mark {
   border-top: 1px solid var(--line);
 }
 .inc__layerhead-t {
-  font: 700 13px/1.5 var(--mono);
+  font: 600 13px/1.5 var(--mono);
   color: var(--ink);
 }
 .inc__layerhead-s {
@@ -2313,7 +2313,7 @@ mark {
   display: grid;
   place-items: center;
   color: rgba(255, 255, 255, 0.6);
-  font: 700 18px/1 var(--mono);
+  font: 600 18px/1 var(--mono);
 }
 .ck__col {
   min-width: 0;
@@ -2335,7 +2335,7 @@ mark {
   border-radius: 999px;
   background: #23c76a;
   color: #04160b;
-  font: 700 11px/1.7 var(--mono);
+  font: 600 11px/1.7 var(--mono);
 }
 .ck__stats {
   display: flex;
@@ -2351,7 +2351,7 @@ mark {
 }
 .ck__stat b {
   color: #fff;
-  font: 700 13px/1.4 var(--mono);
+  font: 600 13px/1.4 var(--mono);
 }
 .ck__stat i {
   font-style: normal;
@@ -2428,7 +2428,7 @@ mark {
   flex-wrap: wrap;
 }
 .ec__title-t {
-  font: 700 14px/1.5 var(--mono);
+  font: 600 14px/1.5 var(--mono);
   overflow-wrap: anywhere;
 }
 .ec__title-s {
@@ -2438,7 +2438,7 @@ mark {
 }
 .ec__title-k {
   margin-left: auto;
-  font: 700 11.5px/1.7 var(--mono);
+  font: 600 11.5px/1.7 var(--mono);
   color: var(--amber);
 }
 .ec__layer {
@@ -2468,11 +2468,11 @@ mark {
   margin-bottom: 8px;
 }
 .ec__num {
-  font: 700 11px/1.7 var(--mono);
+  font: 600 11px/1.7 var(--mono);
   color: var(--ink-3);
 }
 .ec__t {
-  font: 700 12px/1.7 var(--mono);
+  font: 600 12px/1.7 var(--mono);
   letter-spacing: 0.02em;
 }
 .ec__note {
@@ -2521,7 +2521,7 @@ mark {
 }
 .ec__colt {
   margin: 0 0 6px;
-  font: 700 11.5px/1.7 var(--mono);
+  font: 600 11.5px/1.7 var(--mono);
   color: var(--ink-2);
 }
 .ec__finds {
@@ -2582,7 +2582,7 @@ mark {
   margin-bottom: 6px;
 }
 .es__t {
-  font: 700 11.5px/1.7 var(--mono);
+  font: 600 11.5px/1.7 var(--mono);
   color: var(--mint);
 }
 .es__at {

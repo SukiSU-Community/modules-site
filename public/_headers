@@ -1,0 +1,11 @@
+# Cloudflare Pages 响应头。这个文件必须叫 `_headers` 且放在发布目录根部
+# （`tools/build.mjs` 把 public/ 整个拷成 dist/，所以放这儿就够）。
+#
+# 只给「文件名本身就代表内容」的东西长缓存：字体是按字重一个文件，内容永不改。
+# 特意只圈 `*.woff2` —— 同目录的 fonts.css 会在加字重时变，给它 immutable 等于
+# 让老用户永远读不到新 @font-face。
+# JS / CSS / HTML 的文件名不带内容哈希，继续走 ETag 协商（304 只有 ~300 B，
+# 比缓存错版本便宜得多）。
+
+/fonts/*.woff2
+  Cache-Control: public, max-age=31536000, immutable
