@@ -55,8 +55,9 @@ export const CONFIG = {
   // --- ③：Cloudflare Turnstile ------------------------------------------------
   //   TURNSTILE_SITEKEY 留空 → 界面显示一行「反机器人校验待接入」的说明，
   //   不加载任何部件、不做任何前端假验证码。
-  //   填入 sitekey 后会自动加载 Turnstile 脚本，并把 token 以 TURNSTILE_FIELD
-  //   为名一起 POST 到 /submit。
+  //   填入 sitekey 后，脚本**按需**加载：第一次选包、或打开「上传前确认」时才去拉
+  //   challenges.cloudflare.com 的 api.js，不占首屏带宽（只是来看一眼索引的人不该替
+  //   真要上传的人付这条请求）。token 以 TURNSTILE_FIELD 为名一起 POST 到 /submit。
   // 下面这把是本站自己的 widget（managed 模式，允许域名 cool-module.pages.dev / localhost / 127.0.0.1）。
   // **sitekey 本来就是公开的**（它跟着页面发给浏览器），配不上的是那一侧的 secret key —— 它在 Worker
   // 的 `TURNSTILE_SECRET` 里，永远不进这个文件。要自建部署的人换一把自己的：

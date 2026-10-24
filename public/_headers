@@ -2,10 +2,27 @@
 # （`tools/build.mjs` 把 public/ 整个拷成 dist/，所以放这儿就够）。
 #
 # 只给「文件名本身就代表内容」的东西长缓存：字体是按字重一个文件，内容永不改。
-# 特意只圈 `*.woff2` —— 同目录的 fonts.css 会在加字重时变，给它 immutable 等于
-# 让老用户永远读不到新 @font-face。
-# JS / CSS / HTML 的文件名不带内容哈希，继续走 ETag 协商（304 只有 ~300 B，
-# 比缓存错版本便宜得多）。
+#
+# 这里逐个列文件，**不用** `/fonts/*.woff2` 这种通配。Pages 的 `_headers` 是「路径没命中
+# 就返回站点默认响应」而不是 404：`/fonts/nope.woff2`、`/fonts/sub/x.woff2` 线上都回
+# 200 + 43 KB 的 index.html，通配却会给它们盖上 immutable —— 一个拼错的字体路径就被
+# 当字体缓存一年，之后改都改不掉。列全 5 个真实文件，拼错的那条自然落回默认头。
+# 同目录的 fonts.css 不列：它会在加字重时变，immutable 等于让老用户永远读不到新 @font-face。
+#
+# JS / CSS 的文件名不带内容哈希，继续走 ETag 协商（304 只有 ~300 B，比缓存错版本便宜得多）。
+# HTML 不走 ETag —— Pages 对 .html 直出 `max-age=0, must-revalidate`，本来就不缓存。
 
-/fonts/*.woff2
+/fonts/chakrapetch-600.woff2
+  Cache-Control: public, max-age=31536000, immutable
+
+/fonts/chakrapetch-700.woff2
+  Cache-Control: public, max-age=31536000, immutable
+
+/fonts/plexmono-400.woff2
+  Cache-Control: public, max-age=31536000, immutable
+
+/fonts/plexmono-500.woff2
+  Cache-Control: public, max-age=31536000, immutable
+
+/fonts/plexmono-600.woff2
   Cache-Control: public, max-age=31536000, immutable

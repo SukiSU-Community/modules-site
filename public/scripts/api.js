@@ -611,6 +611,19 @@ async function fetchWithTimeout(target, options, ms) {
  * 为什么失败也返回 `{ ok: false }` 而不是抛：这个函数是**页面启动时**调的，它只回答
  * 「这一次还要不要让用户改签名」。后端抖一下就抛，等于让一次与用户无关的刷新把整个上传页
  * 按成红的 —— 多抄一次签名只是麻烦，把能用的页面报成坏的是骗人。失效方向必须是「按没会话处理」。
+ *
+ * 但「按没会话处理」不等于「把令牌删掉」—— 这两件事被压成同一个 ok:false 之后，
+ * 一次断网就能把 90 天的令牌永久销毁（调用方看 !ok 就 clearSession）。所以这里分出 transient 档：
+ *
+ *   transient: true  —— 这一次问不到答案，令牌本身未必有事。**不许清本地**。
+ *                       · fetch 抛异常（断网 / 超时 abort / 跨域被拦 / DNS 挂了）
+ *                       · res.json() 抛（网关错误页、非 JSON 应答）
+ *                       · !res.ok 且不是 401/403（5xx / 429 / 404 端点没上线 / 别的网关码）
+ *   transient 缺席（即确定无效）—— 服务端明确说「这串不能用」：
+ *                       · HTTP 200 里 json.ok !== true（过期 / 注销 / 不认）
+ *                       · !res.ok 且 401/403（服务端看了令牌并拒了）
+ *                       · 本地形状校验就没过（SESSION_TOKEN_RE 不匹配）、API 未配置
+ *                     这几种调用方可以放心 clearSession。
  */
 export async function checkSession(token) {
   const t = String(token || "").trim();
@@ -629,14 +642,22 @@ export async function checkSession(token) {
       SESSION_TIMEOUT_MS
     );
   } catch {
-    return { ok: false }; // 网络断了 / 超时 / 跨域被拦，都归到「这次没有会话」
+    // 网络断了 / 超时 / 跨域被拦：**没问到答案**，令牌可能完全有效 —— 这一档不许清本地那份。
+    return { ok: false, transient: true };
   }
-  if (!res.ok) return { ok: false };
+  if (!res.ok) {
+    // 只有 401/403 是「服务端看了这串令牌、并且说它不行」—— 那是确定无效，可以清本地。
+    // 其余一律算 transient：5xx/429 是后端与网关此刻不行；404 是「这个端点还没上线」
+    // （本文件开头的注释里就写着这一档要照常按「每次都得改签名」走，而端点没上线
+    //  绝不等于手里这串令牌坏了）。混在一起判，一次部署中的 502 就会让所有人的令牌集体消失。
+    return { ok: false, transient: res.status !== 401 && res.status !== 403 };
+  }
   let json;
   try {
     json = await res.json();
   } catch {
-    return { ok: false }; // 回的不是 JSON（网关错误页之类）＝这一格读不懂，不当成有会话
+    // 回的不是 JSON（网关错误页之类）＝这一格读不懂。读不懂 ≠ 令牌无效，同样算 transient。
+    return { ok: false, transient: true };
   }
   if (!json || json.ok !== true) return { ok: false };
   // 后端在这一格里回了整张记录（uid / nickname / avatar / level / expiresAt）—— 它不是

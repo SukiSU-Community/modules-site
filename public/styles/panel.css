@@ -2903,6 +2903,43 @@ mark {
   color: var(--red);
 }
 
+/* 重选这个包：跟 × 同一套「鼠标进卡片才出现」，但钉在右上角 —— 两枚角标分在左右两头，
+   手滑点错的机会小；误点 × 丢一枚，误点 ↻ 只是多开一次选包框。 */
+.zipcard__swap {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  background: var(--panel-3);
+  color: var(--ink-3);
+  font: 600 12px/1 var(--mono);
+  cursor: pointer;
+  display: none;
+  place-items: center;
+}
+
+.zipcard:hover .zipcard__swap,
+.zipcard:focus-within .zipcard__swap {
+  display: grid;
+}
+
+.zipcard__swap:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+/* 触屏没有 hover：不补这一条，两枚角标在手机上永远 display:none ——
+   逐枚「移除」与「重选这个包」都点不到，只能整队清空。hover 能力缺席时直接显示。 */
+@media (hover: none) {
+  .zipcard__x,
+  .zipcard__swap {
+    display: grid;
+  }
+}
+
 /* 为什么不能传：一行红字说明，限在卡片宽度内换行 */
 .zipcard__why {
   display: block;

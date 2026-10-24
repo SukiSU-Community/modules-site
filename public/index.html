@@ -167,8 +167,8 @@
             <!-- 队列墙：一次上传动作 = 一整套模块，铺成一面 zip 图标墙，一枚一块（模块 id / 名称 / versionCode / 查重状态）。
                  点一块就把表单装成它那一份（切走前先写回它自己那块）。
                  查重判为「已被上传过」的那一枚在这一块就摘出去：不进 manifest、不进签名那一串、不提交，
-                 但人还在队列里，想删由你删。每块还有「重选这个包」—— 换一枚的字节就等于换一整套，
-                 签名那一串会当场作废重算。 -->
+                 但人还在队列里，想删由你删。每块右上角还有一个「重选这个包」（↻，鼠标进卡片才出现）——
+                 换一枚的字节就等于换一整套，签名那一串会当场作废重算。 -->
             <div class="queue" id="queue" hidden>
               <div class="queue__hd">
                 <span class="queue__t">本次这一套</span>
@@ -181,7 +181,8 @@
               </div>
               <p class="queue__note" id="queue-note"></p>
             </div>
-            <!-- 逐枚换包用那一个不显示的 input：一次只换一个文件，换完只重解析那一枚 -->
+            <!-- 逐枚换包用那一个不显示的 input：队列墙每块右上角的 ↻ 调 requestSwap(card) 来点它，
+                 一次只换一个文件，换完只重解析那一枚 -->
             <input type="file" id="file-swap" accept=".zip,application/zip" hidden />
 
             <div class="term" id="term" hidden aria-live="polite"></div>
@@ -623,9 +624,9 @@
           <p>纯静态站点，没有任何自己的服务端；所有请求都直连上传后端。下面是当前接线情况：</p>
           <ul class="selfcheck" id="selfcheck"></ul>
           <p style="margin-top:12px">
-            已知待办：<b style="color:var(--ink)">上传端点目前没有鉴权与限流</b>，
-            后续会接 Cloudflare Turnstile。界面上留了接入位，后端配好 sitekey 填进
-            <code>config.js</code> 即可，本站不自己伪造任何验证码。
+            投稿端点已经接上 <b style="color:var(--ink)">Cloudflare Turnstile 人机校验</b>，并按 IP
+            做了滑动窗口限流；人机校验没配密钥的那一侧会跳过，限流在 KV 没绑时也不生效。校验部件不占首屏，
+            第一次选包或打开「上传前确认」时才加载，没过校验就进不了确认层。本站不自己伪造任何验证码。
           </p>
         </article>
       </section>

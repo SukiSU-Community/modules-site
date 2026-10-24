@@ -970,6 +970,16 @@ function zipCard(card) {
     dropCard(card);
   });
   box.append(rm);
+
+  // 重选这个包：换掉这一枚的字节。它跟 × 一起藏在墙角（同一套 hover 显隐），
+  // 但放在右边 —— 左边那枚是「移除」，误点代价是丢一枚；换包只是重解析，放远一点更稳。
+  // 换包 = 换一整套：这一枚的整包哈希是集合签名的输入之一，旧串当场作废重算（见 swapRun）。
+  const sw = node("button", "zipcard__swap", "↻");
+  sw.type = "button";
+  sw.title = "给这一枚重选一个 zip";
+  sw.setAttribute("aria-label", "给这一枚重选一个 zip");
+  sw.addEventListener("click", () => requestSwap(card));
+  box.append(sw);
   return box;
 }
 
@@ -1237,7 +1247,10 @@ function bindStage() {
   stage.addEventListener("pointerdown", (e) => {
     // 鼠标只认左键；触摸与笔一律认。在箭头 / 圆点上按下不算拖（那是点击）。
     if (e.pointerType === "mouse" && e.button !== 0) return;
+    // 输入框里的拖拽是「选文字」，不是翻页：textarea 里横向拖过 40px 就会被当成一次滑动，
+    // 于是用户在 A 的「模块描述」里拖选，回来发现表单已经换成 B 了（焦点没动、内容换了）。
     if (e.target.closest && e.target.closest(".stage__arrow, .stage__dot, .stage__peek")) return;
+    if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
     startX = e.clientX;
     startY = e.clientY;
     tracking = true;
@@ -1267,6 +1280,11 @@ function bindStage() {
   document.addEventListener("keydown", (e) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     if (!stage.contains(document.activeElement)) return;
+    // #stage-main 里装的全是输入框：在它们里面按左右键是移动光标，不是换卡。
+    // 少了这一道，光标一动就把整张表单换成另一枚（switchStage → selectCard → selectCardNow
+    // 会先 commitView 再 applyView），用户以为还在改 A，后面的字全写进 B。
+    const el = document.activeElement;
+    if (el && el.closest && el.closest("input, textarea, select, [contenteditable]")) return;
     if (state.cards.length < 2) return;
     e.preventDefault();
     switchStage(e.key === "ArrowRight" ? 1 : -1);
@@ -1702,6 +1720,23 @@ function gateItems() {
         ? targets.length > 0 && incomplete.length === 0 && !dupId
         : Boolean(state.nonce && proofId && state.zipSha) && targets.length > 0 && incomplete.length === 0 && !dupId,
       text: nonceText,
+    });
+  }
+  // 人机校验：Worker 那边没令牌就是 403，所以它必须自己占一格 —— 否则用户会被放进那个
+  // 全屏确认层，勾完四项才吃到一个 403，再被退回来找这个部件。
+  // ok 落进 ready（就绪判据还是唯一的 items.every），「上传前确认」跟着灭；
+  // shown 说的是「这一格在不在屏幕上」：部件是按需加载的，还没到加载时机（没选包、没开确认层）
+  // 时先不显示，免得首屏就写一句「还没完成」。
+  // 没配 sitekey 时不 push：那时后端也不校验，写一条 ok 恒假的条目等于把整页锁死。
+  if (IS_TURNSTILE_CONFIGURED) {
+    items.push({
+      ok: turnstileOk(),
+      shown: Boolean(turnstileStarted),
+      text: turnstileOk()
+        ? "人机校验已完成"
+        : turnstileStarted
+        ? "人机校验还没完成 —— 04 区那个部件要等它转出「成功」才给令牌；没加载出来就点它重试"
+        : "人机校验还没开始 —— 选好包会自动加载，也可以点一下 04 区那块地方先加载",
     });
   }
   items.push({ ok: IS_API_CONFIGURED, text: "后端 API_BASE 已配置" });
@@ -2192,6 +2227,11 @@ function paintSession() {
  * 这个函数**不抛错**（checkSession 已经把网络/超时/非 JSON 都归到 ok:false）：
  * 后端抖一下就抛，等于让一次与用户无关的刷新把整个上传页按成红的 ——
  * 失效方向必须是「按没会话处理」，多抄一次签名只是麻烦，把能用的页面报成坏的是骗人。
+ *
+ * 但「这一次按没会话处理」与「把令牌销毁」是两件事。checkSession 的 transient 档说的就是
+ * 前一种：断网、超时、5xx、读不懂的应答 —— 那一次只是没问到答案，令牌本身可能好得很。
+ * 只有非 transient（服务端明确说这串不能用）才 clearSession；transient 时只把会话条藏起来，
+ * localStorage 里那份原封不动留着，等下一次刷新再问。
  */
 async function refreshSession() {
   const saved = loadSession();
@@ -2201,7 +2241,9 @@ async function refreshSession() {
   }
   const res = await checkSession(saved.token);
   if (!res || !res.ok) {
-    clearSession();
+    // 问不到答案的那一档不清本地：一次网络抖动就把 90 天令牌永久删掉，用户下次必须
+    // 重改签名且再也取不回来 —— 那是比「这一次多改一次签名」贵得多的代价。
+    if (!res || !res.transient) clearSession();
     paintSession();
     refreshGate();
     return;
@@ -2327,6 +2369,15 @@ function openConfirm() {
   if (!zipOk || !IS_API_CONFIGURED || !targets.length) return;
   // 兜底：万一是手填一切、没走过选包那条路，进确认层时补上。
   ensureTurnstile();
+  // 人机校验没过就别开层。这个全屏层 position:fixed; z-index:80 会把 04 区的校验部件
+  // 整个盖住：用户在这儿勾完四项、点确认，才吃一个 403，再被「返回修改」退出来找部件。
+  // 按钮平时已经是 disabled（ready 由 items.every 决定），这里是给强行调用的兜底，
+  // 顺便把人往部件那儿送一下。
+  if (!turnstileOk()) {
+    refreshGate();
+    $("#turnstile-slot").scrollIntoView?.({ block: "center" });
+    return;
+  }
   commitView();
   lastFocus = document.activeElement;
   const layer = $("#layer-confirm");
@@ -2371,13 +2422,18 @@ function openConfirm() {
     sum.append(block);
   }
   // 签名是提交前最后一道能核对的东西：整套就这一串，列一次，别让人以为还要逐枚抄。
-  const proofVal = node("b", null, "…");
-  const proofLine = node("div", "warn__proof");
-  proofLine.append("这一整套共用的签名: ", proofVal);
-  sum.append(proofLine);
-  proofTextOf().then((t) => {
-    proofVal.textContent = t || "这一套还差来源（某一枚的模块 ID / 整包哈希 / 随机段），现在没有可抄的一串";
-  });
+  // 但走长效会话时这一行**整行不渲染** —— 会话档本来就不生成随机段（proofTextOf 无 nonce 返回 ""），
+  // 硬画出来只会落到「这一套还差来源…现在没有可抄的一串」，跟上面那句「这一次不用改签名」自相矛盾。
+  const viaSession = sessionFor(fieldValue("coolapkUid"));
+  if (!viaSession) {
+    const proofVal = node("b", null, "…");
+    const proofLine = node("div", "warn__proof");
+    proofLine.append("这一整套共用的签名: ", proofVal);
+    sum.append(proofLine);
+    proofTextOf().then((t) => {
+      proofVal.textContent = t || "这一套还差来源（某一枚的模块 ID / 整包哈希 / 随机段），现在没有可抄的一串";
+    });
+  }
   const rec = state.cards.filter((c) => isRecorded(c));
   if (rec.length) {
     sum.append(
@@ -2581,9 +2637,22 @@ async function uploadBatch() {
     // 这一次成功了 ⇒ 这一串签名在服务端记过账了（用过即废）。随机段当场换掉：
     // 留着它，下一套（新选的包）会拿一串已经烧掉的签名去提交，永远回同一句「用过」。
     if (state.nonce) setNonce(makeNonce());
+    // 人机校验令牌是一次性的：这一次已经把它交上去了，服务端（真开了 TURNSTILE_SECRET 时）
+    // 也已经验过。留在 state 里，下一套包会拿同一枚去撞「timeout-or-duplicate」，
+    // 用户看到的却是「人机校验未通过，请重试」——重试多少次都一样。
+    // 顺手让部件回到未解状态：令牌都没了，屏幕上还打着一个绿勾就是骗人。
+    dropTurnstileToken();
+    resetTurnstileWidget();
     showSuccess(state.batchResult);
   } catch (err) {
     state.batchResult = { ok: false, reason: failReason(err), code: errCode(err), owner: errOwner(err) };
+    // 失败路径也要把令牌收回去。Token 是**一次性**的：这次提交失败时它多半已经被
+    // siteverify 消费掉了（服务端那句「人机校验未通过，请重试」就是它被用过的样子），
+    // 留着它，点「重试」发出去的是同一枚废令牌 —— 用户会看到同一句失败，永远出不来。
+    // 网络失败（请求压根没到 Worker）时它其实还活着，但这时让用户重解一次，比让他
+    // 反复撞 403 便宜。
+    dropTurnstileToken();
+    resetTurnstileWidget();
     showFailure(err);
   } finally {
     state.uploading = false;
@@ -2636,6 +2705,17 @@ function retryBatch() {
     openConfirm();
     return;
   }
+  // 令牌在上一次失败时已经被收回去了（uploadBatch 的 catch 里清的），而 Worker 那边
+  // 没令牌就是 403。硬发一次只会让用户再读一遍同一句失败，所以先把他送回 04 区去解。
+  if (!turnstileOk()) {
+    closeRun();
+    const slot = $("#turnstile-slot");
+    slot.hidden = false;
+    slot.scrollIntoView?.({ block: "center" });
+    ensureTurnstile();
+    refreshGate();
+    return;
+  }
   uploadBatch();
 }
 
@@ -2681,11 +2761,17 @@ function showSuccess(res) {
   }
 
   const ul = node("ul", "next");
+  // 第 4 条说的是「签名接下来怎么办」，两条路走的是两件事：
+  // 会话档这一次根本没发签名（batchPayload 里 session 那一格顶掉了签名校验段），
+  // 说「签名已经记账、要再改一次」就是假话 —— 用户会去找那一串根本不存在的签名。
+  const viaSession = Boolean(state.lastBatch && state.lastBatch.session);
   for (const text of [
     "点进 PR 能看到审核进度，以及这一整套每一枚的完整元数据。",
     "新模块若未命中拦截名单可能自动通过；对已收录模块的版本更新不会自动合入，本站没有人工放行这一格。",
     "PR 合并之后，这些模块才会出现在公开索引里，所有人才能在管理器里搜到并一键安装。",
-    "这一串签名已经随这一次上传记账了（用过即废）。要再上传别的包，页面会给你新的一串 —— 签名要再改一次。",
+    viaSession
+      ? "这一趟走的是长效会话（90 天内免改签名），你的酷安签名这一次没有被动过；下次上传仍然不用改。"
+      : "这一串签名已经随这一次上传记账了（用过即废）。要再上传别的包，页面会给你新的一串 —— 签名要再改一次。",
   ])
     ul.append(node("li", null, text));
   box.append(node("p", "done__kicker", "接下来"));
@@ -4347,33 +4433,103 @@ function init() {
  * 只是来看一眼已收录列表的人，替真要上传的人付这笔钱。
  */
 let turnstileStarted = false;
+
+/** 拿到令牌的唯一判据。门禁条目、确认层放行、重试前的检查都读它，别处不再各判一次。 */
+function turnstileOk() {
+  return Boolean(state.turnstileToken);
+}
+
+/** 令牌作废（过期 / 超时 / 出错 / 上传失败）统一走这里：清空 + 重画门禁。 */
+function dropTurnstileToken() {
+  state.turnstileToken = "";
+  refreshGate();
+}
+
+/**
+ * 让部件回到「没解」的样子。失败路径上 holder 可能已经被 turnstileFailed 拆掉了，
+ * 那时 turnstile.reset(null) 会打一条控制台错，所以先确认它在。
+ */
+function resetTurnstileWidget() {
+  const holder = $("#turnstile-widget");
+  if (holder) window.turnstile?.reset?.(holder);
+}
+
 function ensureTurnstile() {
   if (turnstileStarted || !IS_TURNSTILE_CONFIGURED) return;
   turnstileStarted = true;
   const slot = $("#turnstile-slot");
   slot.hidden = false;
   slot.textContent = "下面完成人机校验后才能提交。";
+  slot.onclick = null;
+  slot.style.cursor = "";
   loadTurnstile();
 }
 
+/**
+ * 加载失败（断网、被插件拦、脚本 15 秒还不来）必须有出口：复位 turnstileStarted，
+ * 把半成品（script 标签、空 holder）拆掉，槽位换成可点重试的提示。
+ * 否则 turnstileStarted 一旦为 true 就永远是 true，用户除了刷新页面没有第二条路。
+ */
+function turnstileFailed() {
+  turnstileStarted = false;
+  const slot = $("#turnstile-slot");
+  $("#turnstile-widget")?.remove();
+  slot.hidden = false;
+  slot.textContent =
+    "人机校验没能加载出来（可能是网络不通，或插件拦了 challenges.cloudflare.com）。点这里重试。";
+  slot.style.cursor = "pointer";
+  slot.onclick = () => ensureTurnstile();
+  refreshGate();
+}
+
 function loadTurnstile() {
-  const s = document.createElement("script");
-  s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
-  s.async = true;
-  s.defer = true;
-  document.head.append(s);
+  const slot = $("#turnstile-slot");
+  const script = document.createElement("script");
+  script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+  script.async = true;
+  script.defer = true;
   const holder = node("div");
   holder.id = "turnstile-widget";
-  $("#turnstile-slot").append(holder);
-  const wait = setInterval(() => {
-    if (!window.turnstile) return;
+  let settled = false;
+  let wait = null;
+  let watchdog = null;
+  // 收尾只跑一次：成功就停掉两个计时器；失败把半成品拆干净并交回可重试的槽位。
+  const finish = (ok) => {
+    if (settled) return;
+    settled = true;
     clearInterval(wait);
-    window.turnstile.render(holder, {
-      sitekey: CONFIG.TURNSTILE_SITEKEY,
-      callback: (token) => {
-        state.turnstileToken = token;
-      },
-    });
+    clearTimeout(watchdog);
+    if (ok) return;
+    script.remove();
+    holder.remove();
+    turnstileFailed();
+  };
+  script.onerror = () => finish(false);
+  document.head.append(script);
+  slot.append(holder);
+  // 15 秒还不出现 window.turnstile 就当它加载不出来 —— 这脚本正常是百毫秒级。
+  watchdog = setTimeout(() => finish(false), 15000);
+  wait = setInterval(() => {
+    if (!window.turnstile) return;
+    finish(true);
+    try {
+      window.turnstile.render(holder, {
+        sitekey: CONFIG.TURNSTILE_SITEKEY,
+        callback: (token) => {
+          state.turnstileToken = token;
+          refreshGate();
+        },
+        // 令牌是有寿命的：过期、交互超时、校验本身出错，都得把令牌收回去，
+        // 否则门禁还以为「已通过」，用户拿着一个废令牌去撞 403。
+        "expired-callback": () => dropTurnstileToken(),
+        "timeout-callback": () => dropTurnstileToken(),
+        "error-callback": () => dropTurnstileToken(),
+      });
+    } catch {
+      // render 自己抛（sitekey 与当前域名对不上、holder 被别处动过）：同样要交回可重试的槽位，
+      // 不然 turnstileStarted 卡在 true，页面就永远停在「下面完成人机校验后才能提交」。
+      turnstileFailed();
+    }
   }, 200);
 }
 

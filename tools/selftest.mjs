@@ -2465,6 +2465,183 @@ async function main() {
     );
   }
 
+  // ---- 舞台手势的输入区豁免（P0）/ 会话令牌的 transient 档（P1-1）/
+  //      换包入口（P1-2）/ 会话档确认层不画签名行（P2-4）------
+  // 这四组钉的都是「改回原样也不会报错」的边界：左右键在输入框里换卡、断网一次删令牌、
+  // 换包按钮消失、会话档自相矛盾 —— 页面全都照常能跑，只是用户在别的地方吃亏。
+  {
+    // ① 键盘豁免：切片到 keydown 之后 600 字符内，必须有 input/textarea 这一道。
+    // 为什么要切片而不是全文 includes：app.js 别处也有 closest("input…")，全文匹配等于
+    // 拿一句无关的代码给这一处盖章（同一个假绿形状，painted() 的注释里写过一次）。
+    const kdIdx = appSrc.indexOf('document.addEventListener("keydown"');
+    const kdSlice = kdIdx >= 0 ? appSrc.slice(kdIdx, kdIdx + 600) : "";
+    check(
+      "舞台的键盘左右键在输入框里不换卡（keydown 里有 input/textarea 豁免）",
+      kdIdx >= 0 && /closest\(\s*"input, textarea/.test(kdSlice),
+      kdIdx < 0 ? "找不到 keydown 监听" : `切片里没有 input/textarea 豁免：${JSON.stringify(kdSlice.slice(0, 120))}…`
+    );
+    // ② 拖拽豁免：pointerdown 里同一道，跟 .stage__arrow 那串排除并列。
+    const pdIdx = appSrc.indexOf('stage.addEventListener("pointerdown"');
+    const pdSlice = pdIdx >= 0 ? appSrc.slice(pdIdx, pdIdx + 700) : "";
+    check(
+      "舞台的横向拖拽在输入框里不换卡（pointerdown 里有 input/textarea 豁免）",
+      pdIdx >= 0 && /closest\(\s*"input, textarea/.test(pdSlice),
+      pdIdx < 0 ? "找不到 pointerdown 监听" : "textarea 里横向拖选 >40px 会被当成一次翻页"
+    );
+
+    // ③ 令牌的 transient 档：api.js 那边要真的分档，app.js 那边要真的只在非 transient 时清。
+    // 只查「有没有 transient 这个词」不够 —— 还得钉住三处返回：fetch 抛、5xx/429、读不懂的应答。
+    const csIdx = apiSrc.indexOf("export async function checkSession");
+    const csBody = csIdx >= 0 ? apiSrc.slice(csIdx, apiSrc.indexOf("export async function revokeSession")) : "";
+    const transientReturns = (csBody.match(/return\s*\{\s*ok:\s*false,\s*transient:\s*true\s*\}/g) || []).length;
+    check(
+      "checkSession 分出 transient 档：网络异常 / 5xx·429 / 非 JSON 都不许当成「令牌无效」",
+      csIdx >= 0 &&
+        transientReturns >= 2 &&
+        // 只有 401/403 是确定无效，其余非 ok 状态一律 transient（5xx / 429 / 404 端点没上线）
+        /res\.status\s*!==\s*401\s*&&\s*res\.status\s*!==\s*403/.test(csBody),
+      `transient 返回点 ${transientReturns} 处（期望 ≥2：fetch 抛 + 非 JSON 应答各一处）；` +
+        "还缺「只有 401/403 非 transient」那一条 —— 少了它，一次 502 就能清空所有人的令牌"
+    );
+    check(
+      "refreshSession 只在非 transient 时 clearSession（问不到答案的那一档不动 localStorage）",
+      /if\s*\(\s*!res\s*\|\|\s*!res\.transient\s*\)\s*clearSession\(\);/.test(appSrc),
+      "clearSession() 没被 transient 条件包住 —— 一次网络抖动就能销毁令牌"
+    );
+
+    // ④ 换包入口：zipCard() 里必须真的调 requestSwap，否则那 45 行是死代码。
+    const zcIdx = appSrc.indexOf("function zipCard(card)");
+    const rsIdx = appSrc.indexOf("function requestSwap(card)");
+    const zcBody = zcIdx >= 0 && rsIdx > zcIdx ? appSrc.slice(zcIdx, rsIdx) : "";
+    check(
+      "队列墙每块有换包入口：zipCard() 里调 requestSwap(card)",
+      zcIdx >= 0 && rsIdx > zcIdx && /requestSwap\(\s*card\s*\)/.test(zcBody),
+      zcIdx < 0 ? "找不到 zipCard" : "requestSwap 全仓零调用点，换包链路是死代码"
+    );
+    check(
+      "换包入口在启动序列里仍然被绑定（bindSwap() 还在 init 里）",
+      /^ {2}bindSwap\(\);/m.test(appSrc),
+      "bindSwap() 没被调用，点 ↻ 只会打开一个没人接的选包框"
+    );
+
+    // ⑤ 会话档的确认层不许再画「这一整套共用的签名」那一行 —— 会话档没有 nonce，
+    //    那一行只会落到「现在没有可抄的一串」，与上面「这一次不用改签名」自相矛盾。
+    const ocIdx = appSrc.indexOf("function openConfirm()");
+    const ccIdx = appSrc.indexOf("function closeConfirm()");
+    const ocBody = ocIdx >= 0 && ccIdx > ocIdx ? appSrc.slice(ocIdx, ccIdx) : "";
+    check(
+      "会话档的确认层整行不渲染「共用的签名」（被 viaSession 包住，连容器一起）",
+      ocIdx >= 0 &&
+        /const viaSession = sessionFor\(fieldValue\("coolapkUid"\)\);/.test(ocBody) &&
+        /if\s*\(\s*!viaSession\s*\)\s*\{[\s\S]{0,400}?proofLine/.test(ocBody),
+      "会话档仍会追加签名行，用户看到「不用改签名」与「没有可抄的一串」并排"
+    );
+    // 正向那一半也不能丢：非会话档必须照旧画出来（否则这一改就是把整行删了了事）。
+    check(
+      "非会话档的确认层照旧画签名行（proofTextOf 仍在 openConfirm 里）",
+      /proofTextOf\(\)\.then\(/.test(ocBody) && /这一整套共用的签名: /.test(ocBody),
+      "整行被删掉了 —— 会话档之外的人再也看不到要抄的那一串"
+    );
+  }
+
+  // ---- 首屏性能三项（Turnstile 按需加载 / 字体长缓存 / 后端域 preconnect）------
+  // 这三样都是「改回原样也不会报错」的改动：把它们换回无条件加载、换回通配、删掉 preconnect，
+  // 页面照样能跑，只是每个访客多付一次第三方请求、或者拼错的字体路径被当字体缓存一年。
+  // 所以钉的不是实现细节，是三条能被改坏的边界。
+  {
+    const headersPath = resolve(here, "../public/_headers");
+    const headers = existsSync(headersPath) ? readFileSync(headersPath, "utf8") : "";
+    // 逐文件列 + 每个块都要有同一句 Cache-Control：少一行就等于那个字重没长缓存。
+    const woff2Files = ["chakrapetch-600", "chakrapetch-700", "plexmono-400", "plexmono-500", "plexmono-600"].map(
+      (n) => `/fonts/${n}.woff2`
+    );
+    const missing = woff2Files.filter((p) => !headers.includes(p));
+    check(
+      "_headers 把 5 个真实字体文件逐个列了出来（通配换成清单，漏一个那个字重就没有长缓存）",
+      headers !== "" && missing.length === 0,
+      `缺：${missing.join("、") || "（整个文件都没读到）"}`
+    );
+    // 注释里要能写「别用 *.woff2 通配」这句话，所以只看去掉 `#` 注释行之后的规则本身。
+    const headerRules = headers
+      .split("\n")
+      .filter((line) => !/^\s*#/.test(line))
+      .join("\n");
+    check(
+      "_headers 不再用 /fonts/*.woff2 通配",
+      headers !== "" && !/\*\.woff2/.test(headerRules),
+      "Pages 的 _headers 没命中时回的是 200 + index.html，通配会给拼错的字体路径盖上 immutable"
+    );
+    check(
+      "_headers 每条规则都带 immutable + 一年的 max-age",
+      headers !== "" && (headers.match(/Cache-Control: public, max-age=31536000, immutable/g) || []).length === woff2Files.length,
+      `Cache-Control 行数对不上字体文件数（${woff2Files.length}）`
+    );
+
+    // Turnstile 脚本只该由 ensureTurnstile() 那一处拉起。首屏无条件加载是本仓库刚改掉的事，
+    // 有人把 loadTurnstile() 加回 init() 或模块顶层，这三条断言里第一条会先响。
+    const ensureIdx = appSrc.indexOf("function ensureTurnstile()");
+    const loadDefIdx = appSrc.indexOf("function loadTurnstile()");
+    const ensureBody = ensureIdx >= 0 && loadDefIdx > ensureIdx ? appSrc.slice(ensureIdx, loadDefIdx) : "";
+    const loadCalls = (appSrc.match(/(?<![A-Za-z0-9_.$])loadTurnstile\(\)/g) || []).length;
+    check(
+      "loadTurnstile() 的定义在 ensureTurnstile() 之后，且全文件只有两处提及（定义 + 唯一调用）",
+      ensureIdx >= 0 && loadDefIdx > ensureIdx && loadCalls === 2,
+      `定义位置 ensure=${ensureIdx} load=${loadDefIdx}；loadTurnstile() 出现 ${loadCalls} 次（期望 2：定义里的 function 与 ensureTurnstile 里的那一句）`
+    );
+    check(
+      "拉起脚本的那一句就在 ensureTurnstile() 体内（首屏不加载 Turnstile）",
+      ensureBody.includes("loadTurnstile();"),
+      "ensureTurnstile 体内找不到 loadTurnstile(); —— 脚本会被别处拉起来"
+    );
+    // 失败出口：没有 onerror + 超时，turnstileStarted 一旦置 true 就再也回不到 false，
+    // 用户除了刷新页面没有第二条路。这两条一起钉住「可重试」这个能力本身。
+    check(
+      "Turnstile 加载有失败出口：script.onerror + 15 秒看门狗都会把 turnstileStarted 复位",
+      /script\.onerror = \(\) => finish\(false\);/.test(appSrc) &&
+        /setTimeout\(\(\) => finish\(false\), 15000\)/.test(appSrc) &&
+        /function turnstileFailed\(\) \{\s*turnstileStarted = false;/.test(appSrc),
+      "缺 onerror / 缺超时 / 缺 turnstileStarted 复位 —— 加载失败后用户只能刷新页面"
+    );
+    check(
+      "Turnstile 三个失效回调都清空令牌并重画门禁（过期 / 超时 / 出错）",
+      ['"expired-callback"', '"timeout-callback"', '"error-callback"'].every((k) => appSrc.includes(k)) &&
+        /function dropTurnstileToken\(\) \{\s*state\.turnstileToken = "";\s*refreshGate\(\);/.test(appSrc),
+      "少一个回调就是那种失效之后门禁还亮着，用户拿着废令牌去撞 403"
+    );
+    // 人机校验必须自己占一格门禁条目 —— 这是 P1-A 的根：没有它，确认层会在没校验时放行。
+    const gateBody = appSrc.slice(appSrc.indexOf("function gateItems()"), appSrc.indexOf("function refreshGate()"));
+    check(
+      "gateItems() 里人机校验占一格：ok 走 turnstileOk()，没过校验时整页就绪判据跟着假",
+      /if \(IS_TURNSTILE_CONFIGURED\) \{[\s\S]*?ok: turnstileOk\(\)/.test(gateBody) &&
+        /function turnstileOk\(\) \{\s*return Boolean\(state\.turnstileToken\);/.test(appSrc),
+      "门禁清单里没有 turnstile 这一格，确认层就还能在没校验时打开"
+    );
+    check(
+      "确认层放行前会检查令牌（openConfirm 里 !turnstileOk() 直接 return）",
+      /if \(!turnstileOk\(\)\) \{[\s\S]*?return;\s*\}/.test(
+        appSrc.slice(appSrc.indexOf("function openConfirm()"), appSrc.indexOf("function closeConfirm()"))
+      ),
+      "openConfirm 不看令牌就会把用户放进那个盖住校验部件的全屏层"
+    );
+    check(
+      "上传失败与重试都会先处理废令牌（catch 里 dropTurnstileToken，retryBatch 里判空）",
+      /catch \(err\) \{[\s\S]*?dropTurnstileToken\(\);[\s\S]*?showFailure\(err\);/.test(appSrc) &&
+        /if \(!turnstileOk\(\)\) \{[\s\S]*?ensureTurnstile\(\);/.test(
+          appSrc.slice(appSrc.indexOf("function retryBatch()"), appSrc.indexOf("function showSuccess("))
+        ),
+      "令牌是一次性的：不清零，重试发的是同一枚废令牌，用户永远读同一句失败"
+    );
+
+    // 后端域的 preconnect 是首屏提速那一半；challenges.cloudflare.com 现在按需加载，
+    // 给它 preconnect 等于把刚省下的那条连接又提前建回来。
+    check(
+      "index.html 预连上传后端域，且不再预连 challenges.cloudflare.com",
+      /rel="preconnect" href="https:\/\/sukisu-module-api\.pages\.dev"/.test(html) &&
+        !/preconnect[^>]*challenges\.cloudflare\.com/.test(html),
+      "缺后端域 preconnect，或者又把 Turnstile 域提前连上了"
+    );
+  }
+
   // 总结行不许把跳过藏进后缀。fork 里没有 contrib，跨仓库那几组永远不跑，
   // 而「全部通过」四个字会让所有人以为公式被验过 —— 恰恰在钉最少的地方写得最像钉住了。
   // 所以：有跳过时不说「全部通过」，且把缺席的条数写在同一行里。
