@@ -87,14 +87,14 @@ export async function checkModule(id, versionCode) {
  * 提交**一整套**（§17.1：`POST /submit` 里存在名为 `manifest` 的 text field ⇒ 走批量）。
  * 形状逐条对着设计文档 §17.2 / §17.3，一个字段都不许多、一个都不能换形状。
  *
- * 为什么一次动作只发一个请求（而不是像以前那样一枚发一次）：口令 v2 把绑的对象从
+ * 为什么一次动作只发一个请求（而不是像以前那样一枚发一次）：签名串 v2 把绑的对象从
  * 「(模块 id, 整包 sha256) 这一对」换成「这一次上传的整套」，而 `used-nonce` 用过即废 ⇒
- * 一串口令只有在**一个请求带整套**时语义才干净。拆成 N 次的话要么第一次就把这串烧掉
- * （后 N-1 次全被判「口令已用过」），要么把记账降成一枚一次，那攻击者读到串就能逐枚预占。
+ * 签名串只有在**一个请求带整套**时语义才干净。拆成 N 次的话要么第一次就把这串烧掉
+ * （后 N-1 次全被当成「这一串已经用过了」拒掉），要么把记账降成一枚一次，那攻击者读到串就能逐枚预占。
  * 这条不是省事，是 §15 写下来的硬约束：「不能只做前端」。
  *
  * 三条规矩各自守一件会静默坏掉的事：
- * ① manifest 排成 FormData 的**第一个 part** —— §17.2：闸前移之后口令的输入来自这份声明，
+ * ① manifest 排成 FormData 的**第一个 part** —— §17.2：闸前移之后签名串的输入来自这份声明，
  *    解析器若在读到 manifest 之前就看见 file part ⇒ 400 `manifest_late`。FormData 的插入序
  *    就是线上的 part 序（浏览器按 append 顺序编码边界，实测过，见本文件末尾那条注释），
  *    所以这一条在客户端能真做到，不是「应该没问题」。
@@ -137,7 +137,7 @@ export function submitContribution(batch, { onProgress } = {}) {
   const form = new FormData();
   // ① manifest 必须是第一个 part，早于任何一个 file part。
   form.append("manifest", buildManifest(modules));
-  // 共享字段留在顶层，不进 manifest（§17.3）：一次上传只有一个人、一个承诺、一枚口令。
+  // 共享字段留在顶层，不进 manifest（§17.3）：一次上传只有一个人、一个承诺、一份签名串。
   form.append("uploader", batch.uploader || "");
   form.append(CONFIG.COOLAPK_UID_FIELD, batch.coolapkUid || "");
   form.append("pledge", batch.pledge || "");
@@ -145,6 +145,9 @@ export function submitContribution(batch, { onProgress } = {}) {
   // Turnstile 预留位：没接入时也是发空字符串，不做任何前端假验证码。
   // 一次 POST 一份令牌 —— 整套一次提交只需要解一次题，比逐枚提交少 N-1 次。
   form.append(CONFIG.TURNSTILE_FIELD, IS_TURNSTILE_CONFIGURED ? batch.turnstile || "" : "");
+  // 长效会话令牌：手里有就带上（这一次不用改签名），没有就发空串（照旧走签名那条路）。
+  // 必须排在第一个 file part 之前 —— 与上面那几个共享字段同一条规矩（见 ① 与 manifest_late）。
+  form.append("session", batch.session || "");
   // ③ N 个 name="zip" 的 file part，按 manifest 的顺序追加（配对不看顺序、看包内 module.prop
   //   的 id，§17.3；但顺序一致能让失败文案里的「第几枚」对得上用户认得出的那一枚）。
   let totalBytes = 0;
@@ -174,7 +177,14 @@ export function submitContribution(batch, { onProgress } = {}) {
         if (json && json.ok === true && json.pr) {
           // §17.5：应答是 { ok, pr, modules:[{ id, versionCode, sha256, assetName }] }。
           // `pr` 键名与今天逐字兼容；单枚批量时 `modules` 也有一份 ⇒ 前端只写一条处理路径。
-          resolve({ pr: json.pr, modules: Array.isArray(json.modules) ? json.modules : [] });
+          // 会话令牌随成功应答一起回来（`session` 恒有这个键：签成了是 { token, expiresAt }，
+          // 走令牌来的这一笔不重签、是 null）。在这里丢掉它，等于让「90 天免改签名」在页面上
+          // 根本不存在 —— 令牌只留在 localStorage 里，从来没有被发出去过。
+          resolve({
+            pr: json.pr,
+            modules: Array.isArray(json.modules) ? json.modules : [],
+            session: json.session ?? null,
+          });
         } else {
           reject(backendFailure(xhr.status, json, body));
         }
@@ -243,7 +253,7 @@ export const SUBMIT_ERROR_TEXT = {
   },
   proof_used: {
     owner: "you",
-    text: "这一串口令已经在服务端记过账了（用过即废）。前端会自动换一新一串，你需要先把新串抄进酷安签名并保存，再回来点重试 —— 签名没改就重试，还会撞同一句。",
+    text: "这一串签名已经在服务端记过账了（用过即废）。前端会自动换一新一串，你需要先把新串抄进酷安签名并保存，再回来点重试 —— 签名没改就重试，还会撞同一句。",
   },
   /* ── POST /report（举报入口，下架侧第一步）那九条 ──────────────────────────
      同一条规矩（§17.7）：后端加一个 code，这张表必须同轮加一条，否则页面只能拿一句通用
@@ -365,9 +375,9 @@ export async function fetchReportQueue() {
  * 失败那一侧照走 `backendFailure`：那九个码各有一条人话，而这里最要不得的两种失败
  * （「你引用的那段不在包里」要他改材料 / 「这个包我们读不出来」要我们补能力）修法相反。
  *
- * 这一发会消耗服务端的一次实名额度，也可能烧掉签名里那一串口令（受理之后才烧，
- * 判「我们读不出」那一档不烧）—— 所以调用方必须先把口令那一串的来源逐字确认过：
- * 被举报 id、索引里那一版的 sha256、nonce，三者任一不对，口令就对不上。
+ * 这一发会消耗服务端的一次实名额度，也可能烧掉你填进酷安签名的那一串（受理之后才烧，
+ * 判「我们读不出」那一档不烧）—— 所以调用方必须先把签名串的来源逐字确认过：
+ * 被举报 id、索引里那一版的 sha256、nonce，三者任一不对，签名就对不上。
  */
 export async function reportModule(body) {
   if (!IS_API_CONFIGURED) {
@@ -506,7 +516,7 @@ export const USER_STATUS = {
     label: "unavailable",
     title: "暂时无法核实",
     hint:
-      "酷安接口没响应或后端核实不可用。署名会标为未核实；上传口令要核实通过才生成，所以现在还提交不了 —— " +
+      "酷安接口没响应或后端核实不可用。署名会标为未核实；签名串要核实通过才生成，所以现在还提交不了 —— " +
       "把 UID 重敲一遍会再查，一直不通是后端还没接上核实。",
   },
   // 后端明确告诉我们「只收到、没核实」。和 unavailable（想核实但没核实成）不同，
@@ -518,7 +528,7 @@ export const USER_STATUS = {
     title: "署名未经核实",
     hint:
       "后端收到了 UID，但目前没有核实它对应哪个真实酷安账号。" +
-      "这个署名属于「你自己报的」，出问题时公示按自报处理；核实这条没接上，上传口令也就生成不了，" +
+      "这个署名属于「你自己报的」，出问题时公示按自报处理；核实这条没接上，签名串也就生成不了，" +
       "上传通道此时是关着的 —— 要站点把核实接上才会开。",
   },
 };
@@ -563,6 +573,119 @@ export async function lookupCoolapkUser(uid) {
   // Worker 只做原样回显时给的就是这个值 —— 它诚实，所以照原样呈现，不升格成 verified
   if (json.status === "self_reported") return { status: "self_reported", uid: String(json.uid || uid) };
   return { status: "unavailable" };
+}
+
+/* --------------------------------------------- 长效会话令牌（90 天免改签名） */
+
+// 会话令牌的形状与整包 sha256 恰好同形（64 位小写十六进制），但**不共用** SHA256_HEX_RE：
+// 那一条的名字与注释说的都是「整包哈希」，两条口径将来谁动都不该牵动另一条。
+const SESSION_TOKEN_RE = /^[0-9a-f]{64}$/;
+
+// 这两条会话请求是**页面启动时**发的，不是用户点了什么才发 —— 后端抖动时它俩不能把首屏吊住。
+// 8 秒是「够它自己回来、又不至于让人盯着白屏」的那一档；超时按「这次没有会话」处理，
+// 用户最多多改一次签名，而不会被卡在上传页门口。
+const SESSION_TIMEOUT_MS = 8000;
+
+/**
+ * 带超时的 fetch。这个文件里此前没有超时工具（上传走 XHR、其余 fetch 都不设闸），
+ * 所以这里补一个最小的：到点 abort，异常照常往上抛，由调用方归到 `{ ok: false }`。
+ */
+async function fetchWithTimeout(target, options, ms) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    return await fetch(target, { ...options, signal: ctl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 校验长效会话令牌（90 天免改签名）。
+ *
+ * 为什么「恒 200、只读 ok」：契约照 /check 那一套 —— **令牌过期、被注销、后端压根不认这一串，
+ * 都是 HTTP 200 里的一条结论**，不是一次请求失败。状态码在这一格没有信息量：
+ * 401 与 404 会把「这个令牌不能用了」和「这个端点还没上线」混成同一种，而这两件事对页面的
+ * 意思正好相反 —— 前者要让人重改签名，后者要照常按「每次都得改签名」走。
+ *
+ * 为什么失败也返回 `{ ok: false }` 而不是抛：这个函数是**页面启动时**调的，它只回答
+ * 「这一次还要不要让用户改签名」。后端抖一下就抛，等于让一次与用户无关的刷新把整个上传页
+ * 按成红的 —— 多抄一次签名只是麻烦，把能用的页面报成坏的是骗人。失效方向必须是「按没会话处理」。
+ */
+export async function checkSession(token) {
+  const t = String(token || "").trim();
+  // 形状不对的令牌不发请求：它不可能换来 ok，白打一次请求只会让后端多一条无意义的账。
+  if (!SESSION_TOKEN_RE.test(t)) return { ok: false };
+  if (!IS_API_CONFIGURED) return { ok: false };
+  let res;
+  try {
+    res = await fetchWithTimeout(
+      url("/session/check"),
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: t }),
+      },
+      SESSION_TIMEOUT_MS
+    );
+  } catch {
+    return { ok: false }; // 网络断了 / 超时 / 跨域被拦，都归到「这次没有会话」
+  }
+  if (!res.ok) return { ok: false };
+  let json;
+  try {
+    json = await res.json();
+  } catch {
+    return { ok: false }; // 回的不是 JSON（网关错误页之类）＝这一格读不懂，不当成有会话
+  }
+  if (!json || json.ok !== true) return { ok: false };
+  // 后端在这一格里回了整张记录（uid / nickname / avatar / level / expiresAt）—— 它不是
+  // 装饰，refreshSession 靠 `uid` 判「这张令牌是不是属于输入框里这串 UID」。只把 ok 往上
+  // 传，等于让 sessionFor 永远为假：页面会一直说「每次都得改签名」，令牌等于没生效。
+  return {
+    ok: true,
+    uid: json.uid === undefined || json.uid === null ? "" : String(json.uid),
+    nickname: typeof json.nickname === "string" ? json.nickname : "",
+    avatar: typeof json.avatar === "string" ? json.avatar : "",
+    level: json.level === undefined || json.level === null ? null : json.level,
+    expiresAt: Number(json.expiresAt) || 0,
+  };
+}
+
+/**
+ * 注销长效会话令牌（幂等）。
+ *
+ * 幂等：同一个令牌注销两次，第二次照样算成功 —— 服务端认的是「这一串现在不能用了」，
+ * 不是「我刚刚删掉了它」。所以这里不区分「删掉了」与「本来就没有」，只看 ok。
+ * 失败照样返回 `{ ok: false }` 不抛：退不出去就退不出去，页面上一句「没退成，再试一次」
+ * 比一个红错更有用，而这个函数本来就拿不到给用户看的那句话。
+ */
+export async function revokeSession(token) {
+  const t = String(token || "").trim();
+  if (!SESSION_TOKEN_RE.test(t)) return { ok: false };
+  if (!IS_API_CONFIGURED) return { ok: false };
+  let res;
+  try {
+    res = await fetchWithTimeout(
+      url("/session/revoke"),
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: t }),
+      },
+      SESSION_TIMEOUT_MS
+    );
+  } catch {
+    return { ok: false }; // 网络断了 / 超时 / 跨域被拦
+  }
+  if (!res.ok) return { ok: false };
+  let json;
+  try {
+    json = await res.json();
+  } catch {
+    return { ok: false };
+  }
+  return { ok: json && json.ok === true };
 }
 
 /**

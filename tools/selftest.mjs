@@ -657,7 +657,7 @@ async function main() {
     /report\.result = json;[\s\S]{0,160}report\.nonce = makeNonce\(\);/.test(appSrc) &&
       rpCatchBody.length > 40 &&
       !/makeNonce/.test(rpCatchBody) &&
-      /它没消耗你的口令/.test(appSrc)
+      /它没消耗你的签名/.test(appSrc)
   );
   check(
     "举报只 POST /report，失败一律过那张码表；「不成立」留在 200 里当结论而不是当请求失败",
@@ -1084,9 +1084,15 @@ async function main() {
     "app.js 里这四格少任何一格，一次解析失败就会把整条队列永久打死"
   );
 
+  /* 旧断言只认「屏幕上有没有一串可抄」。长效会话那一档（90 天免改签名）根本不生成 nonce，
+     renderProof 把签名那一格整个收起 —— 于是「有没有串可抄」这个问题的答案必须换成
+     「手里那张令牌还成不成立」，否则这一档永远自称「未就绪」，按钮永久禁用。
+     判据仍然只有一份（sessionFor），不在这里另发明第二条。 */
   check(
-    "口令行的来源齐了才算 shown（v2：整套每一枚的 id 与整包哈希 + 那一枚随机段；屏幕上没串可抄时不许自称就绪）",
-    /shown: Boolean\(state\.nonce && proofId && state\.zipSha\)/.test(gateBody) &&
+    "口令行的来源齐了才算 shown（v2：整套每一枚的 id 与整包哈希 + 那一枚随机段；走长效会话时换成令牌成不成立；屏幕上没串可抄时不许自称就绪）",
+    /Boolean\(state\.nonce && proofId && state\.zipSha\)/.test(gateBody) &&
+      /const viaSession = sessionFor\(fieldValue\("coolapkUid"\)\);/.test(gateBody) &&
+      /shown: viaSession/.test(gateBody) &&
       /&& targets\.length > 0 && incomplete\.length === 0 && !dupId/.test(gateBody) &&
       /const idsInSet = targets\.map\(\(c\) => cardValues\(c\)\.id\)\.filter\(Boolean\);/.test(gateBody) &&
       /if \(!nonce \|\| !set\.targets\.length\) \{/.test(appSrc) &&
@@ -1096,7 +1102,7 @@ async function main() {
   );
   check(
     "还差哪个来源就点名哪个：清单三条各说一种「口令还差」",
-    ["口令还差：填上模块 ID", "口令还差：整包哈希还没算完", "口令还差：还没选包"].every((k) => gateBody.includes(k)) &&
+    ["签名串还差：填上模块 ID", "签名串还差：整包哈希还没算完", "签名串还差：还没选包"].every((k) => gateBody.includes(k)) &&
       !gateBody.includes("随机段已生成 —— 填上模块 ID"),
     "口令行的文案又回到先报「已生成」后报缺什么"
   );
@@ -1106,11 +1112,14 @@ async function main() {
       /blocking \? blocking\.text : "全部就绪，可以确认"/.test(refreshBody),
     refreshBody.includes("全部就绪") ? "全部就绪还在，但没让 shown 先过一遍" : "底栏不再写「全部就绪」"
   );
+  /* 旧断言说「ok 仍只看 state.nonce」。长效会话那一档不生成 nonce（它压根不需要签名），
+     所以 ok 的来源变成两支：有令牌，或者有那一串。按钮那一半一个字没动 —— 仍然只看 ok，
+     不许在这里长出第二个 disabled 条件（那才是第二道闸）。 */
   check(
-    "这条诚实不许变成第二道闸：确认按钮的 enable 条件仍只看 ok，ok 仍只看 state.nonce",
+    "这条诚实不许变成第二道闸：确认按钮的 enable 条件仍只看 ok，ok 只看「有令牌或有那一串」",
     /const ready = items\.every\(\(i\) => i\.ok\);/.test(refreshBody) &&
       /btn\.disabled = !ready/.test(refreshBody) &&
-      /ok: Boolean\(state\.nonce\)/.test(gateBody) &&
+      /ok: viaSession \|\| Boolean\(state\.nonce\)/.test(gateBody) &&
       !/disabled = !(ready && state\.zipSha)/.test(refreshBody)
   );
 
@@ -1299,10 +1308,21 @@ async function main() {
      第一个 file part 就是 400 manifest_late，而闸前移之后口令的输入来自这份声明 ——
      插入序漂到文件之后，整套会一发都发不出去。 */
   check(
-    "提交请求的 part 集合与次序（§17.2 / §17.3 批量契约）：manifest 排在第一个 file part 之前，其后 uploader/<UID字段>/pledge/nonce/<turnstile字段>，最后 N 个 zip",
+    "提交请求的 part 集合与次序（§17.2 / §17.3 批量契约）：manifest 排在第一个 file part 之前，其后 uploader/<UID字段>/pledge/nonce/<turnstile字段>/session，最后 N 个 zip",
     submitAt !== -1 &&
       sentFields.join(",") ===
-        ["manifest", "uploader", "CONFIG.COOLAPK_UID_FIELD", "pledge", "nonce", "CONFIG.TURNSTILE_FIELD", "zip"].join(",") &&
+        [
+          "manifest",
+          "uploader",
+          "CONFIG.COOLAPK_UID_FIELD",
+          "pledge",
+          "nonce",
+          "CONFIG.TURNSTILE_FIELD",
+          // 长效会话令牌（90 天免改签名）：走令牌来的这一笔不烧口令、也不用改签名。
+          // 它必须也是顶层共享字段 —— 一整套一次动作只有一个人，令牌与口令同属那个人。
+          "session",
+          "zip",
+        ].join(",") &&
       submitBody.indexOf('form.append("manifest"') !== -1 &&
       submitBody.indexOf('form.append("manifest"') < submitBody.indexOf('form.append("zip"') &&
       submitBody.indexOf('form.append("zip"') > submitBody.indexOf("CONFIG.TURNSTILE_FIELD") &&
@@ -1398,7 +1418,7 @@ async function main() {
     recordedLine.includes("这个 id 已被上传过") &&
       recordedLine.includes("已从这一套里摘出去") &&
       recordedLine.includes("它不进 manifest") &&
-      recordedLine.includes("口令那一串按剩下的") &&
+      recordedLine.includes("签名那一串按剩下的") &&
       recordedLine.includes("分不清是谁上传的") &&
       recordedLine.includes("查不到还在待审的那一份") &&
       /namesOf\(recorded\)/.test(recordedLine),
@@ -1435,7 +1455,7 @@ async function main() {
   check(
     "提交是整套走的：一次动作只发一个 POST，带那一份共用的 nonce 与逐枚声明的 sha256；出现第二个 await submitContribution( 就要先说清它凭什么能连着发",
     /async function uploadBatch\(\)/.test(appSrc) &&
-      /const \{ pr, modules \} = await submitContribution\(payload, \{/.test(appSrc) &&
+      /const \{ pr, modules, session \} = await submitContribution\(payload, \{/.test(appSrc) &&
       (appSrc.match(/await submitContribution\(/g) || []).length === 1 &&
       /nonce: state\.nonce,/.test(batchPayloadSrc) &&
       /sha256: card\.zipSha,/.test(batchPayloadSrc) &&
@@ -1606,7 +1626,7 @@ async function main() {
     "整套的诚实说法（§17.4 / §17.5）：一个结论说整套 + 逐枚报明细（落盘 sha256 是服务端实算那份），不许出现「一半传上了」那种状态",
     !/本次投稿已提交|已经全部提交完成/.test(appSrc) &&
       !/失败只算在这一枚上/.test(appSrc) &&
-      /const \{ pr, modules \} = await submitContribution\(payload/.test(appSrc) &&
+      /const \{ pr, modules, session \} = await submitContribution\(payload/.test(appSrc) &&
       /枚已受理，一个 PR 已开/.test(appSrc) &&
       /这一次落盘的 \$\{res\.modules\.length\} 枚/.test(appSrc) &&
       /服务端实算 sha256/.test(appSrc) &&
@@ -1616,7 +1636,42 @@ async function main() {
     `逐枚明细=${/这一次落盘的/.test(appSrc)} 全有全无那一句=${/语义全有全无/.test(appSrc)}`
   );
 
-  // 单枚路径的体验不能被这套队列弄啰嗦。
+  /* 长效会话令牌（§18）的接线：worker 那一半早就上线了（/session/check、submit 读 fields.session、
+     走令牌来的不烧口令、成功应答恒带 session 键），而前端这一半曾经断成三截 ——
+     ① api.js 把应答里的 session 丢掉；② batchPayload / multipart 从来不把令牌发出去；
+     ③ 上传成功后那一句 `adoptSession(res)` 里的 `res` 根本没定义（ESM 严格模式 ⇒ 抛
+     ReferenceError ⇒ 被同一个 try 的 catch 抓住 ⇒ **每一次成功上传都显示失败**）。
+     三处都是「界面与网络上真发生的事说的不是同一件事」，而当时 230 条断言全绿 —— 因为
+     没有一条看这条链。下面三条各自钉一处，任何一处再被改回去都必须当场红。 */
+  check(
+    "长效会话令牌的接线三截都通：应答里的 session 不丢、令牌随 multipart 发出去、成功那一句不许引用不存在的变量",
+    /session: json\.session \?\? null/.test(apiSrc) &&
+      /form\.append\("session", batch\.session \|\| ""\)/.test(apiSrc) &&
+      /session: sessionFor\(fieldValue\("coolapkUid"\)\) && state\.session \? state\.session\.token : ""/.test(batchPayloadSrc) &&
+      /adoptSession\(\{ session \}\);/.test(appSrc) &&
+      !/adoptSession\(res\);/.test(appSrc),
+    `api 应答带 session=${/session: json\.session/.test(apiSrc)} multipart 带 session=${/form\.append\("session"/.test(apiSrc)} payload 带 session=${/session: sessionFor/.test(batchPayloadSrc)} adoptSession 调用=${/adoptSession\(\{ session \}\);/.test(appSrc)}`
+  );
+
+  /* 第四截：/session/check 的应答只往上带 `ok` 是不够的。
+     那个端点回的是整张记录（uid / nickname / avatar / level / expiresAt），而
+     sessionFor 与 refreshSession 靠 `uid` 判「这张令牌是不是属于输入框里这串 UID」。
+     只传 ok ⇒ 这个判据永远拿不到 uid ⇒ 令牌等于没生效，页面会一直说「每次都得改签名」，
+     而界面上看不出任何报错（正是那种「看着好好的、其实没生效」）。
+     切片只取 checkSession 自己那一段 —— revokeSession 里同款 `{ ok }` 是正解，不该被这条带红。 */
+  const checkSessionSrc = apiSrc.slice(
+    apiSrc.indexOf("export async function checkSession("),
+    apiSrc.indexOf("export async function revokeSession(")
+  );
+  check(
+    "/session/check 的应答整张往上带（uid 尤其）：只传 ok 会让会话永远认不出属于谁",
+    checkSessionSrc.length > 200 &&
+      /uid: json\.uid === undefined \|\| json\.uid === null \? "" : String\(json\.uid\)/.test(checkSessionSrc) &&
+      /expiresAt: Number\(json\.expiresAt\) \|\| 0/.test(checkSessionSrc) &&
+      !/return \{ ok: json && json\.ok === true \};/.test(checkSessionSrc),
+    `checkSession 带 uid=${/uid: json\.uid/.test(checkSessionSrc)} 带 expiresAt=${/expiresAt: Number\(json\.expiresAt\)/.test(checkSessionSrc)} 切片长度=${checkSessionSrc.length}`
+  );
+
   // 单枚路径的体验不能被这套队列弄啰嗦。
   check(
     "解析是串行的（一批一枚一枚解），中途点卡只记下来不抢租约",
@@ -1637,8 +1692,8 @@ async function main() {
   const singleProof = /nonceText = state\.cards\.length > 1/.test(gateBody);
   check(
     "只有一枚时口令那句仍是原来那一句（「上传口令已生成（填进酷安签名）」原样留着）",
-    singleProof && gateBody.includes('"上传口令已生成（填进酷安签名）"'),
-    "单枚的口令文案被改写了"
+    singleProof && gateBody.includes('"签名串已生成（请填进酷安签名）"'),
+    "单枚的签名串文案被改写了"
   );
   check(
     "文件选择确实开了多选，拖拽也按 FileList 走（不是只取 files[0]）",

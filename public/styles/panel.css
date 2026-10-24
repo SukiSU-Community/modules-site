@@ -2773,6 +2773,454 @@ mark {
   }
 }
 
+/* ==========================================================================
+   模块投稿 —— ZIP 图标墙 / 元数据舞台 / 验证通过动画 / 会话条
+   本节只新增类名，不动上面任何一条既有规则；颜色一律走设计令牌，
+   所以 :root 深色与 [data-theme="light"] 浅色两套主题自动成立。
+   ========================================================================== */
+
+/* —— 1. ZIP 图标墙：一枚 zip 一格 —— */
+.zipwall {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+
+.zipcard {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel-2);
+  overflow: hidden;
+  transition: border-color 0.18s var(--ease), box-shadow 0.18s var(--ease),
+    opacity 0.18s var(--ease);
+}
+
+/* 当前正在编辑的那一枚 */
+.zipcard.is-current {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-wash);
+}
+
+/* 本轮已经记过账的那一枚：压暗，避免同一枚被重复投 */
+.zipcard.is-recorded {
+  opacity: 0.55;
+}
+
+/* 整块可点：内容居中，上下留白略多于左右，视觉上更像一枚图标 */
+.zipcard__pick {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 14px 10px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.zipcard__pick:hover {
+  background: var(--btn-hover);
+}
+
+.zipcard__pick:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+
+.zipcard__ico {
+  width: 38px;
+  height: 38px;
+  color: var(--amber);
+  opacity: 0.9;
+  display: grid;
+  place-items: center;
+}
+
+/* 图标由内联 SVG 画，撑满 38px 槽位（不引入新类名，只挂着改子元素） */
+.zipcard__ico svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* 模块 ID 是这一格的主标题：只给一行，超长省略，不换行把格子顶高 */
+.zipcard__id {
+  width: 100%;
+  text-align: center;
+  font: 600 13px/1.35 var(--mono);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zipcard__meta {
+  font: 500 11px/1.5 var(--mono);
+  color: var(--ink-3);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+}
+
+/* 状态标签：外观直接复用 .chip。它跟在版本行下面走正常流（贴角会压住图标，
+   而且「没收录 · 可上传」这种长句在 148px 的格子里根本放不下），所以这里只缩一档。 */
+.zipcard__st {
+  transform: scale(0.9);
+  transform-origin: center;
+  margin-top: 2px;
+}
+
+/* 移除按钮：平时藏起来，鼠标进卡片或键盘进入才出现，免得墙上一片叉 */
+.zipcard__x {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  background: var(--panel-3);
+  color: var(--ink-3);
+  font: 600 13px/1 var(--mono);
+  cursor: pointer;
+  display: none;
+  place-items: center;
+}
+
+.zipcard:hover .zipcard__x,
+.zipcard:focus-within .zipcard__x {
+  display: grid;
+}
+
+.zipcard__x:hover {
+  border-color: var(--red-line);
+  color: var(--red);
+}
+
+/* 为什么不能传：一行红字说明，限在卡片宽度内换行 */
+.zipcard__why {
+  display: block;
+  padding: 0 10px 9px;
+  font: 500 10.5px/1.5 var(--mono);
+  color: var(--red);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+/* 已有卡片时上传框收窄成一条，把纵向空间全让给图标墙 */
+.drop.is-full {
+  grid-template-columns: auto 1fr;
+  place-items: center start;
+  padding: 12px 14px;
+  gap: 10px;
+  text-align: left;
+  border-style: solid;
+}
+
+.drop.is-full .drop__glyph {
+  width: 22px;
+  height: 22px;
+}
+
+.drop.is-full .drop__t {
+  font-size: 13px;
+}
+
+.drop.is-full .drop__s {
+  display: none;
+}
+
+/* —— 2. 舞台：02 区元数据轮播（左右露头 + 箭头 + 圆点） —— */
+.stage {
+  position: relative;
+  overflow: hidden;
+  padding: 0 0 6px;
+}
+
+.stage__rail {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 左右邻居只露一窄条：看得出「还有别的」，但不抢主卡的注意力 */
+.stage__peek {
+  position: absolute;
+  top: 10px;
+  width: 12%;
+  min-width: 56px;
+  max-width: 120px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel-2);
+  padding: 10px 8px;
+  opacity: 0.5;
+  pointer-events: auto;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
+}
+
+.stage__peek--prev {
+  left: 0;
+  transform: translateX(-2%);
+}
+
+.stage__peek--next {
+  right: 0;
+  transform: translateX(2%);
+}
+
+.stage__peek:hover {
+  opacity: 0.85;
+}
+
+.stage__peek-id {
+  font: 600 11px/1.35 var(--mono);
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage__peek-nm {
+  font: 500 10.5px/1.4 var(--sans);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage__peek-ver {
+  font: 500 10px/1.4 var(--mono);
+  color: var(--ink-3);
+}
+
+/* 主卡两侧各让 13%：既不压住露头的窄条，也不至于窄到读不出元数据 */
+.stage__main {
+  position: relative;
+  z-index: 1;
+  margin: 0 13%;
+  transition: transform 0.26s var(--ease), opacity 0.26s var(--ease);
+}
+
+/* 切换过渡：先淡下去再换内容，避免 id 串台的闪烁 */
+.stage.is-switching .stage__main {
+  opacity: 0.35;
+  transform: scale(0.985);
+}
+
+/* 横向拖拽换枚：按住时给个「抓起来了」的手感，松手就回。
+   touch-action: pan-y 让竖直滚动照常、横向手势留给脚本 —— 不加这一条，
+   手机上横划会被浏览器当成翻页吃掉，滑动换枚在触屏上根本触发不到。 */
+.stage__main {
+  touch-action: pan-y;
+}
+
+.stage.is-dragging .stage__main {
+  cursor: grabbing;
+  opacity: 0.92;
+}
+
+.stage__arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  background: var(--panel-3);
+  color: var(--ink-2);
+  font: 600 15px/1 var(--mono);
+  cursor: pointer;
+  display: none;
+  place-items: center;
+}
+
+/* 只有多枚时才出箭头：单枚时那两个圆是纯噪声 */
+.stage.is-multi .stage__arrow {
+  display: grid;
+}
+
+.stage__arrow:hover {
+  border-color: var(--amber-line);
+  color: var(--amber);
+}
+
+.stage__arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.stage__arrow--prev {
+  left: 2px;
+}
+
+.stage__arrow--next {
+  right: 2px;
+}
+
+.stage__dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 0 0;
+}
+
+.stage__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  background: var(--line-2);
+  cursor: pointer;
+}
+
+/* 当前那一枚拉成短横，位置一眼可读 */
+.stage__dot.is-on {
+  background: var(--amber);
+  width: 16px;
+  border-radius: 3px;
+}
+
+/* 窄屏：只留主卡，露头与箭头都收掉，靠左右滑动切换 */
+@media (max-width: 760px) {
+  .stage__main {
+    margin: 0 4%;
+  }
+  .stage__peek {
+    display: none;
+  }
+  .stage__arrow {
+    display: none !important;
+  }
+}
+
+/* —— 3. 验证通过：勾号描边 + 头像淡入 —— */
+.uid__mark {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  color: var(--mint);
+  opacity: 0;
+  transform: scale(0.8);
+}
+
+.uid__mark-ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 57;
+  stroke-dashoffset: 57;
+}
+
+.uid__mark-tick {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 14;
+  stroke-dashoffset: 14;
+}
+
+.status.is-verified .uid__mark {
+  animation: uidMarkIn 0.42s var(--ease) forwards;
+}
+
+.status.is-verified .uid__mark-ring {
+  animation: uidRing 0.46s var(--ease) 0.04s forwards;
+}
+
+.status.is-verified .uid__mark-tick {
+  animation: uidTick 0.3s var(--ease) 0.3s forwards;
+}
+
+.uid__avatar.is-verified {
+  animation: uidAvatar 0.4s var(--ease) forwards;
+}
+
+@keyframes uidMarkIn {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes uidRing {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes uidTick {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes uidAvatar {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* —— 4. 会话条：身份已验证，90 天内免改签名 —— */
+.session {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--mint-line-soft);
+  border-radius: var(--r);
+  background: linear-gradient(90deg, var(--mint-wash), transparent 62%);
+}
+
+.session__t {
+  font: 600 12.5px/1.4 var(--sans);
+  color: var(--ink);
+}
+
+.session__d {
+  font: 400 11.5px/1.6 var(--mono);
+  color: var(--ink-3);
+}
+
+.session__btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--panel-3);
+  color: var(--ink-2);
+  font: 600 11.5px/1 var(--mono);
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
+.session__btn:hover {
+  border-color: var(--red-line);
+  color: var(--red);
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -2783,5 +3231,22 @@ mark {
     animation-duration: 0.001s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001s !important;
+  }
+
+  /* 本节新增组件：降级时不留描边过程，直接呈现最终态 */
+  .status.is-verified .uid__mark,
+  .status.is-verified .uid__mark-ring,
+  .status.is-verified .uid__mark-tick,
+  .uid__avatar.is-verified {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+    stroke-dashoffset: 0;
+  }
+  .stage__main {
+    transition: none;
+  }
+  .zipcard {
+    transition: none;
   }
 }
