@@ -84,9 +84,8 @@
         <nav class="nav" aria-label="站点分区">
           <a href="#/submit"><i>01</i>上传</a>
           <a href="#/index"><i>02</i>已收录</a>
-          <a href="#/incidents"><i>03</i>处置公示</a>
-          <a href="#/report"><i>04</i>举报</a>
-          <a href="#/about"><i>05</i>说明</a>
+          <a href="#/moderation?tab=ledger"><i>03</i>举报与处置</a>
+          <a href="#/about"><i>04</i>说明</a>
         </nav>
         <button class="theme" id="theme" type="button" title="切换显示模式">
           <svg class="theme__ico theme__ico--moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -141,6 +140,7 @@
         </div>
 
         <form id="form" novalidate>
+          <div class="form__col">
           <!-- 01 目标模块 -->
           <section class="panel rise" aria-labelledby="p1t">
             <div class="panel__hd">
@@ -262,7 +262,9 @@
               </div>
             </div>
           </section>
+          </div>
 
+          <div class="form__col">
           <!-- 03 出处与身份 -->
           <section class="panel rise" aria-labelledby="p3t">
             <div class="panel__hd">
@@ -360,6 +362,7 @@
               <span class="count hide-sm" id="gate-note">先把上面几项填齐</span>
             </div>
           </section>
+          </div>
         </form>
       </section>
 
@@ -393,171 +396,190 @@
         <div class="empty" id="index-state" hidden></div>
       </section>
 
-      <!-- ====================== 03 处置公示 ====================== -->
-      <section class="view" id="view-incidents" aria-labelledby="h-incidents">
+      <!-- ====================== 03 举报与处置 ====================== -->
+      <section class="view" id="view-moderation" aria-labelledby="h-moderation">
         <div class="hero rise">
-          <h1 id="h-incidents">处置<span class="hi">公示</span></h1>
+          <h1 id="h-moderation">举报与<span class="hi">处置</span></h1>
           <p class="hero__lede">
             模块拿到的是 root 权限，一个坏包毁掉的是整台设备。所以这里不私下处理：每一次下架与拒收都逐条公开，带上可核对的凭据（模块 ID / 包体 sha256 / 上传人酷安 UID），随 git 历史长期留档。
             对制作、传播恶意模块或二改他人作品夹带私货的行为，我们保留向公安机关报案、<span class="hl">依法追究法律责任</span>的权利。
           </p>
-          <p class="readout" id="inc-readout" aria-live="polite"></p>
-          <!-- 举报队列那一格（服务端每次定时器跑完记一笔，这里只读那一次）。
-               默认藏着：拿不到可信的数时不显示一个 0 —— 「没有在等」与「我们不知道」相反。 -->
-          <p class="readout" id="inc-queue" aria-live="polite" hidden></p>
         </div>
 
-        <div class="tools rise">
-          <div class="search">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-              <circle cx="10.5" cy="10.5" r="6.5" />
-              <path d="M15.5 15.5 21 21" />
-            </svg>
-            <input
-              type="text"
-              id="q-inc"
-              class="mono"
-              placeholder="按模块 ID / 酷安 UID / sha256 过滤"
-              aria-label="过滤处置记录"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </div>
-          <span class="count" id="inc-count"></span>
+        <!-- 两半的切换器：URL 里始终写着在哪一半（?tab=report|ledger），
+             刷新、收藏、发给别人都落在同一处；这也是键盘左右箭头要移动的那一组。 -->
+        <div class="seg rise" id="mod-tabs" role="tablist" aria-label="举报与处置">
+          <button type="button" class="seg__btn" id="tab-report" role="tab" aria-selected="false"
+            aria-controls="panel-report" data-tab="report" tabindex="-1">举报</button>
+          <button type="button" class="seg__btn" id="tab-ledger" role="tab" aria-selected="true"
+            aria-controls="panel-ledger" data-tab="ledger">处置公示</button>
         </div>
 
-        <div id="inc-people" class="pc-wall" aria-live="polite"></div>
-        <div id="inc-detail" class="pc-detail" hidden></div>
+        <div id="panel-report" role="tabpanel" aria-labelledby="tab-report" hidden>
+          <div class="split">
+            <div class="split__main">
+            <p class="mod__lede">
+              已经进公开索引的模块做了用户没同意的事，可以在这里报。硬的门槛只有一条：
+              <b>实名 + 在包里逐字定位到你引用的那段字节</b>。定位不到就判「与包体不符」，
+              不会被写成对作者的指控 —— 这条门槛防的就是「谁写得漂亮谁杀人」。
+            </p>
 
-        <div class="inc__layerhead" id="inc-list-head" hidden>
-          <span class="inc__layerhead-t">按条</span>
-          <span class="inc__layerhead-s">上面那一层按人聚，只聚得出台账里写了 <code>subject</code> 的那些；这一层是台账的全部条目，一条不落，按理由分组。</span>
-        </div>
-        <div id="inc-groups"></div>
-        <div class="empty" id="inc-state" hidden></div>
+            <p class="readout" id="rp-readout" aria-live="polite"></p>
 
-        <div class="panel rise doc inc-appeal">
-          <h3><span>APPEAL</span>不服某条处置，去哪儿说话</h3>
-          <p>
-            唯一正式渠道是<strong>索引仓库的 issue</strong>。被下架的：在 issue 里说明这一条哪里不对、
-            附上你的证据；被审核判红、没进索引的：在自己的上传 PR 里说明。
-          </p>
-          <p>
-            一条下架记录上的「证据」现在是一枚<strong>机器章</strong>（<code>ci:audit@&lt;提交&gt;</code>）：
-            它写的是这条处置被哪一次运行钉死，旁边那条命令任何人都能重跑一遍。
-            <strong>这里没有人可以签东西进来</strong> —— 本站只有机器审核，所以翻面的办法不是找人，
-            是把证据摆到那一次运行看得见的地方。
-          </p>
-          <p class="inc-appeal__where" id="inc-appeal-where"></p>
-          <p class="inc-appeal__note">
-            这里没有时限承诺，也没有「一定回复」。能承诺的是：每一次放行或下架都留下可以复验的运行和证据，
-            所以「谁决定的」这个问题永远有答案。站内聊天可以说话，但<strong>结论只认 issue</strong>
-            —— 帖子会删、评论会折叠，那些都不构成可复验的记录。
-          </p>
-        </div>
-
-        <div class="panel rise doc inc-how">
-          <h3><span>LEGEND</span>这些字段是什么意思</h3>
-          <ul class="inc-legend" id="inc-legend"></ul>
-        </div>
-      </section>
-
-      <!-- ====================== 04 举报 ====================== -->
-      <section class="view" id="view-report" aria-labelledby="h-report">
-        <div class="hero rise">
-          <h1 id="h-report">举报<span class="hi">已上架的模块</span></h1>
-          <p class="hero__lede">
-            已经进公开索引的模块做了用户没同意的事，可以在这里报。硬的门槛只有一条：
-            <b>实名 + 在包里逐字定位到你引用的那段字节</b>。定位不到就判「与包体不符」，
-            不会被写成对作者的指控 —— 这条门槛防的就是「谁写得漂亮谁杀人」。
-          </p>
-          <p class="readout" id="rp-readout" aria-live="polite"></p>
-        </div>
-
-        <div class="panel rise">
-          <div class="field">
-            <div class="field__lab"><label for="rp-id">被举报的模块 ID<span class="req">*</span></label></div>
-            <input class="mono" type="text" id="rp-id" placeholder="在 02 那一屏那一行小灰字上复制" autocomplete="off" spellcheck="false" required />
-            <p class="field__help">举报只管<b>已经进公开索引</b>的模块。还没上架的走 01 那一条路，不在这里。</p>
-          </div>
-          <div class="field">
-            <div class="field__lab"><label for="rp-vc">哪一版（versionCode）</label></div>
-            <input class="mono" type="text" id="rp-vc" inputmode="numeric" placeholder="留空 = 按索引里最新那一枚判" autocomplete="off" spellcheck="false" />
-            <p class="field__help" id="rp-vc-help">读者装在身上的一般是最新那一版，所以留空是默认答案；要指旧那一版就填它的 code。</p>
-          </div>
-          <div class="field">
-            <div class="field__lab"><label for="rp-reason">你凭什么说它恶意<span class="req">*</span></label></div>
-            <textarea id="rp-reason" rows="3" placeholder="一句话说清「做了用户没同意的事」的那件事"></textarea>
-            <p class="field__help">这一格是给人看的叙述，<b>不当证据</b>。要指控的那一行，请从包里原样复制进下面那几格。</p>
-          </div>
-          <div class="field">
-            <div class="field__lab">
-              <span>包内逐字引用<span class="req">*</span></span>
-              <span class="auto" id="rp-ev-count"></span>
+            <div class="panel rise panel--form">
+              <div class="field field--half">
+                <div class="field__lab"><label for="rp-id">被举报的模块 ID<span class="req">*</span></label></div>
+                <input class="mono" type="text" id="rp-id" placeholder="在 02 那一屏那一行小灰字上复制" autocomplete="off" spellcheck="false" required />
+                <p class="field__help">举报只管<b>已经进公开索引</b>的模块。还没上架的走 01 那一条路，不在这里。</p>
+              </div>
+              <div class="field field--half">
+                <div class="field__lab"><label for="rp-vc">哪一版（versionCode）</label></div>
+                <input class="mono" type="text" id="rp-vc" inputmode="numeric" placeholder="留空 = 按索引里最新那一枚判" autocomplete="off" spellcheck="false" />
+                <p class="field__help" id="rp-vc-help">读者装在身上的一般是最新那一版，所以留空是默认答案；要指旧那一版就填它的 code。</p>
+              </div>
+              <div class="field">
+                <div class="field__lab"><label for="rp-reason">你凭什么说它恶意<span class="req">*</span></label></div>
+                <textarea id="rp-reason" rows="3" placeholder="一句话说清「做了用户没同意的事」的那件事"></textarea>
+                <p class="field__help">这一格是给人看的叙述，<b>不当证据</b>。要指控的那一行，请从包里原样复制进下面那几格。</p>
+              </div>
+              <div class="field">
+                <div class="field__lab">
+                  <span>包内逐字引用<span class="req">*</span></span>
+                  <span class="auto" id="rp-ev-count"></span>
+                </div>
+                <div id="rp-ev-list"></div>
+                <p class="field__help">
+                  下面这几条会逐条拿去在归档里<b>按字节</b>找：大小写差一个字母、把全角标点打成半角、
+                  被换行拆开的那一行，都算<b>没定位到</b> —— 门槛故意不松，松了它就只剩一句漂亮话。
+                </p>
+                <p class="field__help">
+                  <button type="button" class="btn btn--ghost btn--sm" id="rp-ev-add">再加一条</button>
+                </p>
+              </div>
+              <div class="field">
+                <div class="field__lab"><label for="rp-uid">你的酷安 UID<span class="req">*</span></label></div>
+                <input class="mono" type="text" id="rp-uid" placeholder="4-12 位数字" inputmode="numeric" autocomplete="off" spellcheck="false" required />
+                <p class="field__help">
+                  打开酷安 App「我的」→ <b>点头像进个人主页</b> → 右上角<b>三点</b> →
+                  「查看我的资料」里的 <b>用户 UID</b>。填你自己的 —— 这条记录会署你的名字。
+                </p>
+              </div>
+              <div class="field">
+                <div class="field__lab"><label for="rp-nick">你的酷安昵称<span class="req">*</span></label></div>
+                <input type="text" id="rp-nick" placeholder="与你的账号同名" autocomplete="nickname" />
+                <p class="field__help">这一项只是自称：服务端按 UID 查回来的那份活值为准，改名的人不会被永久挡住。</p>
+              </div>
+              <div class="field" id="rp-proof-field">
+                <span class="field__lab">举报签名<span class="req">*</span></span>
+                <div class="proofs" id="rp-proof-list"></div>
+                <p class="field__help" id="rp-proof-help"></p>
+                <p class="field__help">
+                  打开酷安「我的 → 编辑资料 → 签名」，把上面那一串填进去并保存，再回来提交。
+                  这一串绑的是<b>被举报那一枚的模块 ID 与索引里那串包体 sha256</b>：换一枚、换一版都会算出另一串。
+                  它证明这个账号归你 —— 具名公示只认这个锚点，用别人的 UID 报不了。
+                </p>
+                <p class="field__help">
+                  <button type="button" class="btn btn--ghost btn--sm" id="rp-nonce-renew">换一串签名</button>
+                  提交成功后这一串就作废了（用过即废）；要再报另一枚，回来点这一下并重新抄签名。
+                </p>
+              </div>
+              <p class="field__err" id="rp-error" hidden></p>
+              <div class="btn-row cta-inline">
+                <button type="button" class="btn btn--go" id="rp-submit" disabled>提交举报</button>
+              </div>
             </div>
-            <div id="rp-ev-list"></div>
-            <p class="field__help">
-              下面这几条会逐条拿去在归档里<b>按字节</b>找：大小写差一个字母、把全角标点打成半角、
-              被换行拆开的那一行，都算<b>没定位到</b> —— 门槛故意不松，松了它就只剩一句漂亮话。
-            </p>
-            <p class="field__help">
-              <button type="button" class="btn btn--ghost btn--sm" id="rp-ev-add">再加一条</button>
-            </p>
-          </div>
-          <div class="field">
-            <div class="field__lab"><label for="rp-uid">你的酷安 UID<span class="req">*</span></label></div>
-            <input class="mono" type="text" id="rp-uid" placeholder="4-12 位数字" inputmode="numeric" autocomplete="off" spellcheck="false" required />
-            <p class="field__help">
-              打开酷安 App「我的」→ <b>点头像进个人主页</b> → 右上角<b>三点</b> →
-              「查看我的资料」里的 <b>用户 UID</b>。填你自己的 —— 这条记录会署你的名字。
-            </p>
-          </div>
-          <div class="field">
-            <div class="field__lab"><label for="rp-nick">你的酷安昵称<span class="req">*</span></label></div>
-            <input type="text" id="rp-nick" placeholder="与你的账号同名" autocomplete="nickname" />
-            <p class="field__help">这一项只是自称：服务端按 UID 查回来的那份活值为准，改名的人不会被永久挡住。</p>
-          </div>
-          <div class="field" id="rp-proof-field">
-            <span class="field__lab">举报签名<span class="req">*</span></span>
-            <div class="proofs" id="rp-proof-list"></div>
-            <p class="field__help" id="rp-proof-help"></p>
-            <p class="field__help">
-              打开酷安「我的 → 编辑资料 → 签名」，把上面那一串填进去并保存，再回来提交。
-              这一串绑的是<b>被举报那一枚的模块 ID 与索引里那串包体 sha256</b>：换一枚、换一版都会算出另一串。
-              它证明这个账号归你 —— 具名公示只认这个锚点，用别人的 UID 报不了。
-            </p>
-            <p class="field__help">
-              <button type="button" class="btn btn--ghost btn--sm" id="rp-nonce-renew">换一串签名</button>
-              提交成功后这一串就作废了（用过即废）；要再报另一枚，回来点这一下并重新抄签名。
-            </p>
-          </div>
-          <p class="field__err" id="rp-error" hidden></p>
-          <div class="btn-row cta-inline">
-            <button type="button" class="btn btn--go" id="rp-submit" disabled>提交举报</button>
+
+            <div class="panel rise" id="rp-result" hidden></div>
+            </div>
+            <aside class="split__side">
+            <div class="panel rise doc">
+              <h3><span>NEXT</span>提交之后会发生什么</h3>
+              <p>
+                这一发请求本身不动公开索引：成立与不成立都先写进一份<b>待办记录</b>，
+                应答里那句 <code>publicAction: none</code> 说的就是这一刻。
+              </p>
+              <p>
+                之后由本站的自动流程接手：定时器按批把排到的待办提成一条<b>公示 PR</b>，CI 再独立取一次归档，
+                <b>逐字节</b>核对你引用的那几段是不是真在包里 —— 门槛是「实名 + 包内逐字定位到」才下架，
+                核对上了才落下架、才在这一页挂出来。<b>全程没有人工签字那一步</b>，
+                所以别用它来赌气：它要么按证据成立，要么按证据不成立，中间没有人在看。
+              </p>
+              <p class="field__help">
+                这条路限流按 IP 与按 UID 各一根桶，与上传那 5 格/小时是分开的两本账：举报烧不到上传额度，反过来也不行。
+              </p>
+            </div>
+            </aside>
           </div>
         </div>
 
-        <div class="panel rise" id="rp-result" hidden></div>
+        <div id="panel-ledger" role="tabpanel" aria-labelledby="tab-ledger">
+          <div class="split">
+            <div class="split__main">
+            <p class="readout" id="inc-readout" aria-live="polite"></p>
+            <!-- 举报队列那一格（服务端每次定时器跑完记一笔，这里只读那一次）。
+                 默认藏着：拿不到可信的数时不显示一个 0 —— 「没有在等」与「我们不知道」相反。 -->
+            <p class="readout" id="inc-queue" aria-live="polite" hidden></p>
 
-        <div class="panel rise doc">
-          <h3><span>NEXT</span>提交之后会发生什么</h3>
-          <p>
-            这一发请求本身不动公开索引：成立与不成立都先写进一份<b>待办记录</b>，
-            应答里那句 <code>publicAction: none</code> 说的就是这一刻。
-          </p>
-          <p>
-            之后由本站的自动流程接手：定时器按批把排到的待办提成一条<b>台账 PR</b>，CI 再独立取一次归档，
-            <b>逐字节</b>核对你引用的那几段是不是真在包里 —— 门槛是「实名 + 包内逐字定位到」才下架，
-            核对上了才落下架、才在这一页挂出来。<b>全程没有人工签字那一步</b>，
-            所以别用它来赌气：它要么按证据成立，要么按证据不成立，中间没有人在看。
-          </p>
-          <p class="field__help">
-            这条路限流按 IP 与按 UID 各一根桶，与上传那 5 格/小时是分开的两本账：举报烧不到上传额度，反过来也不行。
-          </p>
+            <div class="tools rise">
+              <div class="search">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                  <circle cx="10.5" cy="10.5" r="6.5" />
+                  <path d="M15.5 15.5 21 21" />
+                </svg>
+                <input
+                  type="text"
+                  id="q-inc"
+                  class="mono"
+                  placeholder="按模块 ID / 酷安 UID / sha256 过滤"
+                  aria-label="过滤处置记录"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </div>
+              <span class="count" id="inc-count"></span>
+            </div>
+
+            <div id="inc-people" class="pc-wall" aria-live="polite"></div>
+            <div id="inc-detail" class="pc-detail" hidden></div>
+
+            <div class="inc__layerhead" id="inc-list-head" hidden>
+              <span class="inc__layerhead-t">按条</span>
+              <span class="inc__layerhead-s">上面那一层按人聚，只聚得出公示里写了 <code>subject</code> 的那些；这一层是公示的全部条目，一条不落，按理由分组。</span>
+            </div>
+            <div id="inc-groups"></div>
+            <div class="empty" id="inc-state" hidden></div>
+            </div>
+            <aside class="split__side">
+            <div class="panel rise doc inc-appeal">
+              <h3><span>APPEAL</span>不服某条处置，去哪儿说话</h3>
+              <p>
+                唯一正式渠道是<strong>索引仓库的 issue</strong>。被下架的：在 issue 里说明这一条哪里不对、
+                附上你的证据；被审核判红、没进索引的：在自己的上传 PR 里说明。
+              </p>
+              <p>
+                一条下架记录上的「证据」现在是一枚<strong>机器章</strong>（<code>ci:audit@&lt;提交&gt;</code>）：
+                它写的是这条处置被哪一次运行钉死，旁边那条命令任何人都能重跑一遍。
+                <strong>这里没有人可以签东西进来</strong> —— 本站只有机器审核，所以翻面的办法不是找人，
+                是把证据摆到那一次运行看得见的地方。
+              </p>
+              <p class="inc-appeal__where" id="inc-appeal-where"></p>
+              <p class="inc-appeal__note">
+                这里没有时限承诺，也没有「一定回复」。能承诺的是：每一次放行或下架都留下可以复验的运行和证据，
+                所以「谁决定的」这个问题永远有答案。站内聊天可以说话，但<strong>结论只认 issue</strong>
+                —— 帖子会删、评论会折叠，那些都不构成可复验的记录。
+              </p>
+            </div>
+
+            <div class="panel rise doc inc-how">
+              <h3><span>LEGEND</span>这些字段是什么意思</h3>
+              <ul class="inc-legend" id="inc-legend"></ul>
+            </div>
+            </aside>
+          </div>
         </div>
       </section>
 
-      <!-- ====================== 05 说明 ====================== -->
+      <!-- ====================== 04 说明 ====================== -->
       <section class="view" id="view-about" aria-labelledby="h-about">
         <div class="hero rise">
           <h1 id="h-about">为什么要<span class="hi">人人共建</span></h1>

@@ -32,22 +32,22 @@ export const CONFIG = {
   // （`max-age=60` + 弱 ETag，回源由索引仓库合并后那次 purge 之外的另一条路径保证新鲜）。
   // jsDelivr 那条地址仍然可用，当作后端挂掉时的备用订阅地址：
   //   'https://cdn.jsdelivr.net/gh/SukiSU-Community/modules-repo@main/json/modules.json'
-  // 台账不用单独填：公示页按同目录换文件名推导出 /dispositions.json，那个端点也存在。
+  // 公示地址不用单独填：公示那一半按同目录换文件名推导出 /dispositions.json，那个端点也存在。
   INDEX_URL: "https://sukisu-module-api.pages.dev/index.json",
 
-  // --- 处置台账（下架 / 拉黑）地址 -------------------------------------------
+  // --- 处置公示（下架 / 拉黑）地址 -------------------------------------------
   // 这里是**留空**用的：留空就从 INDEX_URL 换文件名的到 —— 在索引仓库里
   // json/modules.json 与 json/dispositions.json 是同一目录下的两个文件，
   // 抄一整条 URL 只会多出一个会漂移的定义处。
-  // 只有把台账放去了别处（另一个 CDN、另一个仓库）才需要显式填。
+  // 只有把公示放去了别处（另一个 CDN、另一个仓库）才需要显式填。
   //   例：'https://cdn.jsdelivr.net/gh/你的用户名/你的仓库@main/json/dispositions.json'
   DISPOSITIONS_URL: "",
 
   // --- 申诉与治理入口（索引仓库的 issue 列表）--------------------------------
-  // 处置公示页（#/incidents）末尾那段「不服去哪儿说话」用的就是这个地址。
-  // 为什么单独填、不从台账里某条 by 指针反推：一条处置的证据可以指向**别的**仓库的
+  // 「举报与处置」页的公示那一半（#/moderation?tab=ledger）末尾那段「不服去哪儿说话」用的就是这个地址。
+  // 为什么单独填、不从公示里某条 by 指针反推：一条处置的证据可以指向**别的**仓库的
   // issue（处置记录本来就允许引用别的讨论），拿它当「本仓库申诉入口」是猜的；
-  // 而台账为空时更是根本无从反推。申诉入口是一个决定，不是一个派生值。
+  // 而公示为空时更是根本无从反推。申诉入口是一个决定，不是一个派生值。
   // 留空时那一段会明说「地址还没配置」，并把每条自己的「证据」链接指回可查的地方。
   //   例：'https://github.com/你的用户名/你的仓库/issues'
   ISSUES_URL: "https://github.com/SukiSU-Community/modules-repo/issues",

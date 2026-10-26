@@ -93,7 +93,7 @@ const state = {
   intakeError: "",
   index: null,
   indexError: null,
-  // 处置台账。ledgerTried 只用于「浏览页搜不到时顺手查一次台账」这条懒路径，
+  // 处置公示。ledgerTried 只用于「浏览页搜不到时顺手查一次公示」这条懒路径，
   // 避免每次搜不到都去发一次请求。
   ledger: null,
   ledgerError: null,
@@ -261,7 +261,7 @@ const isRecorded = (card) => checkOf(card) === "recorded";
  *   ① 被 /check 判为 recorded 的 —— 它不进集合、不进签名、不进 manifest；
  *   ② 已经拿到后端回执的（card.ack）—— 那几枚的字节已经在一个 PR 里了，跟着下一次再发一遍
  *      就是拿同一个 (id, versionCode) 撞第二次（§17.4 之外那一格：pending/CI 的重复）。
- *      它们留在队列里当这一屏的台账，想投新的就清空或移除，新选的那枚自成下一套。
+ *      它们留在队列里当这一屏的公示，想投新的就清空或移除，新选的那枚自成下一套。
  */
 function submitTargets() {
   return state.cards.filter((c) => c.file && !isRecorded(c) && !c.ack);
@@ -410,26 +410,71 @@ function setCheck(card, status, key, why) {
 const VIEWS = {
   submit: { el: "#view-submit", label: "上传" },
   index: { el: "#view-index", label: "已收录" },
-  incidents: { el: "#view-incidents", label: "处置公示" },
-  report: { el: "#view-report", label: "举报" },
+  moderation: { el: "#view-moderation", label: "举报与处置" },
   about: { el: "#view-about", label: "说明" },
+};
+
+// 举报与处置是同一屏的两半：tab 写在查询串里，永远显式（连默认的那一半也写），
+// 这样刷新、收藏、贴给别人，落点都唯一。旧的两条地址只是入口，进来后会被 replaceState 收敛。
+const MOD_TABS = ["ledger", "report"];
+const LEGACY_VIEWS = {
+  incidents: { tab: "ledger" },
+  report: { tab: "report" },
 };
 
 function parseHash() {
   const raw = location.hash.replace(/^#\/?/, "");
   const [path, search] = raw.split("?");
-  const name = VIEWS[path] ? path : "submit";
   const params = new URLSearchParams(search || "");
+  const name = VIEWS[path] ? path : LEGACY_VIEWS[path] ? "moderation" : "submit";
+  if (name === "moderation") {
+    // 旧地址把 tab 编在路径里；新地址用 ?tab= 指定，缺省与非法值一律落在公示。
+    const asked = LEGACY_VIEWS[path] ? LEGACY_VIEWS[path].tab : params.get("tab");
+    const tab = MOD_TABS.includes(asked) ? asked : "ledger";
+    params.set("tab", tab);
+    return { name, params, tab, legacy: Boolean(LEGACY_VIEWS[path]) };
+  }
   return { name, params };
 }
 
+// 把地址栏收敛成规范写法；别名只做一次性入口，不留在后退链上。
+// tab 一律排在最前：同一屏的两个地址，只有这一格不同，排头才能一眼看出差异所在。
+function canonicalHash(name, params) {
+  const rest = new URLSearchParams();
+  let tab = "";
+  for (const [k, v] of params) {
+    if (k === "tab") tab = v;
+    else rest.append(k, v);
+  }
+  const parts = [];
+  if (tab) parts.push(`tab=${encodeURIComponent(tab)}`);
+  const q = rest.toString();
+  if (q) parts.push(q);
+  return `#/${name}${parts.length ? `?${parts.join("&")}` : ""}`;
+}
+
+// 不在 moderation 那一屏时返回空串：各处「晚到的数据该重画哪一半」都问这一句，
+// 免得每个回调都自己拼 name + tab 两层判断。
+function currentModTab() {
+  const { name, tab } = parseHash();
+  return name === "moderation" ? tab : "";
+}
+
 function renderRoute() {
-  const { name, params } = parseHash();
+  const { name, params, tab, legacy } = parseHash();
+  if (legacy || (name === "moderation" && location.hash !== canonicalHash(name, params))) {
+    history.replaceState(null, "", canonicalHash(name, params));
+  }
+  // 版心按视图分档：数据密集的几屏在宽屏上放宽（见 panel.css「宽屏版心」），
+  // 因此根元素上要挂一个「现在是哪一屏」，CSS 才有得选。文字为主的说明页不参与。
+  document.documentElement.dataset.view = name;
   for (const [key, view] of Object.entries(VIEWS)) {
     $(view.el).classList.toggle("is-active", key === name);
   }
   $$(".nav a").forEach((a) => {
-    const isNow = a.getAttribute("href") === `#/${name}`;
+    // 导航上那条写的是 `#/moderation?tab=ledger`，比对时只看路径那一半。
+    const href = a.getAttribute("href") || "";
+    const isNow = href.split("?")[0] === `#/${name}`;
     if (isNow) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   });
@@ -444,16 +489,87 @@ function renderRoute() {
     $("#q-inc").value = state.query;
   }
   if (name === "index") renderIndex();
-  if (name === "incidents") renderIncidents();
-  if (name === "report") {
-    // 从 02 那一屏「举报这一枚」进来时带着 id 与 versionCode：那是用户不必重打的两格，
-    // 也是签名的两个来源 —— 预填错了就等于签名绑错，所以只认索引里真有的那一枚（reportTarget 判）。
-    if (params.has("id")) $("#rp-id").value = params.get("id") || "";
-    if (params.has("vc")) $("#rp-vc").value = params.get("vc") || "";
-    if (!state.index) loadIndex();
-    renderReport();
+  if (name === "moderation") {
+    renderModerationTabs(tab);
+    if (tab === "ledger") {
+      renderIncidents();
+    } else {
+      // 从 02 那一屏「举报这一枚」进来时带着 id 与 versionCode：那是用户不必重打的两格，
+      // 也是签名的两个来源 —— 预填错了就等于签名绑错，所以只认索引里真有的那一枚（reportTarget 判）。
+      if (params.has("id")) $("#rp-id").value = params.get("id") || "";
+      if (params.has("vc")) $("#rp-vc").value = params.get("vc") || "";
+      if (!state.index) loadIndex();
+      renderReport();
+    }
   }
   window.scrollTo({ top: 0, behavior: "auto" });
+}
+
+/* ---------------------------------------- 举报与处置：两半的切换器（tabs） */
+
+// 焦点在哪一半就跟着切哪一半：这是 tablist 的默认键盘约定（方向键即切换，不用先 Enter），
+// 而 Tab 键仍然只是「从切换器走进这一半的内容」，不参与左右横跳。
+function renderModerationTabs(tab) {
+  const keepFocus = $("#mod-tabs")?.contains(document.activeElement);
+  $$("#mod-tabs .seg__btn").forEach((btn) => {
+    const isNow = btn.dataset.tab === tab;
+    btn.setAttribute("aria-selected", isNow ? "true" : "false");
+    btn.tabIndex = isNow ? 0 : -1;
+    btn.classList.toggle("is-on", isNow);
+    if (isNow && keepFocus) btn.focus();
+  });
+  const panelLedger = $("#panel-ledger");
+  const panelReport = $("#panel-report");
+  if (panelLedger) panelLedger.hidden = tab !== "ledger";
+  if (panelReport) panelReport.hidden = tab !== "report";
+}
+
+function switchModerationTab(tab) {
+  if (!MOD_TABS.includes(tab)) return;
+  const { name, params } = parseHash();
+  if (name !== "moderation") return;
+  // 每一半只留自己看得懂的参数：举报认 id / vc，公示认 q。
+  // 不剪的话会得到 `?tab=ledger&id=…` 这种「公示按某条记录过滤」的假象 —— 而公示根本不认 id。
+  // 剪掉不影响填过的东西：表单值在 DOM 里，切回来还在。
+  const keep = tab === "report" ? ["id", "vc"] : ["q"];
+  for (const k of [...params.keys()]) {
+    if (k !== "tab" && !keep.includes(k)) params.delete(k);
+  }
+  params.set("tab", tab);
+  const next = canonicalHash(name, params);
+  // 切 tab 写一条历史：浏览器后退能退回到另一半，这是「来回看一眼」的常规预期。
+  // 但同一个 tab 不重复写，免得连点两下多出一条死记录。
+  if (location.hash === next) return;
+  location.hash = next.slice(1);
+}
+
+function wireModerationTabs() {
+  const tabs = $$("#mod-tabs .seg__btn");
+  if (!tabs.length) return;
+  tabs.forEach((btn, i) => {
+    btn.addEventListener("click", () => switchModerationTab(btn.dataset.tab));
+    btn.addEventListener("keydown", (e) => {
+      // Home / End 直接跳到两头：这两枚只是两半，但键盘约定照 APG 走，少一条就是一处「按了没反应」。
+      if (e.key === "Home" || e.key === "End") {
+        e.preventDefault();
+        const next = tabs[e.key === "Home" ? 0 : tabs.length - 1];
+        next.focus();
+        switchModerationTab(next.dataset.tab);
+        return;
+      }
+      const step =
+        e.key === "ArrowRight" || e.key === "ArrowDown"
+          ? 1
+          : e.key === "ArrowLeft" || e.key === "ArrowUp"
+            ? -1
+            : 0;
+      if (!step) return;
+      e.preventDefault();
+      const next = tabs[(i + step + tabs.length) % tabs.length];
+      next.focus();
+      switchModerationTab(next.dataset.tab);
+    });
+  });
 }
 
 window.addEventListener("hashchange", renderRoute);
@@ -3041,7 +3157,7 @@ function renderIndex() {
         )
       );
       const why = node("a", "btn btn--ghost btn--sm", "去看这条处置");
-      why.href = `#/incidents?q=${encodeURIComponent(q)}`;
+      why.href = `#/moderation?tab=ledger&q=${encodeURIComponent(q)}`;
       shell.append(why);
       return;
     }
@@ -3049,7 +3165,7 @@ function renderIndex() {
     const go = node("a", "btn btn--go btn--sm", "去上传");
     go.href = "#/submit";
     shell.append(go);
-    // 台账没查过才去查一次：查回来之后这条空态可能升级成「命中了一条处置」。
+    // 公示没查过才去查一次：查回来之后这条空态可能升级成「命中了一条处置」。
     if (!state.ledgerTried) loadLedger();
     return;
   }
@@ -3095,7 +3211,7 @@ function modRow(m, q) {
   // 举报从「就是这一枚」这一格进去：带着 id 与 versionCode，签名的两个来源就不用用户手打。
   if (latest && SHA256_HEX_RE.test(String(latest.sha256 || ""))) {
     const rep = node("a", "mod__rep", "举报这一枚");
-    rep.href = `#/report?id=${encodeURIComponent(m.id)}&vc=${encodeURIComponent(latest.versionCode)}`;
+    rep.href = `#/moderation?tab=report&id=${encodeURIComponent(m.id)}&vc=${encodeURIComponent(latest.versionCode)}`;
     ft.append(rep);
   }
   li.append(ft);
@@ -3116,10 +3232,10 @@ async function loadIndex() {
   }
   renderIndex();
   // 索引是签名的来源之一：它晚到一步，04 那一屏上「算不出签名」那句就得当场改口。
-  if (parseHash().name === "report") refreshReportForm();
+  if (currentModTab() === "report") refreshReportForm();
 }
 
-/* ------------------------------------------------------- 04 举报（已上架的模块）
+/* ------------------------------------------- 举报那一半（报已上架的模块）
    这条路的硬门槛只有一句：实名 + 在包里逐字定位到。判据全在服务端（worker 的 handleReport），
    页面只做两件谁都不肯替它做的事：把「实名」那一串签名算出来给人抄进签名，以及把两种相反的
    失败分开说 —— 「你引用的那段不在包里」（要他改材料）与「这个包我们读不出来」（要我们补能力）。
@@ -3306,6 +3422,14 @@ function paintReportResult() {
   if (r.reportId) add("记录号", r.reportId);
   box.append(kv);
   box.append(node("p", "field__help", String(r.nextStep || "服务端没给下一步 —— 这一句该由服务端说，缺它是本站的问题。")));
+  // 受理了但留在举报这一半（自动跳过去会让人以为「怎么没有我这条」），
+  // 所以给一个自己决定的出口：点它才切到公示那一半看队列读数。
+  if (r.established) {
+    const jump = node("button", "btn btn--ghost btn--sm", "去看处置公示");
+    jump.type = "button";
+    jump.addEventListener("click", () => switchModerationTab("ledger"));
+    box.append(jump);
+  }
 }
 
 async function submitReport() {
@@ -3333,7 +3457,7 @@ async function submitReport() {
     paintReportResult();
     $("#rp-readout").textContent = json.established
       ? "这条举报成立并记下了待办；公开索引这一刻还没动。下架由本站的自动流程按批提出（没有人工签字那一步），" +
-        "排到哪一格看「处置公示」那一页顶部的队列读数 —— 那一格没显示数字就是读数还没到位，不等于没受理。"
+        "排到哪一格，切到「处置公示」那一半看顶部的队列读数 —— 那一格没显示数字就是读数还没到位，不等于没受理。"
       : "这条举报没有成立，但同样留下了待办记录；下面那句是服务端给的下一步。";
   } catch (err) {
     report.result = null;
@@ -3390,12 +3514,12 @@ function bindIncSearch() {
   const input = $("#q-inc");
   const apply = debounce(() => {
     state.incQuery = input.value;
-    if (parseHash().name === "incidents") renderIncidents();
+    if (currentModTab() === "ledger") renderIncidents();
   }, 140);
   input.addEventListener("input", apply);
 }
 
-/* ------------------------------------------------------------- 处置公示 */
+/* ----------------------------------------------------- 处置公示那一半 */
 
 // kind / reason / 选择器三张表在 api.js（仓库侧那份的键由 selftest 对），
 // 这里只留一条注释说明它们为什么不在这里：公示页和读取层要同一套词。
@@ -3433,7 +3557,9 @@ function incRow(item, q) {
     li.append(noteEl);
   }
 
-  const ft = node("div", "mod__ft");
+  // 多带一个 mod__ft--inc：手机档要靠它把这个页脚折成「时间 + 举报并排、证据独占一行」
+  // （见 panel.css 末尾那一节）。已收录那一屏的页脚结构不同，用不上，所以是加类而不是改 .mod__ft。
+  const ft = node("div", "mod__ft mod__ft--inc");
   ft.append(node("span", null, item.atMs === null ? `时间：${item.at || "没写"}` : `时间：${fmtDate(item.atMs)}`));
   // 标签与值分开两个节点：highlight 是清空容器再写的，标签和值在同一个节点里会被它抹掉。
   const href = byLink(item.by);
@@ -3450,6 +3576,14 @@ function incRow(item, q) {
     ft.append(incLabeled("证据：", item.by || "没写", q, "inc__by"));
   }
   if (item.verify) ft.append(incLabeled("复核：", item.verify, q, "inc__by"));
+  // 这一条是按模块 ID 命中的，就给一个直达举报的入口：id 带过去，versionCode 留空 ——
+  // 举报管的默认是「索引里最新那一枚」，正好是这一条要判的那一枚。
+  const hitId = (item.selectors || []).find(([k]) => k === "id");
+  if (hitId && hitId[1]) {
+    const rep = node("a", "mod__rep", "举报这一枚");
+    rep.href = `#/moderation?tab=report&id=${encodeURIComponent(hitId[1])}`;
+    ft.append(rep);
+  }
   li.append(ft);
   return li;
 }
@@ -3493,7 +3627,7 @@ function renderIncLegend() {
   const rows = [
     ["下架 / 拒收", "下架挡住的是这一段内容（按模块 ID、ID+versionCode 或包的 sha256 命中）；拒收挡住的是一个人或一个 ID 未来上传的任何包。"],
     ["命中条件", "同一条里的多个条件是「且」的关系，不是「或」——写了 ID 又写 versionCode，就只命中那一个版本。"],
-    ["证据（by）", "新版是一枚机器章：`ci:audit@<提交>`，写的是这条处置被哪一次运行钉死，旁边那条复核命令任何人都能重跑一遍。它不是链接 —— 章里不带仓库地址，硬拼一个点得开的地址就是这一页在替它编一个它并不知道的去向。main 上还有换代前留下的记录，那一类的 by 是一条能点开的评论，照旧给链接。两种形状都认，因为只认新的那一种会把已经发生过的处置念成「没有证据」。形状不对的指针原样显示成文本。这一页显示的就是台账原文，判定发生在索引推导与 CI 里，前端不另判一份。"],
+    ["证据（by）", "新版是一枚机器章：`ci:audit@<提交>`，写的是这条处置被哪一次运行钉死，旁边那条复核命令任何人都能重跑一遍。它不是链接 —— 章里不带仓库地址，硬拼一个点得开的地址就是这一页在替它编一个它并不知道的去向。main 上还有换代前留下的记录，那一类的 by 是一条能点开的评论，照旧给链接。两种形状都认，因为只认新的那一种会把已经发生过的处置念成「没有证据」。形状不对的指针原样显示成文本。这一页显示的就是公示原文，判定发生在索引推导与 CI 里，前端不另判一份。"],
     ["复核（verify）", "有这一项时任何人都能自己跑一遍确认这条处置成立，而不是只能相信页面上写的。"],
     ["时间", "带时区的那一刻，不是「大概哪天」。"],
   ];
@@ -3509,7 +3643,7 @@ function renderIncLegend() {
  * 公示页 · 人卡层（spec §6.1 骨架 A「以人为主」/ §6.2 三层证据卡 / §5.4 高仿主页头卡）
  *
  * 第一屏是按人聚的卡墙，按条流水降为第二层 —— 但**一条都不会丢**：聚合成卡的条件是
- * 台账条目带 `subject`，历史条目（v1）没有这个键，它们只出现在按条那一层，
+ * 公示条目带 `subject`，历史条目（v1）没有这个键，它们只出现在按条那一层，
  * 而卡墙末尾那句话会替这一层交代清楚有多少条没聚进卡（§10「不空白不报错」）。
  * ===================================================================== */
 
@@ -3722,7 +3856,7 @@ function factsLayer(item, ev) {
     ["模块出处", (pkg && pkg.source) || "没采到", pkg && pkg.source ? String(pkg.source) : ""],
   ];
   box.append(kvRow("ec__kv--2", pairs));
-  if (!ev) box.append(node("p", "ec__miss", "这一条没有固化过的证据文件：页面上这些格子只剩台账自己写的那几个选择器。"));
+  if (!ev) box.append(node("p", "ec__miss", "这一条没有固化过的证据文件：页面上这些格子只剩公示自己写的那几个选择器。"));
   return box;
 }
 
@@ -3931,12 +4065,12 @@ function renderPeopleWall(items, q) {
   host.textContent = "";
   const { people, unkeyed } = groupPeople(items);
   if (!people.length) {
-    host.append(node("p", "pc-wall__none", "这份台账里还没有任何一条处置带 `subject`（按人聚合的键）—— 所以下面按条那一层就是全部。带 subject 的条目由 §8 固化那一步填进来，不是这里能补的。"));
+    host.append(node("p", "pc-wall__none", "这份公示里还没有任何一条处置带 `subject`（按人聚合的键）—— 所以下面按条那一层就是全部。带 subject 的条目由 §8 固化那一步填进来，不是这里能补的。"));
     return { people: 0, unkeyed };
   }
   const hd = node("div", "pc-wall__hd");
   hd.append(node("span", "pc-wall__t", `被处置的人 · ${people.length} 个`));
-  hd.append(node("span", "pc-wall__s", unkeyed ? `另有 ${unkeyed} 条处置没有身份键，只在下面按条那一层列出` : "台账里每一条都聚进了这张墙"));
+  hd.append(node("span", "pc-wall__s", unkeyed ? `另有 ${unkeyed} 条处置没有身份键，只在下面按条那一层列出` : "公示里每一条都聚进了这张墙"));
   host.append(hd);
   const wall = node("div", "pc__wall-grid");
   for (const p of people) wall.append(personCard(p, q));
@@ -4018,14 +4152,14 @@ function renderIncidents() {
   const count = $("#inc-count");
   renderIncLegend();
   renderIncAppeal();
-  // 队列那一格独立于台账：它说的是「下架那条链还在不在动」，而台账读失败的时候恰恰最需要这句话。
-  // 放在最前面，是为了让下面那几条 early return（没配台账地址 / 台账读失败 / 正在加载）都不把它一起带走。
+  // 队列那一格独立于公示：它说的是「下架那条链还在不在动」，而公示读失败的时候恰恰最需要这句话。
+  // 放在最前面，是为了让下面那几条 early return（没配公示地址 / 公示读失败 / 正在加载）都不把它一起带走。
   loadReportQueue();
 
   const clear = () => {
     list.textContent = "";
     count.textContent = "";
-    // 人卡那一层与展开的详情跟着一起清：留着就会出现「台账读不到但墙上还挂着两个人」，
+    // 人卡那一层与展开的详情跟着一起清：留着就会出现「公示读不到但墙上还挂着两个人」，
     // 而这一页唯一的价值是它列出的每条处置都可回访。
     const people = $("#inc-people");
     const detail = $("#inc-detail");
@@ -4040,16 +4174,16 @@ function renderIncidents() {
 
   if (!dispositionsUrl()) {
     clear();
-    readout.textContent = "台账地址还没确定 · 公示页暂时读不到数据";
+    readout.textContent = "公示地址还没确定 · 公示页暂时读不到数据";
     readout.classList.add("bad");
     shell.hidden = false;
     shell.textContent = "";
-    shell.append(node("div", "empty__t", "处置台账的地址来自公开索引地址"));
+    shell.append(node("div", "empty__t", "处置公示的地址来自公开索引地址"));
     shell.append(
       node(
         "p",
         null,
-        "这一页直接读索引仓库里的 json/dispositions.json，路径按 config.js 的 INDEX_URL 同目录推导。索引地址填好之后这里就有内容；台账为空时它会明说「目前没有任何处置记录」。"
+        "这一页直接读索引仓库里的 json/dispositions.json，路径按 config.js 的 INDEX_URL 同目录推导。索引地址填好之后这里就有内容；公示为空时它会明说「目前没有任何处置记录」。"
       )
     );
     const go = node("a", "btn btn--ghost btn--sm", "看看这个站现在接了什么");
@@ -4060,11 +4194,11 @@ function renderIncidents() {
 
   if (state.ledgerError) {
     clear();
-    readout.textContent = "处置台账读取失败";
+    readout.textContent = "处置公示读取失败";
     readout.classList.add("bad");
     shell.hidden = false;
     shell.textContent = "";
-    shell.append(node("div", "empty__t", "拉不到处置台账"));
+    shell.append(node("div", "empty__t", "拉不到处置公示"));
     shell.append(node("p", null, state.ledgerError));
     const retry = node("button", "btn btn--ghost btn--sm", "重试");
     retry.type = "button";
@@ -4079,7 +4213,7 @@ function renderIncidents() {
   if (!state.ledger) {
     clear();
     readout.classList.remove("bad");
-    readout.textContent = state.ledgerLoading ? "正在读取处置台账…" : "正在读取处置台账…";
+    readout.textContent = state.ledgerLoading ? "正在读取处置公示…" : "正在读取处置公示…";
     shell.hidden = false;
     shell.textContent = "";
     shell.append(node("div", "empty__t", "读取中"));
@@ -4090,11 +4224,11 @@ function renderIncidents() {
   shell.hidden = true;
   const { items, lastUpdate, schemaKnown } = state.ledger;
   readout.classList.remove("bad");
-  // 同上：台账日期包 .nb 不拆行
+  // 同上：公示日期包 .nb 不拆行
   readout.replaceChildren(
     `${items.length} 条处置记录`,
-    ...(lastUpdate ? [" · 台账更新 ", node("span", "nb", fmtDate(lastUpdate))] : []),
-    ...(schemaKnown ? [] : [" · 这份台账的 schema 标记本页不认识，按原文列出"])
+    ...(lastUpdate ? [" · 公示更新 ", node("span", "nb", fmtDate(lastUpdate))] : []),
+    ...(schemaKnown ? [] : [" · 这份公示的 schema 标记本页不认识，按原文列出"])
   );
 
   const q = state.incQuery;
@@ -4117,7 +4251,7 @@ function renderIncidents() {
     : items;
 
   count.textContent = "";
-  // 空台账时「0 条 / 共 0」是噪声，下面那句空态说得更清楚
+  // 空公示时「0 条 / 共 0」是噪声，下面那句空态说得更清楚
   if (items.length) {
     const c = count;
     c.append(node("b", null, shown.length));
@@ -4138,12 +4272,12 @@ function renderIncidents() {
         node(
           "p",
           null,
-          "空的台账是正常状态：还没有内容被下架或拒收过。这一页存在的意义是「处置必须留痕且公开」，所以它什么时候有东西，取决于什么时候真的出过事。"
+          "空的公示是正常状态：还没有内容被下架或拒收过。这一页存在的意义是「处置必须留痕且公开」，所以它什么时候有东西，取决于什么时候真的出过事。"
         )
       );
       return;
     }
-    shell.append(node("div", "empty__t", `台账里没有匹配「${q}」的记录`));
+    shell.append(node("div", "empty__t", `公示里没有匹配「${q}」的记录`));
     shell.append(node("p", null, "查不到这条处置，不等于它没被收录过 —— 处置只写被挡掉的那些。"));
     return;
   }
@@ -4170,7 +4304,7 @@ function renderIncidents() {
     const box = node("div", "inc__grp");
     const hd = node("div", "inc__hd");
     hd.append(node("span", "inc__hd-t", REASON_LABELS[key] || key || "没写理由分类"));
-    if (!REASON_LABELS[key]) hd.append(node("span", "chip chip--warn", "台账里有本页不认识的分类"));
+    if (!REASON_LABELS[key]) hd.append(node("span", "chip chip--warn", "公示里有本页不认识的分类"));
     hd.append(node("span", "inc__hd-n", `${groups.get(key).length} 条`));
     box.append(hd);
     const ul = node("ul", "mods");
@@ -4192,11 +4326,11 @@ async function loadLedger() {
     state.ledger = await fetchDispositions();
   } catch (err) {
     state.ledgerError =
-      err instanceof BackendError ? err.message : "处置台账读取失败，可能是网络或格式问题。";
+      err instanceof BackendError ? err.message : "处置公示读取失败，可能是网络或格式问题。";
   }
   state.ledgerLoading = false;
-  if (parseHash().name === "incidents") renderIncidents();
-  // 浏览页那句「搜不到但台账里有」依赖台账，到货后重画一次
+  if (currentModTab() === "ledger") renderIncidents();
+  // 浏览页那句「搜不到但公示里有」依赖公示，到货后重画一次
   if (parseHash().name === "index") renderIndex();
   if (parseHash().name === "about") renderAbout();
 }
@@ -4224,7 +4358,7 @@ function renderAbout() {
     { k: "API_BASE", v: CONFIG.API_BASE || "未配置", ok: IS_API_CONFIGURED },
     { k: "INDEX_URL", v: CONFIG.INDEX_URL || "未配置", ok: IS_INDEX_CONFIGURED },
     {
-      k: "处置台账（公示页数据源）",
+      k: "处置公示（公示页数据源）",
       v: dispositionsUrl()
         ? `${dispositionsUrl()}${CONFIG.DISPOSITIONS_URL.trim() ? "" : "（由 INDEX_URL 同目录推导）"}`
         : "INDEX_URL 与 DISPOSITIONS_URL 都是空的，公示页没有数据来源",
@@ -4373,7 +4507,7 @@ async function syncLimits() {
   if (!changed) return;
   paintLimit();
   refreshGate(); // 枚数与整套字节这两格依赖它，到货之后清单要说真话
-  if (parseHash().name === "report") renderReport();
+  if (currentModTab() === "report") renderReport();
   renderAbout();
 }
 
@@ -4417,6 +4551,7 @@ function init() {
   bindTheme();
   bindStage();
   bindSession();
+  wireModerationTabs(); // 切换器是静态的两枚，绑一次就够，不随路由重绑
   renderQueue(); // 一开始是空队列：整条收起，上传页与今天一模一样
   // 会话刷新是异步的，不 await：本地那串令牌有没有效，不该拦住首屏。
   refreshSession();

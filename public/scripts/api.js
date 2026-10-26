@@ -294,7 +294,7 @@ export const SUBMIT_ERROR_TEXT = {
   },
   located: {
     owner: "us",
-    text: "这条举报成立：举报人过了实名闸，且引用的那段字节在归档里逐字定位到了。下一步不在这一片 —— 由机器 seal 写台账、开下架 PR；在那之前公开索引一个字都没改（publicAction 就是「none」）。",
+    text: "这条举报成立：举报人过了实名闸，且引用的那段字节在归档里逐字定位到了。下一步不在这一片 —— 由机器 seal 写公示、开下架 PR；在那之前公开索引一个字都没改（publicAction 就是「none」）。",
   },
   report_record_failed: {
     owner: "us",
@@ -792,7 +792,7 @@ function httpUrl(value) {
 }
 
 /**
- * 读索引与读台账都必须绕过本地缓存。
+ * 读索引与读公示都必须绕过本地缓存。
  *
  * 实测：jsDelivr 对 `@分支` 形式的地址回的是 `Cache-Control: public, max-age=604800`
  * —— 七天。也就是说源站清完缓存之后，**浏览器/管理器里那份旧索引还能留七天**，
@@ -851,22 +851,22 @@ export function normalizeIndex(json) {
   };
 }
 
-/* ---------------------------------------------------------- 处置台账（公示） */
+/* ---------------------------------------------------------- 处置公示（下架 / 拉黑） */
 
-/** 台账的 schema 标识（写入侧那一档）。与 contrib/repo/scripts/dispositions.mjs 的 DISPOSITIONS_SCHEMA 同值。 */
+/** 公示的 schema 标识（写入侧那一档）。与 contrib/repo/scripts/dispositions.mjs 的 DISPOSITIONS_SCHEMA 同值。 */
 export const LEDGER_SCHEMA = "sukisu-dispositions-v2";
 /**
  * 认得的 schema 全集 —— v1 的条目是 v2 的子集（少了两个可选字段），历史数据不改。
  * 这一份集合必须与索引仓库、Worker 两处同值；`tools/selftest.mjs --require-backend`
- * 拿仓库那份逐字比一次，漂了就红（这里漂了不会红，只会让公示页把已经认识的台账
+ * 拿仓库那份逐字比一次，漂了就红（这里漂了不会红，只会让公示页把已经认识的公示
  * 标成「不认识的 schema」，而那句提示正是给人看「这份数据不该被信任」的）。
  */
 export const KNOWN_LEDGER_SCHEMAS = ["sukisu-dispositions-v2", "sukisu-dispositions-v1"];
 
 /**
- * 台账的读取地址：显式填的优先，没填就从 INDEX_URL 换掉文件名。
+ * 公示的读取地址：显式填的优先，没填就从 INDEX_URL 换掉文件名。
  *
- * 为什么可以换文件名：索引和台账在索引仓库里就是同目录下的两个 json，只有 CDN 前缀
+ * 为什么可以换文件名：索引和公示在索引仓库里就是同目录下的两个 json，只有 CDN 前缀
  * 会不同。把这个约定写成第二份完整 URL，就等于再造一个会和第一份漂移的定义处 ——
  * 后端 Worker 的 dispositionsRawUrl 是同一个理由、同一个做法。
  * 索引地址上挂的 query 原样保留：有些 CDN 靠它鉴权，去掉就变成拉不到。
@@ -889,7 +889,7 @@ export function dispositionsUrl() {
   return u.href;
 }
 
-/** 台账条目上可能出现的命中条件。与仓库侧选择器同名同集合。 */
+/** 公示条目上可能出现的命中条件。与仓库侧选择器同名同集合。 */
 export const SELECTOR_KEYS = ["id", "versionCode", "sha256", "coolapkUid"];
 
 /**
@@ -919,7 +919,7 @@ export const REASON_LABELS = {
 };
 
 /**
- * 归一化一份台账用于公示。
+ * 归一化一份处置公示用于渲染。
  *
  * 这里的失效方向和 CI 那份**相反**，而且是故意的：仓库侧读不懂就抛错、整次推导停住，
  * 因为那里「跳过一条坏条目」等于让被下架的模块复活。这里只是给浏览器读的一份展示，
@@ -928,10 +928,10 @@ export const REASON_LABELS = {
  */
 export function normalizeDispositions(json) {
   if (!json || typeof json !== "object") {
-    throw new BackendError("bad-response", "处置台账不是 JSON 对象。");
+    throw new BackendError("bad-response", "处置公示不是 JSON 对象。");
   }
   if (!Array.isArray(json.dispositions)) {
-    throw new BackendError("bad-response", "处置台账里没有 dispositions 数组，格式不对。");
+    throw new BackendError("bad-response", "处置公示里没有 dispositions 数组，格式不对。");
   }
   const items = json.dispositions.map((d) => {
     const raw = d && typeof d === "object" ? d : {};
@@ -950,7 +950,7 @@ export function normalizeDispositions(json) {
       // 缺就是 null / 空数组 —— 历史条目一个都没有，页面必须照旧渲染（spec §10），不许空白不许报错。
       subject: raw.subject && typeof raw.subject === "object" && !Array.isArray(raw.subject) ? raw.subject : null,
       evidence: Array.isArray(raw.evidence) ? raw.evidence : [],
-      // 选择器按固定顺序取，缺的不显示；一个都没有的条目也照样列出来（它是台账的一条）
+      // 选择器按固定顺序取，缺的不显示；一个都没有的条目也照样列出来（它是公示的一条）
       selectors: SELECTOR_KEYS.filter((k) => raw[k] !== undefined && raw[k] !== null && raw[k] !== "")
         .map((k) => [k, String(raw[k])]),
     };
@@ -972,7 +972,7 @@ export function normalizeDispositions(json) {
  * 猜出来的链接比不链接更坏 —— 点进去是 404 或别人的讨论，等于公示页在替一条它并不知道的
  * 证据背书。
  *
- * 这一条今天只服务**旧台账**：main 上还有 5 条 `by` 是评论 URL 的记录（2026-10-21 之前下的），
+ * 这一条今天只服务**旧记录**：main 上还有 5 条 `by` 是评论 URL 的记录（2026-10-21 之前下的），
  * 新版写入端改的是机器章（见下面的 bySeal），读的一侧因此必须同时认两种形状 ——
  * 只认新的那一种，公示页就会把已经发生过的处置念成「没有证据」。
  */
@@ -1000,14 +1000,14 @@ export function bySeal(value) {
 /**
  * 证据文件名 → 能取的地址。
  *
- * 台账里的 `evidence[].file` 是仓库根相对路径（`evidence/<64 hex>.json`），而这一页拿到的是
- * **台账**的地址，两种部署各差一层目录：
+ * 公示里的 `evidence[].file` 是仓库根相对路径（`evidence/<64 hex>.json`），而这一页拿到的是
+ * **公示**的地址，两种部署各差一层目录：
  *   - 镜像端点 `https://host/dispositions.json` → 证据在 `https://host/evidence/<sha>.json`；
  *   - 直给仓库 `…/<owner>/<repo>/<ref>/json/dispositions.json` → 证据在 `…/<ref>/evidence/<sha>.json`。
  * 所以规则是「换掉文件名，并越过 `json` 这一层到仓库根」，而不是原地换名 —— 后者在直给仓库那一档
  * 会拼出一个不存在的 `json/evidence/…`，而它看起来完全像对的。
  *
- * ⚠️ 先验形状再拼 URL：台账是**签名之前由人写进 PR 的**数据，`file` 这一格如果被写成
+ * ⚠️ 先验形状再拼 URL：公示是**签名之前由人写进 PR 的**数据，`file` 这一格如果被写成
  * `https://别处/x.json` 或 `../../`，原地拼接就等于让公示页替上传者发一次跨站请求。
  * 不匹配的那个正则的形状一律不取。
  */
@@ -1037,17 +1037,17 @@ const evidenceCache = new Map();
 /**
  * 取一份固化证据。**只在真的要看的时候取**（点开某个人卡的那一层），
  * 一份动辄几十 KB，第一屏不该为它发 N 个请求。
- * 失败分两类报：形状不对（台账里那格被写坏了）与取不到（还没合进 main、镜像端点没这条路、网络）。
+ * 失败分两类报：形状不对（公示里那格被写坏了）与取不到（还没合进 main、镜像端点没这条路、网络）。
  */
 export async function fetchEvidence(file) {
   const f = String(file || "").trim();
   if (!LEDGER_EVIDENCE_FILE_RE.test(f)) {
-    return { ok: false, reason: "台账里这一格的文件名不是 `evidence/<64 位十六进制>.json` 的形状，本页不去取它。" };
+    return { ok: false, reason: "公示里这一格的文件名不是 `evidence/<64 位十六进制>.json` 的形状，本页不去取它。" };
   }
   if (evidenceCache.has(f)) return evidenceCache.get(f);
   const url = evidenceUrlFor(f);
   if (!url) {
-    const r = { ok: false, reason: "处置台账的地址还没确定，证据文件也就没有可推的目录。" };
+    const r = { ok: false, reason: "处置公示的地址还没确定，证据文件也就没有可推的目录。" };
     evidenceCache.set(f, r);
     return r;
   }
@@ -1071,7 +1071,7 @@ export async function fetchDispositions() {
   if (!target) {
     throw new BackendError(
       "not-configured",
-      "处置台账地址还没确定：请在 config.js 填入 INDEX_URL（台账按同目录推导）或 DISPOSITIONS_URL。"
+      "处置公示地址还没确定：请在 config.js 填入 INDEX_URL（公示按同目录推导）或 DISPOSITIONS_URL。"
     );
   }
   let res;
@@ -1080,15 +1080,15 @@ export async function fetchDispositions() {
   } catch {
     throw new BackendError(
       "network",
-      "拉不到处置台账。可能是地址写错、该主机不允许浏览器跨域读取，或网络不通。"
+      "拉不到处置公示。可能是地址写错、该主机不允许浏览器跨域读取，或网络不通。"
     );
   }
-  if (!res.ok) throw new BackendError("bad-response", `处置台账返回 HTTP ${res.status}。`);
+  if (!res.ok) throw new BackendError("bad-response", `处置公示返回 HTTP ${res.status}。`);
   let json;
   try {
     json = await res.json();
   } catch {
-    throw new BackendError("bad-response", "处置台账不是合法 JSON，没法解析。");
+    throw new BackendError("bad-response", "处置公示不是合法 JSON，没法解析。");
   }
   return normalizeDispositions(json);
 }

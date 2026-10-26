@@ -396,7 +396,7 @@ async function main() {
   }
   check("UID 形状不对时直接判 invalid，一个请求都不发", invalid.status === "invalid", JSON.stringify(invalid));
 
-  console.log("\n[9] 处置台账公示（下架 / 拉黑）");
+  console.log("\n[9] 处置公示（下架 / 拉黑）");
   const {
     normalizeDispositions,
     dispositionsUrl,
@@ -435,7 +435,7 @@ async function main() {
       },
     ],
   });
-  check("台账条数读出", ledger.items.length === 2);
+  check("公示条数读出", ledger.items.length === 2);
   check("schema 认得", ledger.schemaKnown === true);
   check("带时区偏移的 at 解析成同一个时刻", Number.isFinite(ledger.items[1].atMs) && ledger.items[1].atMs === Date.parse("2026-10-11T16:00:00Z"), String(ledger.items[1].atMs));
   check("选择器按固定顺序取出，id+versionCode 是一条而不是两条", ledger.items[1].selectors.map(([k]) => k).join(",") === "id,versionCode,coolapkUid", JSON.stringify(ledger.items[1].selectors));
@@ -459,7 +459,7 @@ async function main() {
   check("v1 形状（没有这两个键）不被补出空壳，页面按缺字段降级渲染", v2.items[1].subject === null
     && Array.isArray(v2.items[1].evidence) && v2.items[1].evidence.length === 0);
 
-  // 读取层的失效方向和 CI 那份相反，这条必须钉住：这里丢掉一条台账 == 公示漏一项处置。
+  // 读取层的失效方向和 CI 那份相反，这条必须钉住：这里丢掉一条公示 == 公示漏一项处置。
   const weird = normalizeDispositions({
     schema: "sukisu-dispositions-v99",
     dispositions: [
@@ -468,7 +468,7 @@ async function main() {
       "不是对象",
     ],
   });
-  check("未知 schema 标出来而不是当空台账", weird.schemaKnown === false);
+  check("未知 schema 标出来而不是当空公示", weird.schemaKnown === false);
   check("未知 kind / reason / 坏时间 / 非对象条目一条都不丢", weird.items.length === 3 && weird.items[0].atMs === null && (weird.items[2]?.selectors.length ?? -1) === 0, `${weird.items.length} 条`);
   let ledErr = null;
   try {
@@ -488,7 +488,7 @@ async function main() {
     CONFIG.INDEX_URL = "";
     check("两个地址都没填时不猜地址", dispositionsUrl() === "");
     CONFIG.INDEX_URL = "https://cdn.jsdelivr.net/gh/o/r@main/json/modules.json";
-    check("按 INDEX_URL 同目录推导台账地址", dispositionsUrl() === "https://cdn.jsdelivr.net/gh/o/r@main/json/dispositions.json", dispositionsUrl());
+    check("按 INDEX_URL 同目录推导公示地址", dispositionsUrl() === "https://cdn.jsdelivr.net/gh/o/r@main/json/dispositions.json", dispositionsUrl());
     CONFIG.INDEX_URL = "https://raw.githubusercontent.com/o/r/main/json/modules.json?v=3";
     check("索引地址上的 query 保留（有些 CDN 靠它鉴权）", dispositionsUrl().endsWith("/json/dispositions.json?v=3"), dispositionsUrl());
     CONFIG.DISPOSITIONS_URL = "https://mirror.example.com/d.json";
@@ -535,19 +535,34 @@ async function main() {
     ["ci:audit@" + "ab".repeat(19), "ci:audit@pending"].map((v) => `${v}->${bySeal(v) || "(空)"}`).join(" ")
   );
 
-  // 前端不判台账（判据在仓库那份），所以这里只钉两件事：视图接上了，
-  // 以及浏览页搜不到时会去问台账 —— 那条「不是没被投过，是被下架了」是本页的意义。
+  // 前端不判公示（判据在仓库那份），所以这里只钉两件事：视图接上了，
+  // 以及浏览页搜不到时会去问公示 —— 那条「不是没被投过，是被下架了」是本页的意义。
   const appSrc = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../public/scripts/app.js"), "utf8");
-  check("公示页接进了路由", /incidents: \{ el: "#view-incidents"/.test(appSrc));
-  // 索引与台账两处读取都必须绕本地缓存：jsDelivr 对 @分支 回 max-age=604800（七天），
+  check(
+    "举报与处置并成了同一个视图，两半由 URL 里的 tab 决定",
+    /moderation: \{ el: "#view-moderation"/.test(appSrc) &&
+      /const MOD_TABS = \["ledger", "report"\]/.test(appSrc) &&
+      !/incidents: \{ el:/.test(appSrc) &&
+      !/report: \{ el:/.test(appSrc)
+  );
+  check(
+    "旧地址只做一次性入口：进来自动收敛成规范写法，且不往后退链里多塞一条",
+    /const LEGACY_VIEWS = \{\s*\n\s*incidents: \{ tab: "ledger" \},\s*\n\s*report: \{ tab: "report" \},/.test(
+      appSrc
+    ) &&
+      /history\.replaceState\(null, "", canonicalHash\(name, params\)\)/.test(appSrc) &&
+      !/history\.pushState/.test(appSrc),
+    "别名用 pushState 收敛的话，后退一次就退回别名，再自动收敛 —— 用户在两个地址间死循环"
+  );
+  // 索引与公示两处读取都必须绕本地缓存：jsDelivr 对 @分支 回 max-age=604800（七天），
   // 源站清完缓存之后浏览器里那份旧的还能留七天 —— 而「这个模块被下架了」最不能用旧数据答。
   check(
-    "索引与台账两处读取都带 cache: no-cache（不吃那七天的本地缓存）",
+    "索引与公示两处读取都带 cache: no-cache（不吃那七天的本地缓存）",
     /const FRESH = \{ method: "GET", cache: "no-cache" \};/.test(apiSrc) &&
       /fetch\(CONFIG\.INDEX_URL, FRESH\)/.test(apiSrc) &&
       /fetch\(target, FRESH\)/.test(apiSrc)
   );
-  check("浏览页搜不到时会去查台账，命中就说明是被处置了", /ledgerHitFor\(q\)/.test(appSrc) && /它不是没被上传过，是被下架或拒收了/.test(appSrc));
+  check("浏览页搜不到时会去查公示，命中就说明是被处置了", /ledgerHitFor\(q\)/.test(appSrc) && /它不是没被上传过，是被下架或拒收了/.test(appSrc));
 
   check(
     "举报那一行错误有三个来源（本地形状 / 口令来源不齐 / 服务端原文），且 hidden 由内容决定",
@@ -607,19 +622,60 @@ async function main() {
     !/placeholder="\d{4,}"/.test(formHtml) && /id="f-uid"[^>]*placeholder="4-12 位数字"/.test(formHtml)
   );
 
-  /* ------------------------------------------------------- 04 举报那一屏
+  /* ------------------------------------------------------- 03 举报那一半
      这条路是站内第二个要「实名」的入口（第一个是上传）：它也会烧掉签名里那一串口令，但只在
      受理之后烧。它同时是第一个拿服务端自报门槛（一次几条引用、单条几字节起）驱动界面判据的屏，
      所以这一组钉子盯三件会静默坏掉的事：抄第二本账、派生值与来源脱钩、两种相反的失败糊成一句。 */
-  const rpHtml = (formHtml.match(/<section class="view" id="view-report"[\s\S]*?<\/section>/) || [""])[0];
+  const modHtml = (formHtml.match(/<section class="view" id="view-moderation"[\s\S]*?<\/section>/) || [""])[0];
+  const rpPanel = (modHtml.match(/<div id="panel-report"[\s\S]*?<\/div>\s*\n\s*<div id="panel-ledger"/) || [""])[0];
   check(
-    "04 举报三处齐：nav 里有入口且编号唯一、VIEWS 指对容器、section 自己有 aria-labelledby",
-    /<a href="#\/report"><i>04<\/i>举报<\/a>/.test(formHtml) &&
-      /report: \{ el: "#view-report"/.test(appSrc) &&
-      /id="view-report" aria-labelledby="h-report"/.test(rpHtml) &&
-      /<h1 id="h-report">/.test(rpHtml) &&
-      (formHtml.match(/<i>04<\/i>/g) || []).length === 1,
+    "举报那半的三处在位：nav 有一条合并后的入口、VIEWS 指对容器、面板自己有 aria-labelledby",
+    /<a href="#\/moderation\?tab=ledger"><i>03<\/i>举报与处置<\/a>/.test(formHtml) &&
+      /moderation: \{ el: "#view-moderation"/.test(appSrc) &&
+      /id="view-moderation" aria-labelledby="h-moderation"/.test(modHtml) &&
+      /<h1 id="h-moderation">/.test(modHtml) &&
+      /<div id="panel-report" role="tabpanel" aria-labelledby="tab-report"/.test(modHtml) &&
+      /<div id="panel-ledger" role="tabpanel" aria-labelledby="tab-ledger"/.test(modHtml) &&
+      (formHtml.match(/<i>03<\/i>/g) || []).length === 1,
     "nav/VIEWS/section 任一处缺就是这一屏进不去，或编号有两种说法"
+  );
+  check(
+    "切换器是真 tablist：两枚 role=tab、各带 aria-controls，选中态与键盘都靠 JS 收尾",
+    /role="tablist"/.test(modHtml) &&
+      (modHtml.match(/role="tab"/g) || []).length === 2 &&
+      /aria-controls="panel-report"/.test(modHtml) &&
+      /aria-controls="panel-ledger"/.test(modHtml) &&
+      /btn\.tabIndex = isNow \? 0 : -1;/.test(appSrc) &&
+      /if \(isNow && keepFocus\) btn\.focus\(\);/.test(appSrc),
+    "「焦点在哪半就切哪半」靠的是焦点自己跟着走，只写 aria-selected 的话键盘一动焦点就丢了"
+  );
+  check(
+    "切 tab 写一条历史（后退能回另一半），但同一个 tab 不重复写",
+    /if \(location\.hash === next\) return;/.test(appSrc) && /location\.hash = next\.slice\(1\);/.test(appSrc)
+  );
+  /* 切 tab 要剪掉另一半看不懂的参数：留着 `?tab=ledger&id=…` 会读成「公示按这条记录过滤」，
+     公示根本不认 id。剪掉不影响用户填过的东西（值在 DOM 里）。 */
+  check(
+    "切 tab 只保留这一半认识的参数（举报认 id/vc，公示认 q）",
+    /const keep = tab === "report" \? \["id", "vc"\] : \["q"\];/.test(appSrc) &&
+      /if \(k !== "tab" && !keep\.includes\(k\)\) params\.delete\(k\);/.test(appSrc),
+    "不剪参数的话地址栏会写出一个公示读不懂的过滤条件，等于替它许了个愿"
+  );
+  /* 两条跨半的入口：02 页「举报这一枚」带 id+vc，公示每条（按 id 命中时）带 id 走默认那一版。 */
+  check(
+    "跨半的两个入口都在：02 页带 id+vc，公示每条按 id 命中时带 id 指向举报那一半",
+    /rep\.href = `#\/moderation\?tab=report&id=\$\{encodeURIComponent\(m\.id\)\}&vc=\$\{encodeURIComponent\(latest\.versionCode\)\}`;/.test(
+      appSrc
+    ) &&
+      /const hitId = \(item\.selectors \|\| \[\]\)\.find\(\(\[k\]\) => k === "id"\);/.test(appSrc) &&
+      /rep\.href = `#\/moderation\?tab=report&id=\$\{encodeURIComponent\(hitId\[1\]\)\}`;/.test(appSrc),
+    "举报的签名绑的就是「哪一枚的哪个 versionCode」——入口少带一格，用户就得手打，手打就会绑错"
+  );
+  /* 受理后留在举报这一半（自动跳过去会让人以为「怎么没有我这条」），所以出口得自己给。 */
+  check(
+    "举报受理后不自动跳公示，另给一个「去看处置公示」的切换按钮",
+    /if \(r\.established\) \{[\s\S]{0,400}switchModerationTab\("ledger"\)/.test(appSrc),
+    "自动跳走的话用户会以为「我这条怎么没出现」，而队列读数本来就不是「刚提交那一条」"
   );
   /* 这一格盯的不是「有没有写 \|\| 8」这种形状，而是那个函数体里**一个数字都不许出现**：
      抄一份默认值可以写成 `{ maxEvidenceItems: 8 }`、可以写成三元、也可以写成参数默认值 ——
@@ -668,21 +724,23 @@ async function main() {
   );
   check(
     "举报入口只在索引给得出 64 位 sha256 时才出现（口令来源不齐就别许诺这枚报得了）",
-    /if \(latest && SHA256_HEX_RE\.test\(String\(latest\.sha256 \|\| ""\)\)\) \{[\s\S]{0,220}#\/report\?id=/.test(appSrc)
+    /if \(latest && SHA256_HEX_RE\.test\(String\(latest\.sha256 \|\| ""\)\)\) \{[\s\S]{0,240}#\/moderation\?tab=report&id=/.test(
+      appSrc
+    )
   );
   check(
     "举报页把「这一发不动索引」与「之后由逐字复验决定下架」都写在界面上，且不承诺有人在签",
-    /publicAction: none/.test(rpHtml) &&
-      /逐字节/.test(rpHtml) &&
-      /实名 \+ 包内逐字定位到/.test(rpHtml) &&
-      /全程没有人工签字那一步/.test(rpHtml) &&
-      /与上传那 5 格\/小时是分开的两本账/.test(rpHtml)
+    /publicAction: none/.test(rpPanel) &&
+      /逐字节/.test(rpPanel) &&
+      /实名 \+ 包内逐字定位到/.test(rpPanel) &&
+      /全程没有人工签字那一步/.test(rpPanel) &&
+      /与上传那 5 格\/小时是分开的两本账/.test(rpPanel)
   );
   // 反向那一格是这次改版的全部内容：那句话在上一版是真话，在这一版是假话（队列真的会被人摘下来）。
   check(
     "举报页不再说「举报不会让任何模块下架」，也不再把下一步写成内部路线图",
-    !rpHtml.includes("举报不会让任何模块下架") &&
-      !rpHtml.includes("下一步才是机器 seal") &&
+    !rpPanel.includes("举报不会让任何模块下架") &&
+      !rpPanel.includes("下一步才是机器 seal") &&
       !appSrc.includes("下一步由机器 seal 那片"),
     "「不会下架」与「下一步是某片代码」都不该出现在给用户看的那一屏上"
   );
@@ -739,20 +797,20 @@ async function main() {
   );
 
   /* ------------------------------------------------------- 两个浏览页的导语
-     公示页的导语是拿来威慑的，不是拿来解释的 —— 追责那半句一旦被人当啰嗦删掉，
+     处置那一半的导语是拿来威慑的，不是拿来解释的 —— 追责那半句一旦被人当啰嗦删掉，
      这一页就退化成流水账。已收录页的导语是用户点名删掉的，删掉就别让它长回来。
      另一条不在页面上看不出来：.hero__lede .hl 是 nowrap，标记短语一长就在 320px 撑破。 */
   const idxSlice = formHtml.slice(
     formHtml.indexOf('id="view-index"'),
-    formHtml.indexOf('id="view-incidents"')
+    formHtml.indexOf('id="view-moderation"')
   );
   check(
     "已收录页没有导语段落（「公开索引里的全部内容」那句已删，不许自己长回来）",
     idxSlice.length > 0 && !idxSlice.includes("hero__lede") && !formHtml.includes("公开索引里的全部内容")
   );
-  const incLede = /id="view-incidents"[\s\S]*?<p class="hero__lede">([\s\S]*?)<\/p>/.exec(formHtml);
+  const incLede = /id="view-moderation"[\s\S]*?<p class="hero__lede">([\s\S]*?)<\/p>/.exec(formHtml);
   check(
-    "公示页导语留着威慑的四要素：root 权限 / 可核对的凭据 / 向公安机关报案 / 依法追究法律责任",
+    "公示导语留着威慑的四要素：root 权限 / 可核对的凭据 / 向公安机关报案 / 依法追究法律责任",
     !!incLede &&
       ["root 权限", "可核对的凭据", "向公安机关报案", "依法追究法律责任"].every((k) =>
         incLede[1].includes(k)
@@ -1805,11 +1863,11 @@ async function main() {
         /prop\.id !== id/.test(worker) &&
         /prop\.versionCode && Number\(prop\.versionCode\) !== versionCode/.test(worker),
     );
-    // ⑤-e：下架 / 拉黑的 intake 那道。前端不判台账（台账在索引仓库，前端也不该有第二份判据），
+    // ⑤-e：下架 / 拉黑的 intake 那道。前端不判公示（公示在索引仓库，前端也不该有第二份判据），
     // 所以这里钉两件事：后端真的在判，以及它的失效方向必须是**放行** ——
-    // 取不到台账就拒投稿，等于 raw 抖一下所有人都投不了稿。
+    // 取不到公示就拒投稿，等于 raw 抖一下所有人都投不了稿。
     check(
-      "后端在提交阶段核对处置台账（⑤-e），且取不到台账时放行而不是挡",
+      "后端在提交阶段核对处置公示（⑤-e），且取不到公示时放行而不是挡",
       /loadDispositions\(env, deps\)/.test(worker) &&
         /matchAny\(ledger, \{ id, versionCode, sha256, coolapkUid \}\)/.test(worker) &&
         /if \(!res\.ok\) return null;/.test(worker),
@@ -2058,7 +2116,7 @@ async function main() {
     }
   }
 
-  /* ------------------------------------------- 处置台账词汇与索引仓库对齐
+  /* ------------------------------------------- 处置公示词汇与索引仓库对齐
      公示页的分类词表必须跟索引仓库那份封闭集合一致。仓库新增一个 reason 而这里没有，
      公示页就会把那一组标成「不认识的分类」——公示还在，但没人看得懂，这是静默的一半对。 */
   const dispCandidates = [
@@ -2068,19 +2126,19 @@ async function main() {
   ].filter(Boolean);
   const dispPath = dispCandidates.map((p) => resolve(here, p)).find((p) => existsSync(p));
   if (!dispPath) {
-    const msg = `找不到索引仓库的台账判据（试过：${dispCandidates.join(" / ")}）`;
-    if (REQUIRE_BACKEND) check("索引仓库台账模块必须存在（--require-backend）", false, msg);
+    const msg = `找不到索引仓库的公示判据（试过：${dispCandidates.join(" / ")}）`;
+    if (REQUIRE_BACKEND) check("索引仓库公示模块必须存在（--require-backend）", false, msg);
     // 同上：这一组实际有 19 个 check() 调用点，旧值 4 是好几轮加格之后没跟着改的。
-    else skip("处置台账词汇与指针那组跨仓库校验", msg, 19);
+    else skip("处置公示词汇与指针那组跨仓库校验", msg, 19);
   } else {
-    console.log(`  台账契约另一端：${dispPath}`);
+    console.log(`  公示契约另一端：${dispPath}`);
     const repo = await import(pathToFileURL(dispPath).href);
     const missReason = repo.REASONS.filter((r) => !(r in REASON_LABELS));
     const missKind = repo.KINDS.filter((k) => !(k in KIND_LABELS));
     check("仓库的每个 reason 在公示页都有人话标题", missReason.length === 0, missReason.join(","));
     check("仓库的每个 kind 在公示页都有人话标题", missKind.length === 0, missKind.join(","));
     check("schema 标识两边同值", repo.DISPOSITIONS_SCHEMA === LEDGER_SCHEMA, `${repo.DISPOSITIONS_SCHEMA} / ${LEDGER_SCHEMA}`);
-    // 认的集合也要同值，不只当前那一档：v1 的历史台账在 Worker 那一侧读不动的话，
+    // 认的集合也要同值，不只当前那一档：v1 的历史公示在 Worker 那一侧读不动的话，
     // 它的失效方向是「放行」——公示页还在显示下架，投稿已经不再被挡了。
     const repoKnown = [...repo.KNOWN_DISPOSITIONS_SCHEMAS].sort().join(",");
     const frontKnown = [...KNOWN_LEDGER_SCHEMAS].sort().join(",");
@@ -2108,10 +2166,10 @@ async function main() {
       `${repo.EVIDENCE_FILE_RE.source} / ${LEDGER_EVIDENCE_FILE_RE.source}`);
 
     // 这一组是「真生产者 → 公示页消费者」的闭环：拿索引仓库那份固化模块产出的**真实字节**，
-    // 走台账校验，再走这一页的 URL 推导。三处任何一处漂移，这里就红，而不是页面上少一块。
+    // 走公示校验，再走这一页的 URL 推导。三处任何一处漂移，这里就红，而不是页面上少一块。
     const harvestPath = resolve(dirname(dispPath), "harvest-evidence.mjs");
     if (!existsSync(harvestPath)) {
-      skip("§8 固化的产物进得了台账、也推得出地址", "索引仓库那边还没有 harvest-evidence.mjs（该分支尚未合入）");
+      skip("§8 固化的产物进得了公示、也推得出地址", "索引仓库那边还没有 harvest-evidence.mjs（该分支尚未合入）");
     } else {
       const hv = await import(pathToFileURL(harvestPath).href);
       const match = {
@@ -2145,13 +2203,13 @@ async function main() {
       } catch (e) {
         normErr = e.message;
       }
-      check("固化的产物填进台账后，索引仓库那份判得动", !!normEntry && normEntry.evidence[0].file === file, normErr);
+      check("固化的产物填进公示后，索引仓库那份判得动", !!normEntry && normEntry.evidence[0].file === file, normErr);
       const view = normalizeDispositions({ schema: repo.DISPOSITIONS_SCHEMA, dispositions: [normEntry || entry] });
       check("公示页把同一条的 subject 与 evidence 原样带出来",
         view.items[0].subject?.coolapkUid === "99999999" && view.items[0].evidence[0]?.file === file,
         JSON.stringify(view.items[0].evidence));
 
-      // URL 推导：两种部署各一档，再加「形状不对的一律不取」（台账是人在 PR 里写的，
+      // URL 推导：两种部署各一档，再加「形状不对的一律不取」（公示是人在 PR 里写的，
       // 那一格要是能写 `https://别处/x.json`，公示页就替投稿者发了一次跨站请求）。
       const saved = CONFIG.DISPOSITIONS_URL;
       try {
@@ -2166,7 +2224,7 @@ async function main() {
         check("形状不对的证据指针一律推不出地址", bad.every((b) => evidenceUrlFor(b) === ""), bad.filter((b) => evidenceUrlFor(b) !== "").join(","));
 
         // 上面那条只证明「函数返回空串」。真正要守的是**调用点不发请求** —— 拿空串去 `fetch("")`
-        // 会打到当前页面所在的主机，那种形状下台账页就在替一条它并不认识的证据发跨站请求。
+        // 会打到当前页面所在的主机，那种形状下公示页就在替一条它并不认识的证据发跨站请求。
         // 所以这里换成假 fetch，直接数它被调用了几次、打到哪儿。
         const calls = [];
         const realFetch = globalThis.fetch;
@@ -2212,7 +2270,7 @@ async function main() {
     }
 
 
-    // 选择器集合从仓库那份的**归一化输出**里取，不抄常量：它才是「台账里可能出现哪些命中条件」的定义。
+    // 选择器集合从仓库那份的**归一化输出**里取，不抄常量：它才是「公示里可能出现哪些命中条件」的定义。
     const norm = repo.parseDispositions({
       schema: repo.DISPOSITIONS_SCHEMA,
       dispositions: [{ kind: "revoke", reason: "other", by: "b", at: "2026-10-11T00:00:00Z", id: "a", versionCode: 1, sha256: "f".repeat(64), coolapkUid: "99999999" }],
@@ -2222,7 +2280,7 @@ async function main() {
     check("公示页取的选择器与仓库那份归一化结果同名同集合", frontSel.length === SELECTOR_KEYS.length && SELECTOR_KEYS.every((k) => repoSel.includes(k)), repoSel.join(","));
 
     // 证据指针的形状：写入端（revoke.mjs）与展示端（bySeal / byLink）必须判得完全一致。
-    // 漂移的两种后果都不是红，而是台账里出现「写着像链接却点不开」或「能点却不给点」。
+    // 漂移的两种后果都不是红，而是公示里出现「写着像链接却点不开」或「能点却不给点」。
     const revokePath = resolve(dirname(dispPath), "revoke.mjs");
     const revoke = existsSync(revokePath) ? await import(pathToFileURL(revokePath).href) : null;
     if (!revoke?.MACHINE_SEAL_RE) {
@@ -2250,7 +2308,7 @@ async function main() {
         "",
       ].filter((s) => revoke.MACHINE_SEAL_RE.test(s) !== Boolean(bySeal(s)));
       check("机器章形状在写入端与公示页判得完全一致", drift.length === 0, drift.join(" | "));
-      // 待盖值能过写入端（台账 PR 的第一枚提交要用它），但它永远不算一枚章 ——
+      // 待盖值能过写入端（公示 PR 的第一枚提交要用它），但它永远不算一枚章 ——
       // 公示页把它认成章就等于把「还没盖」显示成「已被一次运行钉死」。
       check("待盖值在写入端合法、在两端都不算章",
         revoke.SEAL_PENDING_BY === "ci:audit@pending" &&
@@ -2304,7 +2362,7 @@ async function main() {
     /\.ec__layer--seal \{/.test(cssSrc) && !/\.ec__layer--human/.test(cssSrc)
   );
   // LEGEND 那一格是很多人读这一页的唯一一段解释。它如果还说「看那条评论的作者」，
-  // 就是在替新版台账编一个并不存在的署名 —— 而这一页下面那 5 条旧记录确实还是评论，
+  // 就是在替新版公示编一个并不存在的署名 —— 而这一页下面那 5 条旧记录确实还是评论，
   // 所以两种形状都要说到，缺一种就是假陈述。
   check(
     "LEGEND 讲 by 的那一格：机器章与旧版评论两种形状都说到，且不再说「看那条评论的作者」",

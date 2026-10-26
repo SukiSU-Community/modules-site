@@ -1653,7 +1653,7 @@ mark {
 }
 
 /* ==========================================================================
-   处置公示（台账）
+   处置公示（下架 / 拉黑）
    ========================================================================== */
 
 /* 行本身复用 .mod 那套；这里只补分组标题和指针换行。 */
@@ -2007,7 +2007,10 @@ mark {
     font-size: 14.5px;
     background-size: auto, 22px 22px, 22px 22px, auto;
   }
-  main {
+  /* 底部那 108px 是给上传页那条固定 dock 让位的。只有上传页有 dock
+     （app.js 里 dock.hidden = name !== "submit"），别的屏照旧留白就等于
+     在页面末尾凭空多出一屏半的手指高度 —— 这里按屏区分。 */
+  html[data-view="submit"] main {
     padding-bottom: 108px;
   }
   /* 顶栏从 760 起就不许换行：品牌、分区、主题开关必须在同一条横线上 */
@@ -2041,7 +2044,10 @@ mark {
   .hide-sm {
     display: none !important;
   }
-  .cta-inline {
+  /* 行内主按钮在手机上让位给底部 dock —— 但那只对上传页成立。
+     举报页没有 dock，这条动作按钮就是唯一的提交入口：一律藏掉的话
+     手机上根本递不出举报（旧 bug，与本次合并无关）。 */
+  html[data-view="submit"] .cta-inline {
     display: none !important;
   }
   .dock {
@@ -2682,6 +2688,9 @@ mark {
    · ≤380px   窄屏：规格值再收字号、名条 9px、口令行的模块 ID 独占一行让位给串
    · ≤360px   极窄：承诺行折行
    · 触控档（pointer: coarse 或 ≤760px）：可点目标补到 44px
+   · ≥1240px  宽屏档：版心按屏放宽到 1240、举报与处置切双栏、上传页两条竖流（见文件末尾那一节）
+   · ≥1600px  超宽档：版心再放到 1440（行宽的实用上限，见文件末尾那一节）
+   · ≤760px   手机收尾档：切换器吸顶、公示行页脚折两行、底部留白收到 64（见文件末尾那一节）
    ============================================================ */
 
 /* 桌面宽屏：hero 两列 —— 文案在左，四条硬性条件在右。
@@ -3258,6 +3267,84 @@ mark {
   color: var(--red);
 }
 
+/* ==========================================================================
+   举报与处置：两半的切换器
+   公示与举报原本是两条独立的地址，读到的是同一件事的两面（这边公示、那边递材料），
+   合成一屏后需要一个「现在是哪一半」的显式开关。这里不复用 .btn：
+   .btn 是动作按钮的语言（实心/描边、去点一件事），而切换器要的是两枚等宽、
+   选中项实底的**状态**控件 —— 长得像按钮，语义却完全不同。
+   ========================================================================== */
+
+.seg {
+  display: inline-flex;
+  gap: 0;
+  /* 两枚咬合成一整块：外框一条，中间靠分隔线，所以自己不带 gap、内部不带圆角。 */
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--well);
+  overflow: hidden;
+}
+
+.seg__btn {
+  appearance: none;
+  position: relative;
+  /* 等宽：切一半时总宽不变，下面那半的内容不会横跳一下。 */
+  flex: 1 1 0;
+  min-width: 92px;
+  padding: 10px 16px;
+  font: 600 13px/1 var(--sans);
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--line-2);
+  cursor: pointer;
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+.seg__btn:first-child {
+  border-left: 0;
+}
+.seg__btn:hover {
+  color: var(--ink);
+  background: var(--btn-hover);
+}
+/* 选中项是实底：不是「按下去的样子」，是「你现在站在这半边」。 */
+.seg__btn.is-on {
+  color: var(--amber-ink);
+  background: var(--amber-fill);
+  cursor: default;
+}
+.seg__btn.is-on:hover {
+  color: var(--amber-ink);
+  background: var(--amber-hot);
+}
+/* 键盘焦点必须自己画：选中项是实底，默认 outline 落在琥珀底上几乎看不见，
+   而这一组恰恰是全站最需要键盘可达的控件（左右箭头就在它上面走）。 */
+.seg__btn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -4px;
+  z-index: 1;
+}
+
+/* 举报那半的导语：原先是这一屏的 hero__lede，合并后 hero 归了页头，
+   它就降级成面板里的一段说明 —— 字号与行宽都跟着收一档，但仍是「读」的正文，不是小字注释。 */
+.mod__lede {
+  margin: 0 0 14px;
+  max-width: 62ch;
+  color: var(--ink-2);
+}
+
+@media (max-width: 620px) {
+  /* 窄屏让切换器占满整行：两枚仍等宽，只是不再缩在左边一小截。 */
+  .seg {
+    display: flex;
+    width: 100%;
+  }
+  .seg__btn {
+    padding: 11px 12px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -3285,5 +3372,194 @@ mark {
   }
   .zipcard {
     transition: none;
+  }
+}
+
+/* ==========================================================================
+   宽屏版心 + 举报与处置双栏 + 上传表单两列
+   940 那档是「一行读得完」的度量：说明页、正文、单列表单都按它来最舒服。
+   但数据密集的几屏（已收录、举报与处置、上传）在 1440/1920 上左右各空掉
+   两百多像素，右侧那一列尤其浪费 —— 那里本来就没有东西，而公示的「申诉」
+   与「字段说明」却被挤到列表最底下，要滚三千多像素才看得见。这一节只解决
+   这两件事：把版心按屏放宽，把长页面里那些「读」的块挪到右边去，让左列
+   专心放数据。
+   ========================================================================== */
+
+/* 版心按屏分档：只有数据密集的几屏放宽。量宽写在 html 上的同名变量覆盖，
+   顶栏、main、页脚铭牌三处读的都是同一个 --maxw，改一处即全站一致。
+   说明页是长文，行宽本来就该停在 940 附近，不参与。 */
+@media (min-width: 1240px) {
+  html[data-view="index"],
+  html[data-view="moderation"],
+  html[data-view="submit"] {
+    --maxw: 1240px;
+  }
+}
+
+/* 再往上一档：1920 的屏上 1240 仍是左右各空三百多像素。1600 起放到 1440 ——
+   这是「行还是行」的上限，再宽左列那串按条公示就要靠视线横移去追了。 */
+@media (min-width: 1600px) {
+  html[data-view="index"],
+  html[data-view="moderation"],
+  html[data-view="submit"] {
+    --maxw: 1440px;
+  }
+}
+
+/* 双栏骨架：窄屏就是上下堆叠（display:block，与合并前完全一样）；
+   只有真宽屏才切成「左数据 + 右文档」。右列固定 348px —— 刚好放得下一份
+   72ch 的中文正文而不折成窄条，也不至于把左边的列表压得过窄。 */
+@media (min-width: 1240px) {
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 348px;
+    gap: 0 30px;
+    align-items: start;
+  }
+  /* 右列在滚动时跟着走：左列那串按条公示可以很长，右边的申诉入口与字段
+     说明不该被留在页面末尾。自身比视口高时它照常随页面滚。 */
+  .split__side {
+    position: sticky;
+    top: 84px;
+    min-width: 0;
+  }
+  /* 右列里那些 .doc 的 72ch 上限在 348 的栏里本来就不起作用，
+     这里只保证长 token 不去撑栏。 */
+  .split__side .doc {
+    max-width: none;
+  }
+}
+
+/* 举报表单：那几格本来就是成对的（模块 ID / 版本、UID / 昵称），
+   宽屏上并排放，一屏能看全，不用一路滚着填。 */
+@media (min-width: 1240px) {
+  .panel--form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0 18px;
+    align-items: start;
+  }
+  /* 默认整行：叙述、包内引用、签名这几格是长内容，占满两列才读得顺。 */
+  .panel--form > .field {
+    grid-column: 1 / -1;
+  }
+  /* 成对的那两格退回单列宽。写在上面那条之后，同权重靠顺序取胜。 */
+  .panel--form > .field--half {
+    grid-column: auto;
+  }
+  /* 报错行与提交按钮永远是整行：按钮靠左，与上面几格左缘对齐。 */
+  .panel--form > .field__err,
+  .panel--form > .btn-row {
+    grid-column: 1 / -1;
+  }
+}
+
+/* 上传页：宽屏分成左右两条流 —— 左条「传什么」（01 选包 + 02 填元数据），
+   右条「谁传的、怎么交」（03 出处与身份 + 04 确认与上传）。
+   不用 2×2 栅格是因为四张面板高矮差得悬殊：栅格按行对齐，01 只有三百来像素，
+   会被右边七百多像素的 02 拉出一大块空洞；两条独立的竖流各自往下排，谁也不等谁，
+   页面总高反而更矮，中间也不会横着一道白。 */
+@media (min-width: 1240px) {
+  #form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0 24px;
+    align-items: start;
+  }
+  .form__col {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  /* 分成两条流之后，四张面板不再是同一个父级的 2/3/4 号孩子，
+     入场延迟会重新从 0 开始数；这里按「01 02 03 04」的旧次序补回来。 */
+  .form__col:nth-child(2) > .panel.rise:nth-child(1) {
+    animation-delay: 0.1s;
+  }
+  .form__col:nth-child(2) > .panel.rise:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+}
+
+/* ==========================================================================
+   手机档收尾：吸顶切换器 + 触控目标 + 公示行的页脚折两行
+   宽屏那一节解决「左右空着」，这一节解决「手机上要一直往下滚」。
+   三件事都只在 ≤760 生效，桌面一个字都不动。
+   ========================================================================== */
+
+@media (max-width: 760px) {
+  /* 切换器吸顶：公示一条一条往下排能排到四千多像素，滚到一半想换到「举报」
+     得把整页甩回顶部 —— 这一条把「现在在哪一半」和「换一半」钉在顶栏下面。
+     top 跟着顶栏实际高度走（760~621 是 67，620 往下是 65，下面那档覆盖）。
+     必须等宽铺满：窄的 inline-flex 只占两百来像素，列表会从两侧的缝里穿过去。 */
+  .seg {
+    display: flex;
+    width: 100%;
+  }
+  #mod-tabs {
+    position: sticky;
+    top: 67px;
+    z-index: 30;
+    margin-bottom: 2px;
+  }
+
+  /* 页面末尾的留白：96px 是按桌面「一行读完」的节奏给的，手机上等于小半屏空白。
+     上传页另有 108px 给 dock 让位（见上面那个按屏区分的规则），这里不碰它。 */
+  main {
+    padding-bottom: 64px;
+  }
+}
+
+@media (max-width: 620px) {
+  /* 顶栏在 620 往下矮 2px（品牌字号收了一档），吸顶位置跟着上移。 */
+  #mod-tabs {
+    top: 65px;
+  }
+}
+
+/* 触控档：可点目标补到 44×44。这一节与前面那条触控档分开写，是因为
+   这里补的是「合并之后才出现的」控件（切换器、公示行的举报入口），
+   前面那条管的是全站原有的按钮与导航。 */
+@media (pointer: coarse), (max-width: 760px) {
+  /* 切换器两枚原来只有 35 高：整条是除导航外最常点的东西，补到 44。 */
+  .seg__btn {
+    min-height: 44px;
+  }
+  /* 公示行里的「举报这一枚」只有 78×28，但它右侧就是行尾，直接加高会把
+     每一行都撑胖 —— 用不可见的外扩热区补到 44 高，排版一动不动。 */
+  .mod__rep {
+    position: relative;
+  }
+  .mod__rep::after {
+    content: "";
+    position: absolute;
+    inset: -8px -6px;
+  }
+  /* 搜索框 42 高，差 2px 到 44：直接加高不影响整行（计数本来就在下一行）。 */
+  .search input {
+    min-height: 44px;
+  }
+}
+
+/* 公示行的页脚折两行：时间与「举报这一枚」并排一行，证据/复核各占一整行。
+   原来四个都是 flex 子项，证据那一串（最长能到 340px）一撑就独占一行，
+   时间孤零零留在上一行、举报按钮又掉到第三行 —— 113px 里有 30px 是这么浪费掉的。
+   只在有「证据」的公示行上折（.mod__ft--inc，由 app.js 打标），
+   已收录那一屏的页脚还是原来的一行流。 */
+@media (max-width: 760px) {
+  .mod__ft--inc {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+    align-items: start;
+  }
+  .mod__ft--inc > .mod__rep {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    margin-left: 0;
+  }
+  .mod__ft--inc > .inc__by {
+    grid-column: 1 / -1;
   }
 }

@@ -18,7 +18,7 @@
 |---|---|---|
 | **后端地址** | `config.js` `API_BASE` | 后端根地址（当前是 Cloudflare Pages 网关，转发到 Worker），结尾不带斜杠。前端会请求 `${API_BASE}/check`、`/user`、`/index.json`、`/dispositions.json`、`/submit`，并在启动时问一次 `${API_BASE}/` 拿真实上限。**别填 Worker 自己的 `*.workers.dev`**：那个后缀在国内被 DNS 投毒 + TLS SNI 阻断，浏览器侧会表现为查重与身份核实全部失败（见 `contrib/worker/gateway/README.md`）。**留空时投稿功能会被拦下并明确提示，不会静默失败。** |
 | 公开索引地址 | `config.js` `INDEX_URL` | 「已收录模块」页直接 fetch 这个 MMRL JSON，同时也是**给管理器用的订阅地址**。这里填的是 Worker 的镜像端点 `/index.json`，不是 jsDelivr —— 因为 jsDelivr 对 `@分支` 地址回 `max-age=604800`（七天），下架之后用户手里那份旧的还能留七天；镜像把头交回我们手里（`max-age=60` + 弱 ETag）。不填则浏览页显示「索引地址待配置」，投稿功能不受影响。 |
-| 处置台账地址 | `config.js` `DISPOSITIONS_URL` | **留空就按 `INDEX_URL` 同目录换文件名推导**（索引仓库里 `json/modules.json` 与 `json/dispositions.json` 是一对，Worker 的两个镜像端点也是一对）。只有把台账放去了别处才显式填。公示页（`#/incidents`）读它。 |
+| 处置公示地址 | `config.js` `DISPOSITIONS_URL` | **留空就按 `INDEX_URL` 同目录换文件名推导**（索引仓库里 `json/modules.json` 与 `json/dispositions.json` 是一对，Worker 的两个镜像端点也是一对）。只有把公示放去了别处才显式填。「举报与处置」页的公示那一半（`#/moderation?tab=ledger`）读它。 |
 | **反机器人校验** | `config.js` `TURNSTILE_SITEKEY` / `TURNSTILE_FIELD` | 留空 = 界面显示「待接入」说明，提交时只随表带一个空的 token 字段。填入 sitekey 后自动加载 Turnstile 脚本并渲染部件，token 用 `TURNSTILE_FIELD` 的字段名发出（后端字段名不同就只改这一行）。 |
 | **酷安 UID 字段名** | `config.js` `COOLAPK_UID_FIELD` | 投稿人身份发两个字段：`uploader` = 昵称（索引里公开显示），`coolapkUid` = 酷安 UID 数字。后端约定的名字不同就改这一行。 |
 | **酷安核实端点** | `config.js` `COOLAPK_USER_PATH` | 见下面第 2 节。路径留空 = 不核实，界面显示「未经核实」，**投稿口令也就生成不了** —— 口令是清单里硬拦的一条，于是「上传前确认」按钮一直按死：这条端点没接上之前投稿通道是不开放的（口令是这套流程的硬要求，不是可关的旁路）。核实这条**没有前端开关**：能在浏览器里改到的开关就能被绕过，判定在 Worker。**四种状态**：`verified`（真反查到昵称，口令到这一步才生成）/ `self_reported`（后端只回显，这次没核实）/ `not_found`（这一条拦住）/ `unavailable`（想核实但没核实成；这一条本身只提示，可口令同样不会生成，按钮也就不会亮）。前两种在界面上文案不同，不许混。 |
@@ -165,7 +165,7 @@ versionCode 只在 module.prop 声明了它时才被绑。
 逐条对齐：协议白名单、`URL` 解析后比主机名、拒 `coolapk.com.evil.tld` 与路径藏域名、漏协议补 `https://`）。
 前端校验只是省一次上传，真正拦人的是服务端 —— 直接打接口的人不受前端约束。
 
-### 索引与台账的镜像端点（已实现，`GET /index.json`、`GET /dispositions.json`）
+### 索引与公示的镜像端点（已实现，`GET /index.json`、`GET /dispositions.json`）
 
 这条不是「前端要什么」，而是**下架到底多久到用户手里**：
 
@@ -196,7 +196,8 @@ versionCode 只在 module.prop 声明了它时才被绑。
 | 成功给 PR 链接 | `app.js:showSuccess()`，含「点进去看审核进度」与后续流程说明 |
 | 失败显示中文原因且能重试 | `app.js:showFailure()`：表单内容与已选文件都留着，「重试提交」直接复用 |
 | 已收录模块浏览页（MMRL） | `#view-index` + `api.js:fetchIndex()/normalizeIndex()`，搜索按 ID/名称/作者/描述过滤并高亮 |
-| 下架 / 拉黑的公示 | `#view-incidents` + `api.js:fetchDispositions()/normalizeDispositions()`，读索引仓库那份 `json/dispositions.json` 原文，按 reason 分组、时间倒序。**前端不判台账**：判据在 `contrib/repo/scripts/dispositions.mjs`（推导与 CI 用同一份），这里只负责公开。读取层故意**一条都不丢**（未知 schema / kind / reason / 坏时间都标出来继续显示）—— 公示页丢掉一条就等于公示漏一项处置，而它在 CI 那份的失效方向是「读不懂就停住」，两边反着是有意的。另外浏览页搜不到时会拿这个查询去台账里精确比一次命中条件，命中就写「它不是没被投过，是被下架了」并给跳转。`by` 指针只在形状是 GitHub 评论永久链接时才渲染成链接（`api.js:byLink`，服务的是 main 上那 5 条旧记录），机器章 `ci:audit@<40hex>` 走 `api.js:bySeal` 渲染成「钉在哪一枚提交上」的文字 + 那条可复验命令（章里不带 owner/repo，拼不出能点的地址）；其它一律文本 —— 猜出来的链接等于公示页替一条它不知道去向的证据背书；这两个形状与写入端 `revoke.mjs` 的 `MACHINE_SEAL_RE` 由 selftest 逐样本比对 |
+| 下架 / 拉黑的公示 | `#view-moderation?tab=ledger` + `api.js:fetchDispositions()/normalizeDispositions()`，读索引仓库那份 `json/dispositions.json` 原文，按 reason 分组、时间倒序。**前端不判公示**：判据在 `contrib/repo/scripts/dispositions.mjs`（推导与 CI 用同一份），这里只负责公开。读取层故意**一条都不丢**（未知 schema / kind / reason / 坏时间都标出来继续显示）—— 公示页丢掉一条就等于公示漏一项处置，而它在 CI 那份的失效方向是「读不懂就停住」，两边反着是有意的。另外浏览页搜不到时会拿这个查询去公示里精确比一次命中条件，命中就写「它不是没被投过，是被下架了」并给跳转。`by` 指针只在形状是 GitHub 评论永久链接时才渲染成链接（`api.js:byLink`，服务的是 main 上那 5 条旧记录），机器章 `ci:audit@<40hex>` 走 `api.js:bySeal` 渲染成「钉在哪一枚提交上」的文字 + 那条可复验命令（章里不带 owner/repo，拼不出能点的地址）；其它一律文本 —— 猜出来的链接等于公示页替一条它不知道去向的证据背书；这两个形状与写入端 `revoke.mjs` 的 `MACHINE_SEAL_RE` 由 selftest 逐样本比对 |
+| 举报已上架的模块 | `#view-moderation?tab=report` + `app.js:submitReport()`、`api.js:postReport()`。「处置公示」与「举报」原本是两屏，现在是同一屏的两半：tab 写在查询串里（`?tab=ledger` / `?tab=report`，**默认那一半也显式写**，刷新/收藏/贴给别人的落点都唯一），旧地址 `#/incidents`、`#/report` 只做一次性入口，进来后用 `history.replaceState` 收敛成规范写法（用 pushState 会在别名与规范地址之间来回弹）。tab 是完整的 ARIA tab 模式：左右箭头在 tablist 内移动焦点并立刻切换，`Tab` 跳出到面板。索引页每条模块的「举报这一枚」带着 id 与 versionCode 跳到举报那一半，用户不必重打。 |
 | 人机校验（Turnstile）进提交门禁 | 部件按需加载（第一次选包 / 打开确认层），加载失败给可点重试的出口；令牌过期、超时、出错、上传失败都清空并重画门禁；`gateItems()` 里有一条独立条目，没过校验「上传前确认」就是灰的 |
 | 上传大小 / zip 形态前端预检 | 超过上限、非 `.zip`、根目录无 `module.prop` 都在选文件那一刻就拒掉并把原因打出来 |
 | 包内 `module.prop` 与表单一致性 | **服务端判**（`contrib/worker/src/index.ts` 的 ⑤-a）：`id` 必须一致，包内写了 `versionCode` 也必须一致；不一致 → 400 并把两边的值都打出来。前端不做同一条检查 —— 它已经解析过 module.prop，再判一次就是第二处规则，迟早和后端漂移（本站的做法是让前端问后端，不抄第二份，见「上限自报」）；服务端的原因原样显示在失败屏（`api.js:readReason`） |
@@ -223,8 +224,8 @@ deflate 与 stored 两种压缩、UTF-8 中文内容、`description` 里再出�
 以及非 zip 输入。另外还覆盖 MMRL 索引归一化（`versions` 乱序取最大 versionCode、缺字段回落、
 非 MMRL 结构报错）和酷安规则（UID 位数/非数字、假域名 `coolapk.com.evil.tld`、
 路径里藏域名、`javascript:` 协议、网盘链接不算出处、后端未接线时核实走 `off` 而不是抛错），
-以及处置台账公示（带时区的 `at` 解析、选择器取法、未知 schema/kind/reason 一条都不丢、
-台账地址按 INDEX_URL 同目录推导且保留 query、`by` 指针只有永久链接才给链接）。
+以及处置公示（带时区的 `at` 解析、选择器取法、未知 schema/kind/reason 一条都不丢、
+公示地址按 INDEX_URL 同目录推导且保留 query、`by` 指针只有永久链接才给链接）。
 跨仓库那几组还会直接 import 索引仓库的 `scripts/dispositions.mjs` 与 `scripts/revoke.mjs`，
 把公示页的分类词表与它的封闭集合（`REASONS` / `KINDS` / `DISPOSITIONS_SCHEMA` / 选择器名）
 对一遍，并逐样本比对写入端与公示页对指针形状的判定 ——
@@ -276,7 +277,7 @@ npx wrangler pages deploy dist --project-name=cool-module --commit-dirty=true
   （`app.js` 是 module、defer，等它就来不及了）。琥珀色分成两组变量：`--amber` 是**文字/描边**用的前景色
   （浅色模式下是深棕，保证对比度），`--amber-fill` 是**色块填充**（按钮底、勾选块、危险条纹、进度条），
   两者在夜间模式下同色、日间模式下不同色 —— 只用一个变量的话，浅色模式必然要么按钮文字看不清、要么正文对比度不够。
-- **hash 路由（`#/submit` `#/index` `#/about`）**：静态托管上不需要 rewrite 规则就能刷新/深链接，
+- **hash 路由（`#/submit` `#/index` `#/moderation?tab=ledger|report` `#/about`）**：静态托管上不需要 rewrite 规则就能刷新/深链接，
   拖到任何托管商都不用改配置。
 - **索引/文件名/服务端错误等外部数据一律用 DOM 节点拼装**（`node()` + `textContent`，
   高亮走 `createTextNode` + `<mark>`），没有一处把外部内容塞进 `innerHTML`；
