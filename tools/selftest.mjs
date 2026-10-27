@@ -2724,6 +2724,7 @@ async function main() {
       appSrc.indexOf("async function runCheckFor("),
       appSrc.indexOf("function renderCheck(")
     );
+    const batchBody = (/async function runBatchCheck\(cards\) \{([\s\S]*?)\n\}/.exec(appSrc) || [, ""])[1];
     const gateBody = appSrc.slice(
       appSrc.indexOf("function gateItems()"),
       appSrc.indexOf("function refreshGate()")
@@ -2859,6 +2860,19 @@ async function main() {
         /card\.updateReason = /.test(runCheckBody) &&
         /checkModule\(id, code, uid\)/.test(runCheckBody),
       "只比 (id, versionCode) 会让「换号之后界面还写着别人能发」"
+    );
+    // 这一条是踩出来的：`coolapkUid` 属于 SHARED_KEYS，不在 CARD_KEYS 里，而 cardValues()
+    // 只按 CARD_KEYS 建（当前卡）或从 card.values 拷（别的卡）—— 两条路都拿不到它。
+    // 所以 `cardValues(x).coolapkUid` 恒 undefined，uid 恒空串，后端只会回 null，
+    // 归属闸在**逐枚与批量两条路上**都是从没生效过的。不许再退回去读卡。
+    check(
+      "两条查重路径都现读表单拿 uid：coolapkUid 是 SHARED_KEYS，卡上根本没有这一格",
+      /const uid = fieldValue\("coolapkUid"\);/.test(runCheckBody) &&
+        !/cardValues\([^)]*\)\.coolapkUid/.test(codeOnly(appSrc)) &&
+        !/\bv\.coolapkUid\b/.test(codeOnly(runCheckBody)) &&
+        /const uid = fieldValue\("coolapkUid"\);/.test(batchBody) &&
+        /checkModulesBatch\(list\.map\(\(\{ id, versionCode \}\) => \(\{ id, versionCode, uid \}\)\)\)/.test(batchBody),
+      `逐枚=${/const uid = fieldValue\("coolapkUid"\);/.test(runCheckBody)} 批量=${/const uid = fieldValue\("coolapkUid"\);/.test(batchBody)}`
     );
     check(
       "门禁里那一格只认明确的 false：null（不知道）不许拦人",

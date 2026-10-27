@@ -1577,8 +1577,13 @@ async function runCheckFor(card) {
   const id = v.id;
   const code = v.versionCode;
   // 归属这一问要带上上传人 UID：后端只有在拿到 uid 且 status 是 version_update 时才会答
-  // 「这一版该不该由你发」。uid 不在卡上（它是整套共享的），所以每次现读表单。
-  const uid = v.coolapkUid || "";
+  // 「这一版该不该由你发」。
+  //
+  // **必须现读表单**，不能走 `cardValues(card).coolapkUid` —— 它是 `SHARED_KEYS` 里那一格，
+  // 不在 `CARD_KEYS` 里，而 `cardValues()` 只按 `CARD_KEYS` 建（当前卡）或从 `card.values`
+  // 拷（别的卡）。两条路都拿不到它，`v.coolapkUid` 恒为 `undefined` ⇒ uid 恒为空串 ⇒
+  // 后端永远只会回 `update_eligible: null`，归属闸在这条路上从来没生效过（批量那条同病，一起修）。
+  const uid = fieldValue("coolapkUid");
   const isActive = card === activeCard();
   if (!id || !/^\d+$/.test(code)) {
     setCheck(card, null, "", "");
