@@ -981,7 +981,7 @@ function statusOf(card) {
   // 但归属发不了的那一枚（update_eligible === false）不能跟着变绿：那一枚整单会被 403 拒掉，
   // 标成 ok 就是在教用户白抄一次签名。
   if (status === "version_update") {
-    if (card.updateEligible === false) return { tone: "warn", text: "版本更新 · 不是你的" };
+    if (ownershipOf(card) === "other") return { tone: "warn", text: "版本更新 · 不是你的" };
     return { tone: "ok", text: "版本更新 · 可上传" };
   }
   if (status === "new") return { tone: "ok", text: "没收录 · 可上传" };
@@ -1522,7 +1522,12 @@ async function runBatchCheck(cards) {
     .map(({ card, v }) => ({ card, id: v.id, versionCode: v.versionCode }));
   if (!list.length) return;
   for (const row of list) cancelCheck(row.card);
-  const r = await checkModulesBatch(list.map(({ id, versionCode }) => ({ id, versionCode })));
+  // 归属这一问要带上 uploader UID，和逐枚那条一个道理（`runCheckFor` 也是现读表单）。
+  // 现读表单而不是读 `cardValues(card)`：coolapkUid 是整套共享的那一格（SHARED_KEYS），
+  // 它不在卡上 —— 非当前卡的 `card.values` 里没有它，读卡的会恒拿到空串，
+  // 于是批量这条路的归属永远问不出来（这正是这次要修的那个缺口）。
+  const uid = fieldValue("coolapkUid");
+  const r = await checkModulesBatch(list.map(({ id, versionCode }) => ({ id, versionCode, uid })));
   state.checkVia = r.via;
   if (r.via !== "batch") {
     // 批量那一条没走通 ⇒ 回到逐枚那一条。原因留着给清单与说明页说（不假装查过）。
@@ -1532,13 +1537,18 @@ async function runBatchCheck(cards) {
   }
   for (const row of list) {
     if (!state.cards.includes(row.card)) continue;
-    const status = r.statuses.get(row.id);
+    const got = r.statuses.get(row.id);
     // 后端没给这一枚的结论 == 这一枚没查到，不等于「没被投过」：交回逐枚那一条再问一次。
-    if (!status) {
+    if (!got) {
       scheduleCheck(row.card, 0);
       continue;
     }
-    setCheck(row.card, status, checkKeyOf(row.id, row.versionCode), "");
+    // 归属三态跟着 status 一起落卡（同一次判定，不许分两处写）：
+    // 它决定闸门清单里那一发会不会被拦，而批量这条路正是「一键更新」走的那一条。
+    row.card.checkUid = uid;
+    row.card.updateEligible = got.updateEligible;
+    row.card.updateReason = got.updateReason || "";
+    setCheck(row.card, got.status, checkKeyOf(row.id, row.versionCode), "");
   }
   renderQueue();
   refreshGate();
@@ -1628,9 +1638,18 @@ async function runCheckFor(card) {
  *   false —— 不是你的：现在就该说清「别白抄签名了」，而不是等他填完一整页再被 403 打回来；
  *   null  —— 不知道（没填 UID / 后端还没这一格 / 请求失败）。**不许猜成 true 或 false**：
  *            猜 true 会让人白走一趟，猜 false 会诬告一次「这不是你的模块」。
+ *
+ * 这里多一道 `checkUid` 比对，理由与闸门清单那一格相同：归属结论是**某一次带着某个 UID
+ * 的询问**的产物，换了账号它就是上一个账号的答案。
  */
+function ownershipOf(card) {
+  if (!card || card.updateEligible === null) return null;
+  if ((card.checkUid || "") !== fieldValue("coolapkUid")) return null;
+  return card.updateEligible === true ? "mine" : "other";
+}
+
 function gateNote(card) {
-  if (!card || card.updateEligible !== false) return "";
+  if (ownershipOf(card) !== "other") return "";
   const why = card.updateReason ? `（服务端原话：「${card.updateReason}」）` : "";
   return (
     " 但这一版**发不了**：这个模块已被别人收录，只有原作者能发更新版本" +
@@ -1792,7 +1811,13 @@ function gateItems() {
   // 只有后端**明确**回了 false 才算 —— updateEligible 是 null（没填 UID / 后端还没这一格 /
   // 这一枚不是版本更新）时一律不进这一格：猜一个 false 就是诬告一次「这不是你的模块」。
   // 拦在这里而不是等提交被 403：签名是一次性的，白抄一次就烧掉了。
-  const notMine = targets.filter((c) => cardValues(c).versionCode && c.updateEligible === false);
+  //
+  // 还要比 `checkUid`：`invalidateCheck` 只清 status/key/why，不清这一格（清了也没用 ——
+  // 它和 status 是同一次判定的产物）。换了账号而没重查时，上一轮那句「不是你的」说的是
+  // 上一个 UID 的事；只认「这个结论是在当前这个 UID 下问到的」才准许它拦人。
+  // 判据收在 ownershipOf 一处 —— 队列那枚 chip 与这道闸各写一份，迟早会漂成
+  // 「清单说能发、屏幕说不是你的」。那个函数在这里声明在后面，但函数声明有提升。
+  const notMine = targets.filter((c) => cardValues(c).versionCode && ownershipOf(c) === "other");
 
   // 下面每一格说的都是**这一整套**，不是「当前这一枚」—— 因为提交是整套一次。
   // 所以每一格都要点不出「是哪一枚」（枚数一多，「还差一步」不说差在哪一枚就等于没说）。

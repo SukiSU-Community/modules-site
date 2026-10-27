@@ -441,14 +441,25 @@ export async function reportModule(body) {
 }
 
 /**
- * 批量查重（§17.6）：`POST /check` 收 `{ modules:[{ id, versionCode }] }` ⇒ `{ results:[{ id, status }] }`，
- * `status` 沿用今天那四个值。上面那条 `GET /check` 一字没动 —— App 在读它。
+ * 批量查重（§17.6）：`POST /check` 收 `{ modules:[{ id, versionCode, uid? }] }`
+ * ⇒ `{ results:[{ id, status, update_eligible, reason }] }`，`status` 沿用今天那四个值。
+ * 上面那条 `GET /check` 一字没动 —— App 在读它。
+ *
+ * `uid` 是**每枚可选**的（后端按枚判）：带上它，`status === "version_update"` 的那几枚才会
+ * 多回一格归属判断。为什么非要在这里带上：这条路是「一批包解析完就一次问完」的入口，
+ * 而归属闸要的正是每一枚的归属 —— 不带的话，批量回来的 `updateEligible` 全是 null，
+ * 上传页那张「这不是你的模块」的闸对这条路就是空的，用户会填完一整页、烧完一次签名，
+ * 最后被 `/submit` 的 403 打回来。
  *
  * 读回来的形状逐条判过才认：非 2xx、不是 JSON、results 不是数组、status 不在那四个值里，
  * 任何一种都算「这一档没判成」而不是「没重复」。失效方向必须是**不拦**：
  * 把「读不懂」说成「已被上传过」，就是把一个查不到的东西说成查到了。
  * 逐枚落状态用 `single` 那条路兜底（上面那个端点今天就在跑），所以后端还没上批量这一条时
  * 这里退回逐枚 GET，功能不降级、只是多打几个请求。
+ *
+ * 返回值从 `statuses: Map<id, status字符串>` 改成 `statuses: Map<id, {status, updateEligible, updateReason}>`：
+ * 归属那一格与 status 属于**同一次判定**，分两个 Map 返回就迟早有一处只读了一个。
+ * 调用点只有 app.js 的 runBatchCheck 一处，改形状比给字符串挂属性安全。
  */
 export async function checkModulesBatch(modules) {
   if (!IS_API_CONFIGURED) {
@@ -457,7 +468,14 @@ export async function checkModulesBatch(modules) {
   const payload = {
     modules: (Array.isArray(modules) ? modules : [])
       .filter((m) => m && String(m.id || "").trim())
-      .map((m) => ({ id: String(m.id).trim(), versionCode: m.versionCode })),
+      .map((m) => {
+        const one = { id: String(m.id).trim(), versionCode: m.versionCode };
+        // 只在真有值时带上：`uid: ""` 与「没带」在后端是同一件事，但少带一个键让
+        // 「这次请求里有没有问归属」在网络上就能看出来（排障时不用去猜）。
+        const who = String(m.uid || "").trim();
+        if (who) one.uid = who;
+        return one;
+      }),
   };
   if (!payload.modules.length) return { statuses: new Map(), why: "", via: "single" };
   try {
@@ -476,7 +494,13 @@ export async function checkModulesBatch(modules) {
     const statuses = new Map();
     for (const row of rows) {
       if (!row || typeof row.id !== "string") continue;
-      if (typeof row.status === "string" && CHECK_STATUS[row.status]) statuses.set(row.id, row.status);
+      if (!(typeof row.status === "string" && CHECK_STATUS[row.status])) continue;
+      // 归属三态与 GET 那条同一个读法：只有后端明确给 true/false 才写进来，
+      // 缺省留 null（= 这一问没有答案）。把「没这一格」读成 false 会在屏幕上诬告一次。
+      let updateEligible = null;
+      if (row.update_eligible === true || row.update_eligible === false) updateEligible = row.update_eligible;
+      const updateReason = typeof row.reason === "string" ? row.reason : "";
+      statuses.set(row.id, { status: row.status, updateEligible, updateReason });
     }
     return { statuses, why: "", via: "batch" };
   } catch {

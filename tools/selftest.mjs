@@ -2757,7 +2757,7 @@ async function main() {
     );
     check(
       "statusOf 的 version_update 分支：可上传走 ok、归属不符的那一枚不许跟着变绿",
-      /if \(status === "version_update"\) \{[\s\S]*?updateEligible === false[\s\S]*?tone: "warn"[\s\S]*?tone: "ok", text: "版本更新 · 可上传"/.test(
+      /if \(status === "version_update"\) \{[\s\S]*?ownershipOf\(card\) === "other"[\s\S]*?tone: "warn"[\s\S]*?tone: "ok", text: "版本更新 · 可上传"/.test(
         statusBody
       ) &&
         /"版本更新 · 可上传": "更新"/.test(appSrc) &&
@@ -2862,14 +2862,19 @@ async function main() {
     );
     check(
       "门禁里那一格只认明确的 false：null（不知道）不许拦人",
-      /const notMine = targets\.filter\(\(c\) => cardValues\(c\)\.versionCode && c\.updateEligible === false\);/.test(
+      /const notMine = targets\.filter\(\(c\) => cardValues\(c\)\.versionCode && ownershipOf\(c\) === "other"\);/.test(
         gateBody
-      ) && /if \(notMine\.length\) \{/.test(gateBody),
+      ) &&
+        /if \(notMine\.length\) \{/.test(gateBody) &&
+        // 判据收在 ownershipOf 一处：闸门与 chip 各写一份，迟早漂成「清单说能发、屏幕说不是你的」。
+        // 它内部第一行就把 null 挡回去 —— 不知道就是不知道，不许折成 false。
+        /function ownershipOf\(card\) \{[\s\S]*?if \(!card \|\| card\.updateEligible === null\) return null;/.test(appSrc) &&
+        /return card\.updateEligible === true \? "mine" : "other";/.test(appSrc),
       "猜一个 false 就是诬告一次「这不是你的模块」，而它可能只是后端还没这一格"
     );
     check(
       "界面上「不知道」与「不行」分开说：gateNote 只在 false 时开口",
-      /function gateNote\(card\) \{[\s\S]*?card\.updateEligible !== false[\s\S]*?return "";/.test(appSrc) &&
+      /function gateNote\(card\) \{[\s\S]*?ownershipOf\(card\) !== "other"[\s\S]*?return "";/.test(appSrc) &&
         /gateNote\(card\)/.test(runCheckBody),
       "把 null 也说成「发不了」，等于替后端编了一个它没给的判决"
     );
