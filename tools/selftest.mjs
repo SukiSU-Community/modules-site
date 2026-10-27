@@ -2700,6 +2700,365 @@ async function main() {
     );
   }
 
+  // ---- 版本更新说真话（契约 §4.1）/ 归属三态（§3.1）/ 我的模块与一键更新（§4.2 §4.3）----
+  // 这一组钉的是本轮最容易「改回去也不报错」的那几处：
+  //   ① 页面从前教人「版本更新永远进不去」，而它其实进得去 —— 假话比缺失更坏，
+  //      因为它会让人放弃一次本来会成功的上传；
+  //   ② 归属只有一条来源（/check 带 uid 之后后端回的 update_eligible）。前端要是自己猜，
+  //      猜 true 会放人去烧一次性签名，猜 false 会诬告一次「这不是你的模块」；
+  //   ③ 「我的模块」是便利不是闸：读不到、令牌失效、清单为空都不许挡首投、不许弹错。
+  {
+    const {
+      checkModule,
+      fetchMine,
+      CHECK_STATUS,
+      SUBMIT_ERROR_TEXT,
+    } = await import("../public/scripts/api.js");
+
+    const statusBody = (/function statusOf\(card\) \{([\s\S]*?)\n\}/.exec(appSrc) || [, ""])[1];
+    const checkExtraBody = appSrc.slice(
+      appSrc.indexOf("const CHECK_EXTRA = {"),
+      appSrc.indexOf("const checkTimers")
+    );
+    const runCheckBody = appSrc.slice(
+      appSrc.indexOf("async function runCheckFor("),
+      appSrc.indexOf("function renderCheck(")
+    );
+    const gateBody = appSrc.slice(
+      appSrc.indexOf("function gateItems()"),
+      appSrc.indexOf("function refreshGate()")
+    );
+    const paintMineBody = (/function paintMine\(\) \{([\s\S]*?)\n\}/.exec(appSrc) || [, ""])[1];
+    const loadMineBody = (/async function loadMine\(\) \{([\s\S]*?)\n\}/.exec(appSrc) || [, ""])[1];
+    const prefillBody = (/function prefillFromMine\(row\) \{([\s\S]*?)\n\}/.exec(appSrc) || [, ""])[1];
+    const gapsBody = (/function cardGaps\(card\) \{([\s\S]*?)\n\}/.exec(appSrc) || [, ""])[1];
+    const backendFailureBody = (/function backendFailure\(status, json, body\) \{([\s\S]*?)\n\}/.exec(apiSrc) || [, ""])[1];
+    const successBody = (/function showSuccess\(res\) \{([\s\S]*?)\n\}/.exec(appSrc) || [, ""])[1];
+    // 这些断言看的是**画到屏幕上的字**，不是注释：本轮改文案时注释里特意留了「这句原来说什么」，
+    // 拿整份源码去匹配假陈述，会把「记录历史」当成「还在说假话」。
+    const codeOnly = (src) => src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+
+    // ① 假陈述清干净：三处界面文案 + 一句成功页，全都不许再说「不会被自动合进索引」。
+    check(
+      "版本更新这一档的正文不再说「不会被自动合进索引」，改说与首投同一套机器判据",
+      checkExtraBody.length > 100 &&
+        !/不会被自动合进索引/.test(codeOnly(checkExtraBody)) &&
+        /同一套机器判据/.test(checkExtraBody) &&
+        !/没有人可以签它进来/.test(codeOnly(apiSrc)) &&
+        !/不会被自动合进索引/.test(CHECK_STATUS.version_update.hint) &&
+        /自动进索引/.test(CHECK_STATUS.version_update.hint),
+      `CHECK_EXTRA=${checkExtraBody.length}ch hint=${CHECK_STATUS.version_update.hint.slice(0, 20)}…`
+    );
+    check(
+      "四个 status 键一个没动、version_update 由 warn 转 ok（可上传就不是「等审核」）",
+      ["new", "version_update", "recorded", "unknown"].every((k) => CHECK_STATUS[k] && CHECK_STATUS[k].tone) &&
+        CHECK_STATUS.version_update.tone === "ok",
+      `tones=${["new", "version_update", "recorded", "unknown"].map((k) => CHECK_STATUS[k] && CHECK_STATUS[k].tone).join("/")}`
+    );
+    check(
+      "statusOf 的 version_update 分支：可上传走 ok、归属不符的那一枚不许跟着变绿",
+      /if \(status === "version_update"\) \{[\s\S]*?updateEligible === false[\s\S]*?tone: "warn"[\s\S]*?tone: "ok", text: "版本更新 · 可上传"/.test(
+        statusBody
+      ) &&
+        /"版本更新 · 可上传": "更新"/.test(appSrc) &&
+        /"版本更新 · 不是你的": "非本人"/.test(appSrc),
+      `分支=${/版本更新 · 可上传/.test(statusBody)} 短标签=${/版本更新 · 不是你的/.test(appSrc)}`
+    );
+    check(
+      "成功页不再说「版本更新不会自动合入、没有人工放行这一格」",
+      !/不会自动合入/.test(codeOnly(successBody)) &&
+        !/人工放行/.test(codeOnly(successBody)) &&
+        /版本更新还多一道归属闸/.test(successBody),
+      "成功页那句是用户读得最认真的一段，留着就是让人以为更新永远进不去"
+    );
+    check(
+      "说明页与确认项同步改口（三处），且第 5 步那一格仍是 gate 类",
+      !/不会自动合入/.test(html) &&
+        !/没有人可以签它进来/.test(html) &&
+        !/可能一直进不去/.test(html) &&
+        !/版本更新不自动合并/.test(html) &&
+        html.includes('<li class="gate">') &&
+        /归属闸/.test(html) &&
+        !html.includes("人工审核"),
+      "说明页还在教旧规矩，而上传页已经按新规矩放行"
+    );
+
+    // ② 归属三态：uid 传不传、后端给不给、给的是 true 还是 false，四种都要分得开。
+    {
+      const realFetch = globalThis.fetch;
+      const calls = [];
+      const run = async (body, { status = 200, uid } = {}) => {
+        globalThis.fetch = async (u) => {
+          calls.push(String(typeof u === "string" ? u : u.url));
+          return new Response(typeof body === "string" ? body : JSON.stringify(body), {
+            status,
+            headers: { "content-type": "application/json" },
+          });
+        };
+        try {
+          return uid === undefined ? await checkModule("a".repeat(12), 7) : await checkModule("a".repeat(12), 7, uid);
+        } finally {
+          globalThis.fetch = realFetch;
+        }
+      };
+      try {
+        const noUid = await run({ status: "version_update" });
+        const withUid = await run({ status: "version_update", update_eligible: true, reason: "" }, { uid: "1234567" });
+        const denied = await run(
+          { status: "version_update", update_eligible: false, reason: "该模块已由其他投稿者收录" },
+          { uid: "1234567" }
+        );
+        const notVer = await run({ status: "new", update_eligible: true }, { uid: "1234567" });
+        const garbage = await run({ status: "whatever", update_eligible: "yes" }, { uid: "1234567" });
+        check(
+          "不传 uid 时请求里没有 uid 这一格（App 那条老路径逐字不变）",
+          !calls[0].includes("uid=") && /versionCode=7/.test(calls[0]) && noUid.updateEligible === null,
+          calls[0]
+        );
+        check(
+          "传了 uid 就带上，且三态分得开：true / false / 缺省一律 null",
+          calls[1].includes("uid=1234567") &&
+            withUid.updateEligible === true &&
+            denied.updateEligible === false &&
+            denied.updateReason.length > 0 &&
+            notVer.updateEligible === true &&
+            garbage.updateEligible === null &&
+            garbage.status === "unknown",
+          `true=${withUid.updateEligible} false=${denied.updateEligible} 非版本更新=${notVer.updateEligible} 脏值=${garbage.updateEligible}/${garbage.status}`
+        );
+        check(
+          "checkModule 返回对象而不是裸字符串（归属那两格必须与 status 一起回来）",
+          typeof noUid === "object" && noUid !== null && typeof noUid.status === "string",
+          `typeof=${typeof noUid}`
+        );
+        check(
+          "网络抛错仍抛 BackendError，不被吞成 unknown",
+          await (async () => {
+            globalThis.fetch = async () => {
+              throw new Error("断网");
+            };
+            try {
+              await checkModule("a".repeat(12), 7);
+              return false;
+            } catch (e) {
+              return e && e.kind === "network";
+            } finally {
+              globalThis.fetch = realFetch;
+            }
+          })(),
+          "查重失败与「没重复」是两件事，吞掉就变成「可以传」"
+        );
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    }
+    check(
+      "查重的缓存判据把 uid 一起比：换号而 (id, versionCode) 不变时结论会变",
+      /card\.checkKey === key && \(card\.checkUid \|\| ""\) === uid/.test(runCheckBody) &&
+        /card\.updateEligible = /.test(runCheckBody) &&
+        /card\.updateReason = /.test(runCheckBody) &&
+        /checkModule\(id, code, uid\)/.test(runCheckBody),
+      "只比 (id, versionCode) 会让「换号之后界面还写着别人能发」"
+    );
+    check(
+      "门禁里那一格只认明确的 false：null（不知道）不许拦人",
+      /const notMine = targets\.filter\(\(c\) => cardValues\(c\)\.versionCode && c\.updateEligible === false\);/.test(
+        gateBody
+      ) && /if \(notMine\.length\) \{/.test(gateBody),
+      "猜一个 false 就是诬告一次「这不是你的模块」，而它可能只是后端还没这一格"
+    );
+    check(
+      "界面上「不知道」与「不行」分开说：gateNote 只在 false 时开口",
+      /function gateNote\(card\) \{[\s\S]*?card\.updateEligible !== false[\s\S]*?return "";/.test(appSrc) &&
+        /gateNote\(card\)/.test(runCheckBody),
+      "把 null 也说成「发不了」，等于替后端编了一个它没给的判决"
+    );
+    check(
+      "归属两个码都在表里，且归属方分得开（not_owner 是你的问题 / owner_unknown 是我们的）",
+      SUBMIT_ERROR_TEXT.not_owner &&
+        SUBMIT_ERROR_TEXT.not_owner.owner === "you" &&
+        SUBMIT_ERROR_TEXT.owner_unknown &&
+        SUBMIT_ERROR_TEXT.owner_unknown.owner === "us" &&
+        /首发/.test(SUBMIT_ERROR_TEXT.not_owner.text) &&
+        /fail-closed/.test(SUBMIT_ERROR_TEXT.owner_unknown.text),
+      `not_owner=${SUBMIT_ERROR_TEXT.not_owner && SUBMIT_ERROR_TEXT.not_owner.owner} owner_unknown=${SUBMIT_ERROR_TEXT.owner_unknown && SUBMIT_ERROR_TEXT.owner_unknown.owner}`
+    );
+    check(
+      "backendFailure 不按状态码猜归属：403 表外照 serviceSideHint 说「没归到哪一种」",
+      backendFailureBody.length > 100 &&
+        /const detail = known \? known\.text : serviceSideHint\(status, reason\);/.test(backendFailureBody) &&
+        !/status === 403/.test(backendFailureBody) &&
+        /owner: known \? known\.owner : status >= 500 \? "us" : "unknown"/.test(backendFailureBody),
+      "凭 403 猜一条文案，就是把「我们查不出来」说成「你不是本人」"
+    );
+    check(
+      "码表每一条都声明了归属方（you / us），没有第三档、也没有漏写",
+      (() => {
+        const body = apiSrc.slice(apiSrc.indexOf("export const SUBMIT_ERROR_TEXT"), apiSrc.indexOf("\n};", apiSrc.indexOf("export const SUBMIT_ERROR_TEXT")));
+        const owners = [...body.matchAll(/^ {2}[a-z_][a-z0-9_]*: \{\s*\n {4}owner: "([^"]+)"/gm)].map((m) => m[1]);
+        return owners.length >= 15 && owners.every((o) => o === "you" || o === "us");
+      })(),
+      "归属方决定失败页让用户改包还是让他等我们 —— 写错就是把责任推给了错的人"
+    );
+
+    // ③ 我的模块：便利不是闸。四种「问不到」全都不许弹错、不许清会话。
+    {
+      const realFetch = globalThis.fetch;
+      const calls = [];
+      const run = async (body, { status = 200, token = "a".repeat(64) } = {}) => {
+        globalThis.fetch = async (u) => {
+          calls.push(String(typeof u === "string" ? u : u.url));
+          return new Response(typeof body === "string" ? body : JSON.stringify(body), {
+            status,
+            headers: { "content-type": "application/json" },
+          });
+        };
+        try {
+          return await fetchMine(token);
+        } finally {
+          globalThis.fetch = realFetch;
+        }
+      };
+      try {
+        const bad = await fetchMine("不是令牌");
+        check("令牌形状不对一次请求都不发（别拿半截令牌去打后端）", calls.length === 0 && bad.ok === false, `calls=${calls.length}`);
+        const good = await run({
+          ok: true,
+          degraded: false,
+          modules: [
+            { id: "abcdef12", name: "甲", author: "我", version: "2.1.0", versionCode: 21, sha256: "0".repeat(64), source: "" },
+            { id: "", name: "没有 ID 的那一条" },
+            null,
+          ],
+        });
+        check(
+          "ok:true ⇒ 归一化成白名单字段，没有 ID 的条目丢掉（空卡混进队列就预填不了）",
+          good.ok === true &&
+            good.degraded === false &&
+            good.modules.length === 1 &&
+            good.modules[0].id === "abcdef12" &&
+            good.modules[0].versionCode === "21" &&
+            good.modules[0].version === "2.1.0",
+          JSON.stringify(good.modules)
+        );
+        check("请求打到 /mine 且令牌在查询串里", /\/mine\?token=/.test(calls[calls.length - 1]), calls[calls.length - 1]);
+        const degraded = await run({ ok: true, degraded: true, modules: [] });
+        check(
+          "degraded:true 照样 ok:true（「这次没读到索引」不是失败，更不是「你没有模块」）",
+          degraded.ok === true && degraded.degraded === true && degraded.modules.length === 0,
+          JSON.stringify(degraded)
+        );
+        const expired = await run({ ok: false, error: "令牌失效，请重新验证" }, { status: 401 });
+        const expired200 = await run({ ok: false, error: "令牌失效，请重新验证" });
+        check(
+          "令牌失效（401/403 或 ok:false）⇒ ok:false 且**不带** transient：这才是「服务端看了并拒了」",
+          expired.ok === false && !expired.transient && expired200.ok === false && !expired200.transient,
+          JSON.stringify({ expired, expired200 })
+        );
+        const broken = [];
+        for (const st of [500, 502, 429]) broken.push(await run({ ok: true, modules: [] }, { status: st }));
+        globalThis.fetch = async () => {
+          throw new Error("断网");
+        };
+        let threw = null;
+        try {
+          threw = await fetchMine("b".repeat(64));
+        } catch (e) {
+          threw = "抛出来了";
+        } finally {
+          globalThis.fetch = realFetch;
+        }
+        const notJson = await run("{ 坏掉的");
+        check(
+          "5xx / 429 / 断网 / 非 JSON 一律 transient（部署中的 502 不该说成「你的令牌失效了」）",
+          broken.every((x) => x.ok === false && x.transient === true) &&
+            threw && threw.ok === false && threw.transient === true &&
+            notJson.ok === false && notJson.transient === true,
+          JSON.stringify({ broken: broken.map((x) => x.transient), threw, notJson })
+        );
+        check(
+          "fetchMine 从不抛（附属信息不该把整页拖成失败态）",
+          threw !== "抛出来了",
+          String(threw)
+        );
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    }
+    check(
+      "「我的模块」那一格默认是藏的，且容器/清单/注脚三件都在 html 里",
+      /<div class="mine" id="mine-bar" hidden>/.test(html) &&
+        html.includes('id="mine-list"') &&
+        html.includes('id="mine-note"') &&
+        html.includes('id="mine-n"') &&
+        /\.mine__list \{[\s\S]{0,240}?max-height/.test(cssSrc) &&
+        /\.mine__note:empty \{[\s\S]{0,40}?display: none/.test(cssSrc),
+      "少一件就是页面上永远没有这一格，而 selftest 照样绿"
+    );
+    check(
+      "只有会话成立（属于输入框那个人）才亮；读不到 / 空清单都不弹错、不清会话",
+      /const show = sessionFor\(uid\) && \(mine\.loading \|\| mine\.rows\.length > 0 \|\| mine\.degraded\);/.test(
+        paintMineBody
+      ) &&
+        /这次没读到公开索引，清单可能不全/.test(paintMineBody) &&
+        !/clearSession\(\)/.test(loadMineBody) &&
+        !/alert\(/.test(loadMineBody) &&
+        /state\.mine\.asked = "";/.test(loadMineBody),
+      "把「读不到」画成「你没有模块」，就是拿一次索引抖动骗用户说他没投过东西"
+    );
+    check(
+      "藏起来时把清单内容一并清掉：退出验证之后 DOM 里不许还留着上一个人的模块名",
+      (() => {
+        // 只看 paintMine 里 `if (!show)` 那一段：清 list / note / n 三件都得在 return 之前。
+        const hide = /if \(!show\) \{([\s\S]*?)\n {2}\}/.exec(paintMineBody);
+        if (!hide) return false;
+        const body = hide[1];
+        return (
+          /bar\.hidden = true;/.test(body) &&
+          /\$\("#mine-list"\)/.test(body) &&
+          /\$\("#mine-note"\)/.test(body) &&
+          /\$\("#mine-n"\)/.test(body) &&
+          /return;/.test(body)
+        );
+      })(),
+      "现在它只是 hidden：任何一处「只切 hidden」的将来改动都会把别人的清单露出来"
+    );
+    check(
+      "清单属于某一串令牌：asked 记的是哪一串，换人就重问、退出就清空",
+      /if \(state\.mine\.asked === token\)/.test(loadMineBody) &&
+        /state\.mine\.asked = token;/.test(loadMineBody) &&
+        /\(state\.session \? state\.session\.token : ""\) !== token/.test(loadMineBody) &&
+        /state\.mine = \{ asked: "", rows: \[\], degraded: false, loading: false \};/.test(appSrc) &&
+        /^ {2}bindMine\(\);$/m.test(appSrc),
+      "留着上一个人的清单，就是「看起来已经退出了其实没有」"
+    );
+    check(
+      "一键更新三处留白：version 空、versionCode = 当前 +1、file 为 null（选包前不进提交集）",
+      /makeCard\(null\)/.test(prefillBody) &&
+        /version: ""/.test(prefillBody) &&
+        /versionCode: base \? String\(base \+ 1\) : ""/.test(prefillBody) &&
+        /requestSwap\(card\)/.test(prefillBody) &&
+        /c\.file && !isRecorded\(c\) && !c\.ack/.test(appSrc),
+      "替他猜版本串等于替他发错版；给预填卡补 file 就等于绕开 submitTargets 那道过滤"
+    );
+    check(
+      "版本号必须大于已收录那一版（等号也不行），且这一格说的是「还没选包」而不是「坏包」",
+      /const base = card\.fromMine \? Number\(card\.fromMine\.versionCode\) \|\| 0 : 0;/.test(gapsBody) &&
+        /Number\(v\.versionCode\) <= base/.test(gapsBody) &&
+        /gaps\.push\("还没选包"\)/.test(gapsBody),
+      "混成一句会让从「我的模块」来的卡看起来像坏包，而它只是还没选包"
+    );
+    check(
+      "卡上写出已收录的那一版读数，且编辑条不再裸用 cur.file.name（预填卡没有 file）",
+      /zipcard__was/.test(appSrc) &&
+        /\.zipcard__was \{/.test(cssSrc) &&
+        /当前已收录：/.test(appSrc) &&
+        /cur\.file \? cur\.file\.name : "还没选包"/.test(appSrc) &&
+        !/v\.id \|\| cur\.file\.name/.test(appSrc),
+      "裸用 cur.file.name 会在预填卡上抛 TypeError，队列一多就整块画不出来"
+    );
+  }
+
   // 总结行不许把跳过藏进后缀。fork 里没有 contrib，跨仓库那几组永远不跑，
   // 而「全部通过」四个字会让所有人以为公式被验过 —— 恰恰在钉最少的地方写得最像钉住了。
   // 所以：有跳过时不说「全部通过」，且把缺席的条数写在同一行里。

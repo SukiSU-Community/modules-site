@@ -30,6 +30,7 @@ import {
   normalizeCoolapkUrl,
   reportModule,
   fetchReportQueue,
+  fetchMine,
   checkSession,
   revokeSession,
 } from "./api.js";
@@ -119,6 +120,12 @@ const state = {
   // 批量查重那一条路本轮到底走没走过（措辞要能指得出是哪一种查的法子），以及走不通的原因。
   checkVia: "",
   checkWhy: "",
+  /* 「我的模块」：`GET /mine` 的读数。
+     rows 只放后端认下来的条目；asked 记的是**问过哪一串令牌** —— 会话换了、UID 换了都要重问，
+     只按「有没有问过」判会拿上一张令牌的清单给下一个人看。
+     degraded 单独留着：索引读不到时清单是空的，界面上那句「没读过索引」与「你确实还没有模块」
+     必须说得不一样，否则一次索引抖动就变成一句关于用户的假话。 */
+  mine: { asked: "", rows: [], degraded: false, loading: false },
 };
 
 /* ------------------------------------------------------------------ 小工具 */
@@ -213,8 +220,16 @@ function makeCard(file) {
     zipSha: "",
     checkStatus: null, // /check 给的那一档；来源一换就当作没有（见 checkOf）
     checkKey: "", // 这份结论属于哪个 (id, versionCode) 组合
+    checkUid: "", // 以及它是在哪个酷安 UID 下问到的（换了号，归属那两格会变）
     checkRun: "", // 正在查的是哪个组合（用来区分「还没查」与「正在查」）
     checkWhy: "", // 查不成时的原话（服务端/网络给的原因）
+    // 归属：后端 /check 带 uid 时回的 update_eligible / reason。null = 还没问 / 后端没这一格，
+    // 一律当作「不知道」，绝不当成 true —— 猜 true 会放人去烧签名，猜 false 会诬告一次。
+    updateEligible: null,
+    updateReason: "",
+    // 这张卡是从「我的模块」点「上传新版本」来的：它带着已收录那一版的读数，
+    // 用来卡住「版本号必须大于当前值」这条，也用来在卡上写出「当前是第几版」。
+    fromMine: null,
     values: emptyValues(),
     auto: {}, // 这一枚里哪些字段是被 module.prop 预填的（下一次预填可以覆盖它）
     term: [],
@@ -962,7 +977,13 @@ function statusOf(card) {
   if (card.ack) return { tone: "ok", text: "后端已回执" };
   const status = checkOf(card);
   if (status === "recorded") return { tone: "muted", text: "已被上传过 · 摘出" };
-  if (status === "version_update") return { tone: "warn", text: "版本更新" };
+  // 版本更新与首投走同一套机器判据，过了就自动进索引 —— 所以它是「可上传」，不是「等审核」。
+  // 但归属发不了的那一枚（update_eligible === false）不能跟着变绿：那一枚整单会被 403 拒掉，
+  // 标成 ok 就是在教用户白抄一次签名。
+  if (status === "version_update") {
+    if (card.updateEligible === false) return { tone: "warn", text: "版本更新 · 不是你的" };
+    return { tone: "ok", text: "版本更新 · 可上传" };
+  }
   if (status === "new") return { tone: "ok", text: "没收录 · 可上传" };
   if (status === "unknown") return { tone: "warn", text: "查重未确认" };
   if (card.checkRun) return { tone: "idle", text: "查重中" };
@@ -981,7 +1002,18 @@ function cardGaps(card) {
   for (const key of CARD_REQUIRED_KEYS) if (!v[key]) gaps.push(FIELD_NAMES[key]);
   if (v.versionCode && !/^\d+$/.test(v.versionCode)) gaps.push("版本号不是整数");
   if (v.source && !normalizeCoolapkUrl(v.source)) gaps.push("出处不是酷安站内链接");
-  if (!card.zipSha) gaps.push(card.zip ? "整包哈希还没算完" : "包体没解析成功");
+  // 版本更新这一档的版本号必须**大于**已收录那一版：后端按同一套判据拦，前端先拦一道，
+  // 理由是签名一次性 —— 抄完再被拒，那一串就白烧了。等号也算不行（同版重发没有意义）。
+  const base = card.fromMine ? Number(card.fromMine.versionCode) || 0 : 0;
+  if (base && /^\d+$/.test(v.versionCode) && Number(v.versionCode) <= base) {
+    gaps.push(`版本号要大于已收录的 ${base}`);
+  }
+  // 包体这一格分三种说法：没选包（预填卡就是这样）、选了但没解析成、解析成了但哈希还没算完。
+  // 混成一句「包体没解析成功」会让从「我的模块」来的卡看起来像坏包，而它只是还没选包。
+  if (!card.zipSha) {
+    if (!card.file && !card.zip) gaps.push("还没选包");
+    else gaps.push(card.zip ? "整包哈希还没算完" : "包体没解析成功");
+  }
   const limit = state.limits.maxBytes;
   if (limit !== null && card.file && card.file.size > limit) gaps.push(`超出单枚上限 ${fmtBytes(card.file.size)}`);
   return gaps;
@@ -1030,7 +1062,8 @@ const SHORT_STATUS = {
   "随这套提交中": "提交中",
   "后端已回执": "已回执",
   "已被上传过 · 摘出": "已上传",
-  "版本更新": "更新",
+  "版本更新 · 可上传": "更新",
+  "版本更新 · 不是你的": "非本人",
   "没收录 · 可上传": "可上传",
   "查重未确认": "未确认",
   "查重中": "查重中",
@@ -1063,6 +1096,14 @@ function zipCard(card) {
   pick.append(node("span", "zipcard__id", v.id || "（还没解析出模块 ID）"));
   const meta = [v.version ? `v${v.version}` : "", v.versionCode ? `code ${v.versionCode}` : ""].filter(Boolean).join(" · ");
   pick.append(node("span", "zipcard__meta", meta || "—"));
+  // 从「我的模块」来的那一枚要写出「它是从哪一版往上走」：只写新填的 code 101 而不说当前是 100，
+  // 用户没法判断自己是不是跳错了版本 —— 这一行是那一格唯一的上下文。
+  if (card.fromMine) {
+    const was = [card.fromMine.version ? `v${card.fromMine.version}` : "", card.fromMine.versionCode ? `versionCode ${card.fromMine.versionCode}` : ""]
+      .filter(Boolean)
+      .join(" / ");
+    pick.append(node("span", "zipcard__was", `当前已收录：${was || "（后端没给版本）"}`));
+  }
   // 状态标签排在格子里（跟在版本行下面）：墙角放不下「没收录 · 可上传」这么长的字，
   // 贴角会压住图标 —— 所以走正常流，短文案上台面，整句留给 title 与读屏。
   const st = statusOf(card);
@@ -1197,7 +1238,7 @@ function renderEditing() {
   box.hidden = false;
   box.textContent = "";
   box.append(
-    node("span", null, `正在编辑第 ${at + 1} / ${state.cards.length} 枚：${v.id || cur.file.name}`),
+    node("span", null, `正在编辑第 ${at + 1} / ${state.cards.length} 枚：${v.id || (cur.file ? cur.file.name : "还没选包")}`),
     " "
   );
   const nav = node("span", "editing__nav");
@@ -1427,8 +1468,9 @@ function showCheck(tone, chip, title, desc) {
  * 这里加的是「这道前端预拦能做到什么、做不到什么」，属于本页的说明，不是第二份判据。
  *
  * 措辞的边界要说真话，三句都不能少：
- * ① 公开索引里没有上传人 UID（build-index 的投影层故意不带）⇒ 只能说「这个 id 已被上传过」，
- *    **不能暗示归属** —— 说成「你投过了」或「别人投过了」都是猜；
+ * ① 公开索引里没有上传人 UID（build-index 的投影层故意不带）⇒ 光看索引只能说「这个 id 已被上传过」，
+ *    **不能从索引暗示归属**；归属只有一条来源：`/check` 带上 uid 之后后端回的 `update_eligible`。
+ *    所以下面这段正文里仍然不写「别人传的」，那句话改由 gateNote() 按 update_eligible 说。
  * ② 正在待审（pending/ 里、还没合进索引）的同 id 今天查不到 ⇒ 这一档拦不住，得后端加一档状态；
  * ③ 摘出之后签名那一串会变 —— 签名绑的是这套的全集，少一枚就是另一个前缀。
  */
@@ -1437,9 +1479,12 @@ const CHECK_EXTRA = {
     " 这一枚已经从本次上传里摘出去了：不进 manifest、不进签名那一串、也不提交。" +
     "摘出去之后屏幕上那一串签名就按剩下的那几枚重算 —— 已经抄进签名的那串要重抄一次。" +
     "它只看公开索引里的模块 ID：索引里不带酷安 UID，所以分不清「已被上传过」那一条是谁上传的；" +
-    "还在审核里、没合进索引的上传今天查不到。想留着看就由你留着，队列里点「移除」。",
+    "还在审核里、没合进索引的上传今天查不到。想留着看就由你留着，队列里点「移除」。" +
+    "自己的模块不用在这一页猜：验证过 UID 之后，「我的模块」那一格列着它们，点「上传新版本」就接着发。",
+  // 这句原来说「不会被自动合进索引」—— 那是假话（契约 §4.1 点名要改）。版本更新与首投走
+  // 同一套机器判据，过了就自动进索引；页面从前教人「更新永远进不去」，而它其实进得去。
   version_update:
-    " 这不是重复，所以它留在这一套里照常要上传 —— 只是「对已收录模块的版本更新」不会被自动合进索引。",
+    " 这不是重复，所以它留在这一套里照常要上传 —— 版本更新会按同一套机器判据审核，通过后自动进索引。",
 };
 
 const checkTimers = new Map();
@@ -1521,6 +1566,9 @@ async function runCheckFor(card) {
   const v = cardValues(card);
   const id = v.id;
   const code = v.versionCode;
+  // 归属这一问要带上上传人 UID：后端只有在拿到 uid 且 status 是 version_update 时才会答
+  // 「这一版该不该由你发」。uid 不在卡上（它是整套共享的），所以每次现读表单。
+  const uid = v.coolapkUid || "";
   const isActive = card === activeCard();
   if (!id || !/^\d+$/.test(code)) {
     setCheck(card, null, "", "");
@@ -1528,23 +1576,33 @@ async function runCheckFor(card) {
     return;
   }
   const key = checkKeyOf(id, code);
-  if (card.checkStatus && card.checkKey === key) {
+  // uid 也是这一问的输入：换了账号而 (id, versionCode) 没变，结论照样会变。
+  // 所以缓存命中要连 uid 一起比 —— 只比 (id, versionCode) 会让「换号之后界面还写着别人能发」。
+  if (card.checkStatus && card.checkKey === key && (card.checkUid || "") === uid) {
     if (isActive) renderCheck();
-    return; // 这一对 (id, versionCode) 已经查过了，切回来不再打一次
+    return; // 这一对 (id, versionCode, uid) 已经查过了，切回来不再打一次
   }
   card.checkRun = key;
   card.checkWhy = "";
   if (isActive) showCheck("idle", "checking", "正在查重…", `检查 ${id} 是否已在公开索引里。`);
   renderQueue();
   let status = null;
+  let eligible = null;
+  let gateReason = "";
   let why = "";
   try {
-    status = await checkModule(id, code);
+    const out = await checkModule(id, code, uid);
+    status = out.status;
+    eligible = out.updateEligible;
+    gateReason = out.updateReason || "";
   } catch (err) {
     why = err instanceof BackendError ? err.message : "查重请求失败，不影响你继续上传。";
   }
   // 这一枚在等回包期间被移除了就什么都不做；结论落卡，视图只在租约还在时跟着动。
   if (!state.cards.includes(card)) return;
+  card.checkUid = uid;
+  card.updateEligible = eligible;
+  card.updateReason = gateReason;
   setCheck(card, status, key, why);
   if (isActive) {
     if (status) {
@@ -1553,13 +1611,32 @@ async function runCheckFor(card) {
         meta.tone === "ok" ? "ok" : meta.tone === "warn" ? "warn" : "muted",
         meta.label,
         meta.title,
-        meta.hint + (CHECK_EXTRA[status] || "")
+        meta.hint + (CHECK_EXTRA[status] || "") + gateNote(card)
       );
     } else {
       showCheck("warn", "未确认", "现在查不了重", why);
     }
   }
   renderQueue();
+}
+
+/**
+ * 归属那一格的补充说明（契约 §3.1 的 `update_eligible` 三态）。
+ *
+ * 三态必须分得开，因为它们对用户的意思完全不同：
+ *   true  —— 是你的模块，可以发更新（不用多说，正文已经讲了怎么发）；
+ *   false —— 不是你的：现在就该说清「别白抄签名了」，而不是等他填完一整页再被 403 打回来；
+ *   null  —— 不知道（没填 UID / 后端还没这一格 / 请求失败）。**不许猜成 true 或 false**：
+ *            猜 true 会让人白走一趟，猜 false 会诬告一次「这不是你的模块」。
+ */
+function gateNote(card) {
+  if (!card || card.updateEligible !== false) return "";
+  const why = card.updateReason ? `（服务端原话：「${card.updateReason}」）` : "";
+  return (
+    " 但这一版**发不了**：这个模块已被别人收录，只有原作者能发更新版本" +
+    why +
+    "。整单提交会被 403 拒掉 —— 先确认「酷安 UID」填的是当初首发那个账号；不是你的模块就别试了。"
+  );
 }
 
 /** 视图切到某一枚之后，把它的查重结论原样画回那一格（没有就收起）。 */
@@ -1575,7 +1652,7 @@ function renderCheck() {
     meta.tone === "ok" ? "ok" : meta.tone === "warn" ? "warn" : "muted",
     meta.label,
     meta.title,
-    meta.hint + (CHECK_EXTRA[status] || "")
+    meta.hint + (CHECK_EXTRA[status] || "") + gateNote(card)
   );
 }
 
@@ -1596,6 +1673,11 @@ function bindCheck() {
     // 「这个昵称属于上一串 UID」在按键那一刻就已经成立，等不到 debounce 后的核实结果
     syncUploaderField();
     runUidCheck();
+    // 归属那一问的输入是 (id, versionCode, uid)：UID 一改，上一轮的「能不能发更新」就过期了。
+    // 不作废的话，换号之后界面上还挂着「这一版发不了」—— 那句话说的是上一个账号。
+    const card = commitView();
+    invalidateCheck(card);
+    scheduleCheck(card);
   });
   fieldEls.source.addEventListener("blur", () => {
     // 很多人会直接粘 www.coolapk.com/feed/…，补上协议再存，省一次报错
@@ -1706,6 +1788,11 @@ function gateItems() {
   });
   const overCount = overModuleCount(targets.length);
   const overTotal = overTotalBytes(targets);
+  // 归属闸（契约 §3.3）：这一套里有模块的更新权不属于当前 UID。
+  // 只有后端**明确**回了 false 才算 —— updateEligible 是 null（没填 UID / 后端还没这一格 /
+  // 这一枚不是版本更新）时一律不进这一格：猜一个 false 就是诬告一次「这不是你的模块」。
+  // 拦在这里而不是等提交被 403：签名是一次性的，白抄一次就烧掉了。
+  const notMine = targets.filter((c) => cardValues(c).versionCode && c.updateEligible === false);
 
   // 下面每一格说的都是**这一整套**，不是「当前这一枚」—— 因为提交是整套一次。
   // 所以每一格都要点不出「是哪一枚」（枚数一多，「还差一步」不说差在哪一枚就等于没说）。
@@ -1774,6 +1861,18 @@ function gateItems() {
     items.push({
       ok: false,
       text: `这一套合计 ${fmtBytes(totalBytes(targets))}，超过后端自报的整套上限（${fmtBytes(overTotal)}）—— 把大的一枚拆到下一次上传去。`,
+    });
+  }
+  if (notMine.length) {
+    // 措辞只说后端答了什么，不替它编原因：updateReason 是服务端原话，有就带上。
+    // 「整单会被拒」这句是真的 —— 归属闸在「已算出 rows、准备开 PR」之前，任一枚不符就整单 403。
+    const why = notMine[0].updateReason ? `（服务端原话：「${notMine[0].updateReason}」）` : "";
+    items.push({
+      ok: false,
+      text:
+        `${namesOf(notMine)} 的更新权不属于当前这个酷安 UID：已收录模块只接受原作者发更新，` +
+        `整单会被归属闸拒掉，一枚都发不出去${why}。` +
+        "先确认「酷安 UID」填的是当初首发那个账号；不是你的模块就只能走举报，别在这里重试 —— 重试只烧签名。",
     });
   }
   if (spent && !targets.length) {
@@ -2307,6 +2406,8 @@ function adoptSession(res) {
   };
   saveSession(state.session);
   paintSession();
+  // 会话一到手，「我的模块」当场可以问了 —— 刚提交成功的人正是最想看见自己那几枚的人。
+  loadMine();
   // 会话一到手，签名那一格当场收起（renderProof 的判据就是 sessionFor），清单也要跟着改口。
   renderProof();
   refreshGate();
@@ -2314,6 +2415,9 @@ function adoptSession(res) {
 
 function clearSession() {
   state.session = null;
+  // 清单一并作废：它属于刚才那串令牌。留着的话，下一个人验证完会在 paintMine 之前
+  // 先看见上一个人的模块 —— asked 为空正好让 loadMine 重问一次。
+  state.mine = { asked: "", rows: [], degraded: false, loading: false };
   try {
     localStorage.removeItem(SESSION_KEY);
   } catch {
@@ -2353,6 +2457,7 @@ async function refreshSession() {
   const saved = loadSession();
   if (!saved) {
     paintSession();
+    paintMine();
     return;
   }
   const res = await checkSession(saved.token);
@@ -2361,6 +2466,7 @@ async function refreshSession() {
     // 重改签名且再也取不回来 —— 那是比「这一次多改一次签名」贵得多的代价。
     if (!res || !res.transient) clearSession();
     paintSession();
+    paintMine();
     refreshGate();
     return;
   }
@@ -2380,6 +2486,9 @@ async function refreshSession() {
   }
   paintSession();
   refreshGate();
+  // 令牌刚被后端认下来：顺手把「我的模块」问一次（同一串令牌只问一次，见 loadMine）。
+  // 不 await —— 这一格是便利，它慢不该让会话条的刷新跟着慢。
+  loadMine();
 }
 
 /** 退出验证：注销令牌（幂等，失败也照样清本地）+ 把 UID 一起清掉，回到「每次改签名」那一档。 */
@@ -2397,6 +2506,9 @@ function bindSession() {
     // 退不出去也要退：本地这份留着才是真问题（下次刷新又会自称「已验证」）。
     clearSession();
     paintSession();
+    // 立刻收起来，不等 runUidCheck 那 500ms 的防抖 —— 退出验证之后还挂着自己的模块清单，
+    // 是那种「看起来已经退出了其实没有」的界面。
+    paintMine();
     const el = fieldEls.coolapkUid;
     if (el) {
       el.value = "";
@@ -2406,11 +2518,159 @@ function bindSession() {
   });
 }
 
+/* ------------------------------------------------- 我的模块（GET /mine，契约 §4.2） */
+
+/**
+ * 这一格是**便利**，不是闸 —— 这条原则决定了下面每一处「出错怎么办」：
+ * 读不到索引（degraded）、令牌失效、清单为空，全都只是「这一格没东西可看」，
+ * 绝不许弹错、绝不许挡住首投。首投的人根本不该知道这里有这么一格。
+ *
+ * 反过来，只要后端说了话就照实说：degraded 时清单可能不全，这一句必须写出来 ——
+ * 「你确实没有模块」与「这次没读到索引」是两件完全不同的事，混成一句就是拿一次索引抖动
+ * 去骗用户说他没投过东西。
+ */
+function paintMine() {
+  const bar = $("#mine-bar");
+  if (!bar) return;
+  const uid = fieldValue("coolapkUid");
+  const mine = state.mine;
+  // 会话成立（属于输入框这个人）才有资格看这一格；loading 时也先占位，避免闪一下才出现。
+  const show = sessionFor(uid) && (mine.loading || mine.rows.length > 0 || mine.degraded);
+  if (!show) {
+    bar.hidden = true;
+    // 藏起来也要把内容清掉：退出验证之后 state.mine 已经重置，DOM 里却还留着上一个人的模块名。
+    // 现在它们是 hidden 的，但任何一处「只切 hidden」的将来改动都会把别人的清单露出来 —— 不留这个雷。
+    const stale = $("#mine-list");
+    if (stale) stale.textContent = "";
+    const staleNote = $("#mine-note");
+    if (staleNote) staleNote.textContent = "";
+    const staleN = $("#mine-n");
+    if (staleN) staleN.textContent = "";
+    return;
+  }
+  bar.hidden = false;
+  const n = $("#mine-n");
+  if (n) n.textContent = mine.loading ? "正在读…" : mine.rows.length ? `${mine.rows.length} 枚已收录` : "";
+  const list = $("#mine-list");
+  if (list) {
+    list.textContent = "";
+    for (const row of mine.rows) list.append(mineRow(row));
+  }
+  const note = $("#mine-note");
+  if (note) {
+    if (mine.loading) note.textContent = "";
+    else if (mine.degraded) note.textContent = "这次没读到公开索引，清单可能不全 —— 不影响你继续上传。";
+    else if (mine.rows.length)
+      note.textContent =
+        "点「上传新版本」会把 ID / 名称 / 作者 / 出处填好、版本号预填成当前值 +1，接着让你选包。";
+    else note.textContent = "";
+  }
+}
+
+function mineRow(row) {
+  const li = node("li", "mine__row");
+  li.append(node("span", "mine__id", row.id));
+  const meta = [row.version ? `v${row.version}` : "", row.versionCode ? `code ${row.versionCode}` : ""]
+    .filter(Boolean)
+    .join(" · ");
+  li.append(node("span", "mine__meta", meta || "—"));
+  const go = node("button", "mine__go", "上传新版本");
+  go.type = "button";
+  go.setAttribute("aria-label", `给 ${row.id} 上传新版本`);
+  go.addEventListener("click", () => prefillFromMine(row));
+  li.append(go);
+  return li;
+}
+
+/**
+ * 去问一次清单。同一串令牌只问一次：refreshSession 与提交成功都会叫到这里，
+ * 每次都问等于每回一次页面就打一次网络。`asked` 记的是**哪一串令牌**问过，
+ * 不是「问过没有」—— 换号换令牌之后必须重问，否则会把上一个人的清单摆给下一个人看。
+ */
+async function loadMine() {
+  const token = state.session ? state.session.token : "";
+  if (!token) {
+    state.mine = { asked: "", rows: [], degraded: false, loading: false };
+    paintMine();
+    return;
+  }
+  if (state.mine.asked === token) {
+    paintMine();
+    return;
+  }
+  state.mine.asked = token;
+  state.mine.loading = true;
+  paintMine();
+  const res = await fetchMine(token);
+  // 等回包期间会话被退出或换成了别人：这份清单不属于现在这个人，丢掉。
+  if ((state.session ? state.session.token : "") !== token) return;
+  state.mine.loading = false;
+  if (!res || !res.ok) {
+    // 静默降级：**不清**会话（那是 refreshSession 的判决，这里没有资格越权），
+    // 也不弹错。清掉 asked 让下一次会话刷新还能再问一遍。
+    state.mine.rows = [];
+    state.mine.degraded = false;
+    state.mine.asked = "";
+    paintMine();
+    return;
+  }
+  state.mine.rows = res.modules || [];
+  state.mine.degraded = res.degraded === true;
+  paintMine();
+}
+
+/**
+ * 一键更新（契约 §4.3）：把已收录那一版的读数填成一张新卡。
+ *
+ * 三处留白都是有意的：
+ * ① `version` 留空 —— 新版本串只能由作者写（`2.1.0`、`v2.1`、`2026.10.26` 都合法），
+ *    替他猜一个等于替他发错版；
+ * ② `versionCode` = 当前 +1 —— 这是唯一能算出来的一格；手改之后还有一道「必须更大」的拦（见 cardGaps）；
+ * ③ `file` 留 null —— `submitTargets()` 的过滤式一个字没动，所以这张卡在选包之前
+ *    根本不进提交集，签名也不会提前算出来。
+ */
+function prefillFromMine(row) {
+  const base = Number(row.versionCode) || 0;
+  const card = makeCard(null);
+  card.fromMine = { id: row.id, version: row.version || "", versionCode: base };
+  card.values = {
+    ...emptyValues(),
+    id: row.id,
+    name: row.name || "",
+    author: row.author || "",
+    source: row.source || "",
+    version: "",
+    versionCode: base ? String(base + 1) : "",
+  };
+  state.cards.push(card);
+  selectCardNow(card.key);
+  renderQueue();
+  // 就在这次点击里把选包对话框打开（同一个用户手势，浏览器不会拦）：
+  // 「上传新版本」之后紧接着要做的唯一一件事就是选包，多一步点击只是多一次卡壳的机会。
+  // 取消也不要紧 —— 卡留在队列里，之后点这一枚右边的 ↻ 还能把包选上。
+  requestSwap(card);
+}
+
+/**
+ * 「我的模块」里那几颗按钮是每次 paintMine 现建的，所以这里没有逐颗绑定的活；
+ * 保留这个函数是为了让 init() 里那一串 bind 的形状一致 —— 也留一个将来接「刷新清单」的挂点。
+ */
+function bindMine() {
+  const bar = $("#mine-bar");
+  if (!bar) return;
+  // 点这一格里的空白不该把焦点带跑（它是面板，不是链接）；键盘用户走 Tab 到按钮即可。
+  bar.addEventListener("mousedown", (e) => {
+    if (e.target === bar) e.preventDefault();
+  });
+}
+
 const runUidCheck = debounce(async () => {
   const uid = fieldValue("coolapkUid");
   // 会话条跟着输入框走：手改或清空 UID 时这里是唯一会被叫醒的地方。
   // 不在这里重画，会话属于旧 UID、输入框已换成别人时，条子会一直挂着说「已验证」。
   paintSession();
+  // 「我的模块」也挂在同一条线上：它认的就是「输入框这串 UID 有没有会话」。
+  paintMine();
   if (!uid || !isCoolapkUid(uid)) {
     state.uidStatus = uid ? "invalid" : "idle";
     state.uidInfo = null;
@@ -2443,6 +2703,8 @@ const runUidCheck = debounce(async () => {
     syncUploaderField();
     renderProof();
     refreshGate();
+    // 会话属于这串 UID：清单该有内容了。asked 是「问过哪串令牌」，所以这里不会重复打网络。
+    loadMine();
     return;
   }
   state.uidStatus = "checking";
@@ -2883,7 +3145,9 @@ function showSuccess(res) {
   const viaSession = Boolean(state.lastBatch && state.lastBatch.session);
   for (const text of [
     "点进 PR 能看到审核进度，以及这一整套每一枚的完整元数据。",
-    "新模块若未命中拦截名单可能自动通过；对已收录模块的版本更新不会自动合入，本站没有人工放行这一格。",
+    // 这句原来说「对已收录模块的版本更新不会自动合入」—— 与契约 §4.1 同源的假话。
+    // 新模块与版本更新走的是同一套机器判据，过了都自动进索引；差别只在「这一枚是不是你的」。
+    "新模块与版本更新走同一套机器判据：没命中拦截名单就可能自动通过。版本更新还多一道归属闸 —— 只有原作者能发。",
     "PR 合并之后，这些模块才会出现在公开索引里，所有人才能在管理器里搜到并一键安装。",
     viaSession
       ? "这一趟走的是长效会话（90 天内免改签名），你的酷安签名这一次没有被动过；下次上传仍然不用改。"
@@ -4551,6 +4815,7 @@ function init() {
   bindTheme();
   bindStage();
   bindSession();
+  bindMine();
   wireModerationTabs(); // 切换器是静态的两枚，绑一次就够，不随路由重绑
   renderQueue(); // 一开始是空队列：整条收起，上传页与今天一模一样
   // 会话刷新是异步的，不 await：本地那串令牌有没有效，不该拦住首屏。

@@ -32,10 +32,13 @@ export const CHECK_STATUS = {
     hint: "欢迎上传。审核通过后所有人就能在管理器里搜到它。",
   },
   version_update: {
-    tone: "warn",
+    tone: "ok",
     label: "version_update",
     title: "已有同名模块，你的是更新版本",
-    hint: "可以上传，但「对已收录模块的版本更新」不会被自动合进索引 —— 本站只有机器审核，没有人可以签它进来。",
+    // 这句曾经写「不会被自动合进索引 —— 本站只有机器审核，没有人可以签它进来」，那是**假话**：
+    // 版本更新走的是与首投同一套机器判据，过了就自动进索引。四个键与四档语义不动（App 在读），
+    // 只有这句陈述改成真的 —— 否则页面在教用户「更新永远进不去」，而它其实进得去。
+    hint: "可以上传。版本更新与首次上传走同一套机器判据，通过后自动进索引。",
   },
   recorded: {
     tone: "muted",
@@ -56,14 +59,25 @@ const NETWORK_HINT =
   "或它还没返回 Access-Control-Allow-Origin（跨域被浏览器拦下）。";
 
 /**
- * 单枚查重：`GET /check?id=&versionCode=` —— §17.6 明写「一字不改」，因为 App 在读它，
+ * 单枚查重：`GET /check?id=&versionCode=&uid=` —— §17.6 明写「一字不改」，因为 App 在读它，
  * 而这个端点任何情况都回 HTTP 200、客户端只读 status。批量那一头见下面的 checkModulesBatch。
+ *
+ * `uid` 是**可选**第三参：不传时请求逐字与从前一样（App 那条老路径就靠这一点）。
+ * 传了它，后端才会在 `status === "version_update"` 时多回一格归属判断（`update_eligible`），
+ * 因为「这一版该不该由你发」只有带上上传人 UID 才答得出。
+ *
+ * 返回 `{ status, updateEligible, updateReason }`，不再是裸字符串：
+ * 归属那一格必须与 status 一起回到调用方，否则 app.js 只能再打一次请求（而那是同一次判定）。
+ * 调用点只有 app.js 一处，改形状比「给字符串挂属性」安全 —— 后者在严格模式下直接抛
+ * TypeError（模块顶层就是严格模式），而 typeof/比较都保不住的写法不算零破坏。
  */
-export async function checkModule(id, versionCode) {
+export async function checkModule(id, versionCode, uid) {
   if (!IS_API_CONFIGURED) {
     throw new BackendError("not-configured", "后端地址还没配置，暂时无法查重。");
   }
   const qs = new URLSearchParams({ id, versionCode: String(versionCode) });
+  const who = String(uid || "").trim();
+  if (who) qs.set("uid", who);
   let res;
   try {
     res = await fetch(`${url("/check")}?${qs.toString()}`, {
@@ -74,13 +88,21 @@ export async function checkModule(id, versionCode) {
     throw new BackendError("network", NETWORK_HINT);
   }
   let status = "unknown";
+  // 归属三态：true / false / null（= 这一问没有答案：没传 uid、不是版本更新、后端没这一格）。
+  // 只有后端明确给 true/false 才写进来 —— 缺省留 null，界面上「不知道」与「不行」必须能分开。
+  let updateEligible = null;
+  let updateReason = "";
   try {
     const json = await res.json();
     if (typeof json.status === "string" && CHECK_STATUS[json.status]) status = json.status;
+    if (json.update_eligible === true || json.update_eligible === false) {
+      updateEligible = json.update_eligible;
+    }
+    if (typeof json.reason === "string") updateReason = json.reason;
   } catch {
     status = "unknown";
   }
-  return status;
+  return { status, updateEligible, updateReason };
 }
 
 /**
@@ -276,6 +298,14 @@ export const SUBMIT_ERROR_TEXT = {
     owner: "us",
     text: "服务端读不出公开索引，或索引里那一枚没有可用的 sha256/zipUrl —— **这是本站的问题**。你不需要改任何东西，稍后再试一次；一直如此就把服务端那句原话发给站点。",
   },
+  not_owner: {
+    owner: "you",
+    text: "这个模块已经被别人收录了，只有当初首发它的那个账号能发更新版本 —— 整单拒，一个 GitHub 写入都没发生，签名也没被烧掉。先确认「上传人酷安 UID」那一栏填的是首发时用的那个号：归属是按首发那份上传记的 UID 判的，换号发同一枚会被当成别人。如果这确实不是你的模块，就别再试了 —— 想改别人的模块只能走举报那条路。",
+  },
+  owner_unknown: {
+    owner: "us",
+    text: "服务端查不出这个模块归谁（归属台账读不到，翻提交历史对账也没成），于是 fail-closed 整单拒了 —— **这不是你的包的问题**：包、字段、签名都不用动，稍后再试一次；一直这样就按这一屏的内容找站点维护者。它和「不是你的模块」是两件事，别为了绕过它去换 UID。",
+  },
   no_evidence_cited: {
     owner: "you",
     text: "这条举报没有成立：逐字门槛要的是「包里那一段字节」，而这次没有可定位的引用（截图、转述、你自己的描述都不算）。把要指控的那一行从包里原样复制出来再来一次。",
@@ -305,6 +335,11 @@ export const SUBMIT_ERROR_TEXT = {
 /**
  * 把服务端的失败分成三格：你的包 / 我们的服务 / 说不清。
  * 归类只认后端回的 code（机器可读），中文文案原样跟着显示，**不在这里改写它**。
+ *
+ * 403 不单独兜一条「大概是被归属闸拒了」：这一族在表里已经有自己的码
+ * （`not_owner` = 确实不是你的 / `owner_unknown` = 查不出来、fail-closed），
+ * 两个码说的是完全不同的两件事，凭状态码猜一个等于把「我们查不出来」说成「你不是本人」。
+ * 表外的 403 就照 serviceSideHint 说「拒了但没归到哪一种」，那是实话。
  */
 function backendFailure(status, json, body) {
   const code = json && typeof json.code === "string" ? json.code : "";
@@ -707,6 +742,68 @@ export async function revokeSession(token) {
     return { ok: false };
   }
   return { ok: json && json.ok === true };
+}
+
+/**
+ * 「我的模块」：`GET /mine?token=` —— 契约 §3.2。
+ *
+ * 三档结果，页面上的处理完全不同，所以这里不许把它们压成同一个 false：
+ *   · `{ ok: true, modules, degraded }` —— 服务端认这串令牌，给了清单。
+ *     `degraded: true` 的意思是**索引此刻读不到**，清单是空的或不完整的：页面照常显示，
+ *     不报错、不挡首投（一次索引抖动不该把「我的模块」变成一句红错）。
+ *   · `{ ok: false, transient: true }` —— 这一次问不到答案（断网 / 超时 / 5xx / 非 JSON）。
+ *     **不许清本地令牌**：一次断网就把 90 天的会话销毁，比不显示这一格糟得多。
+ *   · `{ ok: false }` —— 服务端明确说这串令牌不能用了（json.ok !== true）。
+ *
+ * 鉴权只认会话令牌，与 checkSession 同一份 `SESSION_TOKEN_RE`：形状不对就不发请求，
+ * 白打一次只会让后端多一条无意义的账。
+ */
+export async function fetchMine(token) {
+  const t = String(token || "").trim();
+  if (!SESSION_TOKEN_RE.test(t)) return { ok: false };
+  if (!IS_API_CONFIGURED) return { ok: false };
+  let res;
+  try {
+    res = await fetchWithTimeout(
+      `${url("/mine")}?token=${encodeURIComponent(t)}`,
+      { method: "GET", headers: { Accept: "application/json" } },
+      SESSION_TIMEOUT_MS
+    );
+  } catch {
+    return { ok: false, transient: true };
+  }
+  // 只有 401/403 是「服务端看了令牌并拒了」；其余非 2xx（5xx / 429 / 404 端点没上线）
+  // 都是「此刻问不到」—— 与 checkSession 同一条口径，理由也同一条：一次部署中的 502
+  // 不该让所有人的「我的模块」变成「你的令牌失效了」。
+  if (!res.ok) return { ok: false, transient: res.status !== 401 && res.status !== 403 };
+  let json;
+  try {
+    json = await res.json();
+  } catch {
+    return { ok: false, transient: true };
+  }
+  if (!json || json.ok !== true) return { ok: false };
+  const rows = Array.isArray(json.modules) ? json.modules : [];
+  const modules = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const id = row.id === undefined || row.id === null ? "" : String(row.id).trim();
+    // 没有模块 ID 的条目在页面上做不了任何事（既不能显示成「你的模块」，也没法预填）——
+    // 丢掉它，而不是让一张空卡混进队列。
+    if (!id) continue;
+    modules.push({
+      id,
+      name: typeof row.name === "string" ? row.name : "",
+      author: typeof row.author === "string" ? row.author : "",
+      source: typeof row.source === "string" ? row.source : "",
+      version: row.version === undefined || row.version === null ? "" : String(row.version),
+      versionCode: row.versionCode === undefined || row.versionCode === null ? "" : String(row.versionCode),
+      sha256: typeof row.sha256 === "string" ? row.sha256 : "",
+    });
+  }
+  // degraded 只认后端明确说的 true：读不懂的字段按「没降级」处理，
+  // 否则一次字段改名就能让整页都在说「索引读不到」。
+  return { ok: true, modules, degraded: json.degraded === true };
 }
 
 /**

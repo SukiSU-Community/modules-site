@@ -325,6 +325,17 @@
               </div>
               <button type="button" class="session__btn" id="session-forget">退出验证</button>
             </div>
+            <!-- 「我的模块」：只有手里那张会话令牌成立时才去问 GET /mine。
+                 三档结果的处理在这里全是有意的：索引读不到（degraded）照常显示不报错、
+                 令牌失效静默收起不弹错、空清单也不占版面 —— 这一格是便利，不是闸。 -->
+            <div class="mine" id="mine-bar" hidden>
+              <div class="mine__hd">
+                <span class="mine__t">我的模块</span>
+                <span class="mine__n" id="mine-n"></span>
+              </div>
+              <ul class="mine__list" id="mine-list"></ul>
+              <p class="mine__note" id="mine-note"></p>
+            </div>
             <div class="field" id="proof-field" hidden>
               <span class="field__lab">酷安签名<span class="req">*</span></span>
               <!-- 整套一串：v2 的签名绑的是「这一整套的 (模块 ID + 整包 sha256) 全集」，
@@ -608,14 +619,15 @@
             <li><i>2</i><div><b>存成 GitHub Release asset</b>长期稳定、可下载，替掉会失效的网盘链接。</div></li>
             <li><i>3</i><div><b>自动开一个 PR</b>PR 里只有元数据 JSON，不含 zip 本体。</div></li>
             <li><i>4</i><div><b>自动安全审核</b>静态扫描模块脚本里的危险行为、外联、敏感信息。</div></li>
-            <li class="gate"><i>5</i><div><b>版本更新不自动合并</b>对已收录模块的更新，机器不会替你合。</div></li>
+            <li class="gate"><i>5</i><div><b>版本更新要过归属闸</b>已收录模块的更新只接受原作者；判据与首投同一套，过了就自动合并。</div></li>
             <li><i>6</i><div><b>合并进公开索引</b>从此所有人能在管理器里搜到它，下载链接长期有效。</div></li>
           </ol>
           <div class="callout">
-            <b>别以为提交完就立刻上线。</b>低风险的新模块可以自动通过；但「对已收录模块的版本更新」
-            不会自动合入，而且<b>没有人可以签它进来</b> —— 本站只有机器审核。这是刻意的：
-            否则有人 fork 一个热门模块、加几行恶意代码、
-            伪装成「更新」上传，所有已安装用户就会收到恶意更新提示。
+            <b>别以为提交完就立刻上线。</b>新模块与版本更新走的是<b>同一套机器判据</b>：
+            没命中拦截名单就可能自动通过，命中就停在 PR 里等规则改完。
+            版本更新还多一道<b>归属闸</b> —— 只有原作者能发，因为否则有人 fork 一个热门模块、
+            加几行恶意代码、伪装成「更新」上传，所有已安装用户就会收到恶意更新提示。
+            归属按首发那份上传记的酷安 UID 判，换号投同一枚会被当成别人。
           </div>
 
           <h3><span>C</span>两个上传入口</h3>
@@ -694,8 +706,8 @@
             <li><label class="tick" for="ck3">
               <input type="checkbox" id="ck3" />
               <span class="tick__txt"><span class="no">03 / REVIEW</span>
-                我知道上传后<b>需要审核才会进公开索引，不是提交就立刻上线</b>；
-                已收录模块的版本更新不会自动合入，本站也没有人工放行这一步，可能一直进不去。</span>
+                我知道上传后<b>需要过机器判据才会进公开索引，不是提交就立刻上线</b>；
+                已收录模块的版本更新只接受原作者，别人发同一枚会被归属闸拒掉。</span>
             </label></li>
             <li><label class="tick" for="ck4">
               <input type="checkbox" id="ck4" />
