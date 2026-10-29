@@ -31,6 +31,23 @@
           .setAttribute("content", mode === "light" ? "#F5F3EE" : "#07080B");
       })();
     </script>
+    <script>
+      // 身份闸的首屏档位：本地有令牌就先按「待确认」（pending）画，没有就按「没有会话」（out）画。
+      // 不这么写的话，带令牌回来的人会先看见上传表单、再被送去身份页 —— 闪一下比等一会儿难受。
+      // 这里只读 localStorage，不判有效性（那要问后端，见 app.js 的 refreshSession）。
+      (function () {
+        var state = "out";
+        try {
+          var obj = JSON.parse(localStorage.getItem("sukisu-session") || "null");
+          var token = obj && typeof obj.token === "string" ? obj.token : "";
+          var expiresAt = obj ? Number(obj.expiresAt) || 0 : 0;
+          if (/^[0-9a-f]{64}$/.test(token) && !(expiresAt && expiresAt <= Date.now())) state = "pending";
+        } catch (e) {
+          state = "out";
+        }
+        document.documentElement.setAttribute("data-auth", state);
+      })();
+    </script>
     <!-- favicon 与页头同一套形状（圆角方块里刻 M），但 M 直接填实色 --amber-ink：
          图标会被贴到标签栏、书签列表、桌面、分享卡各种底上，刻穿在浅底上会糊掉。
          也不铺底色矩形，圆角外面留透明，免得在浅色标签栏上出现一个深色方块。 -->
@@ -97,6 +114,26 @@
           </svg>
           <span id="theme-txt">夜间</span>
         </button>
+        <!-- 当前验证身份：没会话时整个不出现（不是禁用，是不渲染）。
+             头像与昵称只认后端 /session/check 回来的那一张，输入框里的字不算数。 -->
+        <div class="who" id="who" hidden>
+          <button class="who__btn" id="who-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="who-menu">
+            <img class="who__avatar" id="who-avatar" alt="" width="24" height="24" decoding="async" referrerpolicy="no-referrer" hidden />
+            <span class="who__mono" id="who-mono" aria-hidden="true"></span>
+            <span class="who__name" id="who-name"></span>
+            <svg class="who__caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1.4 5 5 9 1.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          </button>
+          <div class="who__menu" id="who-menu" role="menu" aria-labelledby="who-btn" hidden>
+            <div class="session" id="session-bar" hidden>
+              <div class="session__txt">
+                <div class="session__t" id="session-t"></div>
+                <div class="session__d" id="session-d"></div>
+              </div>
+            </div>
+            <a class="who__item" role="menuitem" href="#/records" id="who-records">上传记录</a>
+            <button class="who__item who__item--out" role="menuitem" type="button" id="session-forget">退出</button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -138,6 +175,9 @@
             </div>
           </div>
         </div>
+
+        <!-- 会话恢复期间先按「不确定」处理：表单不出场，避免先渲染再被送走。 -->
+        <p class="auth-wait" id="auth-wait" hidden>正在确认上次的验证状态…</p>
 
         <form id="form" novalidate>
           <div class="form__col">
@@ -265,17 +305,16 @@
           </div>
 
           <div class="form__col">
-          <!-- 03 出处与身份 -->
+          <!-- 03 出处（署名与身份那一半搬去了 #/identity：它是前置步骤，不是这张表单的一部分） -->
           <section class="panel rise" aria-labelledby="p3t">
             <div class="panel__hd">
               <span class="panel__no">03</span>
-              <h2 id="p3t">出处与身份</h2>
+              <h2 id="p3t">出处</h2>
               <span class="panel__tag">traceability</span>
             </div>
             <p class="panel__note">
-              这两项是<b style="color: var(--amber)">必须填的</b>：出处说明这个包从哪来，UID 说明是谁带上来的。
-              出处<b>每一枚一份</b>（在 02 那一屏跟着当前这一枚改）；UID 和署名是<b>一整套一份</b> ——
-              一次上传只有一个人。
+              这一项是<b style="color: var(--amber)">必须填的</b>：出处说明这个包从哪来，出事时要能顺着它找回人。
+              出处<b>每一枚一份</b>（在 02 那一屏跟着当前这一枚改）。
             </p>
             <div class="field">
               <div class="field__lab"><label for="f-source">模块出处（酷安帖子链接）<span class="req">*</span></label></div>
@@ -284,72 +323,6 @@
                 贴这个模块的<b>酷安帖子链接</b>。没有的话可以顺手发一个帖子存档，也顺便宣传一下。
               </p>
               <p class="field__err" data-err="source">请填写酷安站内链接</p>
-            </div>
-            <div class="field">
-              <div class="field__lab"><label for="f-uid">上传人酷安 UID<span class="req">*</span></label></div>
-              <input class="mono" type="text" id="f-uid" data-k="coolapkUid" placeholder="4-12 位数字" inputmode="numeric" autocomplete="off" spellcheck="false" required />
-              <p class="field__help">
-                酷安 App「我的」→ <b>点头像进个人主页</b> → 右上角<b>三点</b> →
-                「查看我的资料」里的 <b>用户 UID</b>。
-              </p>
-              <p class="field__err" data-err="coolapkUid">UID 应是 4-12 位纯数字</p>
-            </div>
-            <!-- 昵称不是要填的字段，是按上面那个 UID 反查回来的结果，所以整行默认不出现：
-                 取到了只读显示；取不到（核实没开 / 酷安不可达 / UID 查无此人）才放开让你自己填 ——
-                 Worker 那边 uploader 空着直接 400，不能让酷安抖动把真人挡在上传之外。 -->
-            <div class="field" id="nick-field" hidden>
-              <div class="field__lab">
-                <label for="f-uploader">上传人酷安昵称</label>
-                <span class="auto" id="uploader-tag">按 UID 自动取</span>
-              </div>
-              <input type="text" id="f-uploader" data-k="uploader" placeholder="这次没取到昵称，请自己填一个" autocomplete="nickname" />
-              <p class="field__help" id="uploader-help"></p>
-              <p class="field__err" data-err="uploader">这一项没取到昵称，请自己填一个署名</p>
-            </div>
-            <div class="status" id="uid-check" hidden aria-live="polite">
-              <img class="uid__avatar" id="uid-avatar" alt="" hidden />
-              <svg class="uid__mark" viewBox="0 0 24 24" aria-hidden="true">
-                <circle class="uid__mark-ring" cx="12" cy="12" r="9" />
-                <path class="uid__mark-tick" d="M7.4 12.5 10.5 15.4 16.7 9" />
-              </svg>
-              <span class="chip" id="uid-chip">…</span>
-              <div class="status__body">
-                <div class="status__t" id="uid-t"></div>
-                <p class="status__d" id="uid-d"></p>
-              </div>
-            </div>
-            <div class="session" id="session-bar" hidden>
-              <div>
-                <div class="session__t" id="session-t"></div>
-                <div class="session__d" id="session-d"></div>
-              </div>
-              <button type="button" class="session__btn" id="session-forget">退出验证</button>
-            </div>
-            <!-- 「我的模块」：只有手里那张会话令牌成立时才去问 GET /mine。
-                 三档结果的处理在这里全是有意的：索引读不到（degraded）照常显示不报错、
-                 令牌失效静默收起不弹错、空清单也不占版面 —— 这一格是便利，不是闸。 -->
-            <div class="mine" id="mine-bar" hidden>
-              <div class="mine__hd">
-                <span class="mine__t">我的模块</span>
-                <span class="mine__n" id="mine-n"></span>
-              </div>
-              <ul class="mine__list" id="mine-list"></ul>
-              <p class="mine__note" id="mine-note"></p>
-            </div>
-            <div class="field" id="proof-field" hidden>
-              <span class="field__lab">酷安签名<span class="req">*</span></span>
-              <!-- 整套一串：v2 的签名绑的是「这一整套的 (模块 ID + 整包 sha256) 全集」，
-                   长度恒 19 字符、与枚数无关。下面那一行小字点名这一串到底绑了哪几枚 ——
-                   增删任一枚、改任一枚的 ID、重选任一枚的包，这一串就变成另一串。 -->
-              <div class="proofs" id="proof-list"></div>
-              <p class="field__help" id="proof-cap"></p>
-              <p class="field__help">
-                打开酷安「我的 → 编辑资料 → 签名」，把上面那一串<b>填进去并保存</b>，然后回来提交。
-                为什么要这么做：为了让这个账号的所有权归属明确 —— 我们读取你的签名，确认和上面这一串吻合，
-                才认定这次投稿是你本人提交的。
-                这一串绑的是<b>本次这一整套模块</b>：少一枚、多一枚、换任何一枚的包，都会变成另一串。
-                所以它只对这一次提交有效。
-              </p>
             </div>
           </section>
 
@@ -663,6 +636,155 @@
             第一次选包或打开「上传前确认」时才加载，没过校验就进不了确认层。本站不自己伪造任何验证码。
           </p>
         </article>
+      </section>
+
+      <!-- ====================== 05 身份验证（前置步骤：不在顶栏里，只能从上传页被送进来） ====================== -->
+      <section class="view" id="view-identity" aria-labelledby="h-identity">
+        <div class="hero rise">
+          <h1 id="h-identity">先证明<span class="hi">是你</span></h1>
+          <p class="hero__lede" id="identity-lede">
+            上传是公开且长期保留的动作，所以先认人：填你的酷安 UID，挑一个<b>这次要上传的包</b>，
+            把算出来的口令写进酷安签名。验过这一次，<b>90 天内</b>再投稿都不用再改签名。
+          </p>
+        </div>
+
+        <form class="idform rise" id="idform" novalidate>
+          <section class="panel" aria-labelledby="pid1t">
+            <div class="panel__hd">
+              <span class="panel__no">01</span>
+              <h2 id="pid1t">你的酷安账号</h2>
+              <span class="panel__tag">who</span>
+            </div>
+            <p class="panel__note">
+              只填 UID：昵称与头像由酷安那边回给我们，你改不了，也不用改。
+            </p>
+            <div class="field">
+              <div class="field__lab"><label for="f-uid">上传人酷安 UID<span class="req">*</span></label></div>
+              <input class="mono" type="text" id="f-uid" data-k="coolapkUid" placeholder="4-12 位数字" inputmode="numeric" autocomplete="off" spellcheck="false" required />
+              <p class="field__help">
+                酷安 App「我的」→ <b>点头像进个人主页</b> → 右上角<b>三点</b> →
+                「查看我的资料」里的 <b>用户 UID</b>。
+              </p>
+              <p class="field__err" data-err="coolapkUid">UID 应是 4-12 位纯数字</p>
+            </div>
+            <!-- 昵称不是要填的字段，是按上面那个 UID 反查回来的结果，所以整行默认不出现：
+                 取到了只读显示；取不到（核实没开 / 酷安不可达 / UID 查无此人）才放开让你自己填 ——
+                 Worker 那边 uploader 空着直接 400，不能让酷安抖动把真人挡在上传之外。 -->
+            <div class="field" id="nick-field" hidden>
+              <div class="field__lab">
+                <label for="f-uploader">上传人酷安昵称</label>
+                <span class="auto" id="uploader-tag">按 UID 自动取</span>
+              </div>
+              <input type="text" id="f-uploader" data-k="uploader" placeholder="这次没取到昵称，请自己填一个" autocomplete="nickname" />
+              <p class="field__help" id="uploader-help"></p>
+              <p class="field__err" data-err="uploader">这一项没取到昵称，请自己填一个署名</p>
+            </div>
+            <div class="status" id="uid-check" hidden aria-live="polite">
+              <img class="uid__avatar" id="uid-avatar" alt="" hidden />
+              <svg class="uid__mark" viewBox="0 0 24 24" aria-hidden="true">
+                <circle class="uid__mark-ring" cx="12" cy="12" r="9" />
+                <path class="uid__mark-tick" d="M7.4 12.5 10.5 15.4 16.7 9" />
+              </svg>
+              <span class="chip" id="uid-chip">…</span>
+              <div class="status__body">
+                <div class="status__t" id="uid-t"></div>
+                <p class="status__d" id="uid-d"></p>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel" aria-labelledby="pid2t">
+            <div class="panel__hd">
+              <span class="panel__no">02</span>
+              <h2 id="pid2t">拿一个包当凭据</h2>
+              <span class="panel__tag">proof</span>
+            </div>
+            <p class="panel__note">
+              口令绑的是「模块 ID + 整包 sha256」，所以得有一个<b>真包</b>才算得出来。挑这次要上传的那一枚 ——
+              验完之后它跟着进上传队列，不用再选一遍。
+            </p>
+            <div class="pick">
+              <!-- 真正可点、可 Tab 到的是这枚铺满按钮的 input（与上传页 .drop 同一套做法）：
+                   label 只负责长相，键盘与读屏拿到的是原生的文件选择器，不是一块好看的假按钮。 -->
+              <label class="btn btn--sm pick__btn">
+                <input type="file" id="id-file" accept=".zip,application/zip,application/x-zip-compressed" aria-label="选一个模块 zip" />
+                选一个模块 zip
+              </label>
+              <p class="pick__out" id="id-pick"></p>
+            </div>
+            <div class="field" id="proof-field" hidden>
+              <span class="field__lab">酷安签名<span class="req">*</span></span>
+              <!-- 整套一串：v2 的签名绑的是「这一整套的 (模块 ID + 整包 sha256) 全集」，
+                   长度恒 19 字符、与枚数无关。下面那一行小字点名这一串到底绑了哪几枚 ——
+                   增删任一枚、改任一枚的 ID、重选任一枚的包，这一串就变成另一串。 -->
+              <div class="proofs" id="proof-list"></div>
+              <p class="field__help" id="proof-cap"></p>
+              <p class="field__help">
+                打开酷安「我的 → 编辑资料 → 签名」，把上面那一串<b>填进去并保存</b>，然后回来点下面的「验证并继续」。
+                为什么要这么做：为了让这个账号的所有权归属明确 —— 我们读取你的签名，确认和上面这一串吻合，
+                才认定这次投稿是你本人提交的。
+                这一串绑的是<b>本次这一整套模块</b>：少一枚、多一枚、换任何一枚的包，都会变成另一串。
+                所以它只对这一次上传有效。
+              </p>
+            </div>
+          </section>
+
+          <section class="panel" aria-labelledby="pid3t">
+            <div class="panel__hd">
+              <span class="panel__no">03</span>
+              <h2 id="pid3t">承诺</h2>
+              <span class="panel__tag">pledge</span>
+            </div>
+            <p class="panel__note">
+              下面三条跟着这次验证一起记下来，是<b>你为这个账号投的每一份包</b>都成立的话。
+            </p>
+            <ul class="ticks ticks--flat">
+              <li><span class="tick__txt"><span class="no">01 / SAFE</span>这个模块<b>不含恶意代码</b>，不损害设备或数据。</span></li>
+              <li><span class="tick__txt"><span class="no">02 / OWN</span>我为自己提交的内容与来源<b>负责</b>，出处是真的。</span></li>
+              <li><span class="tick__txt"><span class="no">03 / PUBLIC</span>我知道上传是<b>公开</b>动作（会进公开仓库与 PR），包里<b>不含密钥或隐私</b>。</span></li>
+            </ul>
+            <label class="tick tick--pledge" for="ck-pledge">
+              <input type="checkbox" id="ck-pledge" />
+              <span class="tick__txt">上面三条我认，写进签名的口令也是我自己填的。</span>
+            </label>
+          </section>
+        </form>
+
+        <div class="btn-row cta-inline">
+          <button type="button" class="btn btn--go" id="id-verify" disabled>验证并继续</button>
+          <span class="count hide-sm" id="id-note">先把上面几项填齐</span>
+        </div>
+        <p class="callout callout--err" id="id-err" hidden></p>
+      </section>
+
+      <!-- ====================== 06 上传记录（顶栏头像 → 上传记录） ====================== -->
+      <section class="view" id="view-records" aria-labelledby="h-records">
+        <div class="hero rise">
+          <h1 id="h-records">上传<span class="hi">记录</span></h1>
+          <p class="hero__lede" id="records-lede">
+            这个账号投过的模块都在这儿。点某一枚的「上传更新版」会回到上传页，把 ID / 名称 / 作者 / 出处填好、
+            版本号预填成当前 +1 —— 你只需要选新包。
+          </p>
+        </div>
+        <div class="panel rise" aria-labelledby="prect">
+          <div class="panel__hd">
+            <span class="panel__no">01</span>
+            <h2 id="prect">已收录</h2>
+            <span class="panel__tag">mine</span>
+          </div>
+          <!-- 「我的模块」：只有手里那张会话令牌成立时才去问 GET /mine。
+               三档结果的处理在这里全是有意的：索引读不到（degraded）照常显示不报错、
+               令牌失效静默收起不弹错、空清单也不占版面 —— 这一格是便利，不是闸。 -->
+          <div class="mine" id="mine-bar" hidden>
+            <div class="mine__hd">
+              <span class="mine__t">我的模块</span>
+              <span class="mine__n" id="mine-n"></span>
+            </div>
+            <ul class="mine__list" id="mine-list"></ul>
+            <p class="mine__note" id="mine-note"></p>
+          </div>
+          <p class="mine__empty" id="records-state" hidden></p>
+        </div>
       </section>
     </main>
 

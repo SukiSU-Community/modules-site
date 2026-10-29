@@ -298,6 +298,23 @@ export const SUBMIT_ERROR_TEXT = {
     owner: "us",
     text: "服务端读不出公开索引，或索引里那一枚没有可用的 sha256/zipUrl —— **这是本站的问题**。你不需要改任何东西，稍后再试一次；一直如此就把服务端那句原话发给站点。",
   },
+  /* 「/submit 没带有效会话」这件事，后端此刻**没有**回 `identity_required` 这个码的
+     生产者（worker 的 /session/issue 用 `identity_invalid` 表示「请求本身发得不对」）。
+     §17.4 有一条反方向判据：前端表里留着后端永远不会回的码，就等于留一句没人会看到的
+     文案，还会把「码表条数」这个读数带偏 —— 所以这里不预埋，等 worker 真回这个码的
+     那一天再补（补的时候连同 owner 一起想清楚是哪一侧的事）。 */
+  identity_invalid: {
+    owner: "us",
+    text: "这次请求**本身发得不对**（字段缺/错、content-type 不对、nonce 形状不对）—— 这跟「没带会话」是两件事，也**不是你的包的问题**：回身份页把 UID / 签名 / 承诺重新生成一次再点验证，包不用重选。一直这样就按这一屏的内容找站点维护者。",
+  },
+  body_too_large: {
+    owner: "you",
+    text: "这次带的包太大了（或某个字段太长），服务端在收字节这一格就拒了，没往下读 —— 少选几个再来：一次一枚、或者把这一套拆成两次上传（每次改一次签名）。",
+  },
+  rate_limited: {
+    owner: "you",
+    text: "一小时内的验证次数用完了（额度按 IP 与账号一起算）—— **这跟你的令牌、包、签名都没关系**，本地那份会话不要退出，过一会儿再点一次验证就行。等的时候不用重选包。",
+  },
   not_owner: {
     owner: "you",
     text: "这个模块已经被别人收录了，只有当初首发它的那个账号能发更新版本 —— 整单拒，一个 GitHub 写入都没发生，签名也没被烧掉。先确认「上传人酷安 UID」那一栏填的是首发时用的那个号：归属是按首发那份上传记的 UID 判的，换号发同一枚会被当成别人。如果这确实不是你的模块，就别再试了 —— 想改别人的模块只能走举报那条路。",
@@ -769,6 +786,86 @@ export async function revokeSession(token) {
 }
 
 /**
+ * POST /session/issue —— 契约 §2：**用一个包换一张会话**（网页端的身份前置那一步）。
+ *
+ * 与 /session/check 的两条口径分得开：那一条是「我手里这串还行不行」，恒 200、只读 ok；
+ * 这一条是「拿一次签名去换一张新的」，**失败是有原因的**，所以走 backendFailure，
+ * 让 `proof_used` / `not_owner` / `owner_unknown` / `index_unavailable` / `identity_required`
+ * 各自的现成中文照着显示 —— 这几个码要用户做的事互不相同（改包 / 换号 / 等我们 / 重走验证）。
+ *
+ * 应答 `{ ok, session: { token, expiresAt }, identity: { uid, nickname, avatar, level } }`：
+ * 昵称与头像**只认后端这一格**，不许拿输入框里那串字当昵称 —— 那是用户自己填的，
+ * 而这里是酷安那边回来的人。200 但没给可用令牌时按失败处理：让人以为换成了、
+ * 下次进来又被打回身份页，比当场说一句「没换成」糟得多。
+ */
+export async function issueIdentitySession(body) {
+  if (!IS_API_CONFIGURED) {
+    throw new BackendError("not-configured", "后端地址还没配置：请在 config.js 填入 API_BASE 后再验证身份。");
+  }
+  const items = Array.isArray(body && body.items) ? body.items : [];
+  const payload = {
+    coolapkUid: String((body && body.coolapkUid) || "").trim(),
+    nonce: String((body && body.nonce) || "").trim(),
+    items: items.map((it) => ({
+      id: String((it && it.id) || "").trim(),
+      zipSha: String((it && it.zipSha) || "").trim(),
+    })),
+    pledge: String((body && body.pledge) || ""),
+  };
+  let res;
+  try {
+    res = await fetchWithTimeout(
+      url("/session/issue"),
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+      },
+      SESSION_TIMEOUT_MS
+    );
+  } catch {
+    // 断网 / 超时 abort / 跨域被拦：这一发没打出去。签名没被烧，重试一次即可。
+    throw new BackendError(
+      "network",
+      "验证请求没发出去（断网、超时，或后端没给跨域许可）。你的签名与包都不用动 —— 检查网络后再点一次「验证并继续」。"
+    );
+  }
+  let text = "";
+  try {
+    text = await res.text();
+  } catch {
+    text = "";
+  }
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  if (!res.ok) throw backendFailure(res.status, json, text);
+  const session = json && json.session && typeof json.session.token === "string" ? json.session : null;
+  if (!json || json.ok !== true || !session || !SESSION_TOKEN_RE.test(session.token)) {
+    throw new BackendError(
+      "rejected",
+      "服务端回了 200，但应答里没有可用的会话令牌 —— 这一次没换成。签名可能已经记在服务端那一侧了，重试前先看一眼回包里那句原话；反复这样就把这一屏发给站点维护者。",
+      text,
+      { code: "session_issue_empty", owner: "us" }
+    );
+  }
+  const id = (json.identity && typeof json.identity === "object" && json.identity) || {};
+  const uid = id.uid === undefined || id.uid === null ? payload.coolapkUid : String(id.uid);
+  return {
+    session: { token: session.token, expiresAt: Number(session.expiresAt) || 0 },
+    identity: {
+      uid,
+      nickname: typeof id.nickname === "string" ? id.nickname : "",
+      avatar: typeof id.avatar === "string" ? id.avatar : "",
+      level: id.level === undefined ? null : id.level,
+    },
+  };
+}
+
+/**
  * 「我的模块」：`GET /mine?token=` —— 契约 §3.2。
  *
  * 三档结果，页面上的处理完全不同，所以这里不许把它们压成同一个 false：
@@ -823,6 +920,15 @@ export async function fetchMine(token) {
       version: row.version === undefined || row.version === null ? "" : String(row.version),
       versionCode: row.versionCode === undefined || row.versionCode === null ? "" : String(row.versionCode),
       sha256: typeof row.sha256 === "string" ? row.sha256 : "",
+      // 记录页想要的两样（PR 链接 / 最近一次提交时间）后端今天还没回：**回来了才带上**，
+      // 没回就留空由页面「有就显示」—— 绝不在这里编一个时间或拼一条 PR 地址，
+      // 那种看起来像真数据的假字段，比空着难查得多。
+      pr: typeof row.pr === "string" ? row.pr : "",
+      submittedAt: typeof row.submittedAt === "string" ? row.submittedAt : "",
+      // 投稿过的版本：只认字符串/数字组成的数组，其余一律当没给。
+      versions: Array.isArray(row.versions)
+        ? row.versions.filter((v) => typeof v === "string" || typeof v === "number").map((v) => String(v))
+        : [],
     });
   }
   // degraded 只认后端明确说的 true：读不懂的字段按「没降级」处理，

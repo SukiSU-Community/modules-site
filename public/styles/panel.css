@@ -3372,6 +3372,297 @@ mark {
 }
 
 /* ==========================================================================
+   05 身份验证（前置步骤）+ 顶栏身份控件 + 上传记录页
+   身份不再是表单里的一块：没有会话根本进不了上传页，所以这一屏自带一套排版。
+   复用 .panel / .field / .btn / .ticks / .mine 已有的语言，新写的只有三处 ——
+   顶栏那枚头像、选包那一行、以及「正在确认上次的验证状态…」那一行字。
+   ========================================================================== */
+
+/* —— 顶栏：头像 + 昵称 + 菜单 ——
+   这一块回答的是「这台浏览器上现在是谁」，所以它只读后端确认过的会话，
+   不读输入框里的草稿。没会话时整块 hidden（不是禁用、也不是画成灰的）。 */
+.who {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+.who__btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 15rem;
+  padding: 5px 10px 5px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--void-2);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: color 0.16s var(--ease), border-color 0.16s var(--ease),
+    background 0.16s var(--ease);
+}
+.who__btn:hover,
+.who__btn[aria-expanded="true"] {
+  color: var(--ink);
+  border-color: var(--amber-line);
+  background: var(--amber-wash);
+}
+.who__btn:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+.who__avatar {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--line-2);
+  background: var(--panel-3);
+}
+/* 没有头像、或头像图挂了时顶上来的首字：与头像同尺寸同位置，
+   所以图从无到有、从有到无的那一刻，顶栏宽度不会跳。 */
+.who__mono {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--amber-line);
+  background: var(--amber-wash);
+  color: var(--amber);
+  font: 600 12px/1 var(--mono);
+}
+.who__mono:empty {
+  display: none;
+}
+.who__name {
+  font: 600 12.5px/1 var(--sans);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.who__caret {
+  flex: none;
+  width: 10px;
+  height: 6px;
+  color: var(--ink-3);
+  transition: transform 0.16s var(--ease);
+}
+.who__btn[aria-expanded="true"] .who__caret {
+  transform: rotate(180deg);
+}
+
+/* 菜单：贴着头像右下角、右侧对齐；窄屏最多留 12px 呼吸，不许撑出屏幕。 */
+.who__menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(300px, calc(100vw - 24px));
+  padding: 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--panel);
+  box-shadow: 0 20px 44px var(--shadow);
+}
+/* 会话条搬进菜单后是菜单的第一行，所以吃掉它在表单里那块上边距。 */
+/* 会话条搬进菜单后是菜单的第一行：它不再需要「退出」按钮挤在右边（退出已经是
+   菜单里自己那一格），所以这里改成整行铺开、吃掉表单里那块上边距。 */
+.who__menu .session {
+  display: block;
+  margin: 0 0 6px;
+  padding: 9px 10px;
+}
+.who__menu .session__d {
+  font-size: 11px;
+}
+.who__item {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--ink-2);
+  font: 600 12.5px/1.2 var(--sans);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.16s var(--ease), border-color 0.16s var(--ease),
+    background 0.16s var(--ease);
+}
+.who__item:hover {
+  color: var(--ink);
+  border-color: var(--line-2);
+  background: var(--btn-hover);
+}
+.who__item:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+/* 退出走红：与 .session__btn:hover 同一语义 —— 这一格会把本机上的令牌真的抹掉。 */
+.who__item--out {
+  color: var(--red-ink);
+}
+.who__item--out:hover {
+  color: var(--red);
+  border-color: var(--red-line);
+  background: var(--red-wash);
+}
+.who__item[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* —— 「正在确认上次的验证状态…」——
+   问后端是异步的。这一段没问完之前，上传表单整块藏着、只露这一行：
+   宁可让人多看半秒这句话，也不要先把身份区画出来再让它原地消失。 */
+.auth-wait {
+  margin: 0 0 16px;
+  padding: 11px 13px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r);
+  background: var(--void-2);
+  color: var(--ink-3);
+  font: 400 12.5px/1.7 var(--mono);
+}
+
+/* —— 身份页版式：单列三张面板，不比上传页那两列宽 —— */
+.idform {
+  display: grid;
+  gap: 16px;
+  max-width: 880px;
+}
+.idform > .panel {
+  margin: 0;
+}
+
+/* 验证那一行跟着三张面板走同一条宽度。.count 在上传页是被 margin-left:auto
+   推到行尾的（那里按钮在左、提示在右），这一屏两者要挨着念，所以就地改回 0。 */
+#view-identity .cta-inline {
+  max-width: 880px;
+  margin-top: 16px;
+}
+#view-identity .cta-inline .count {
+  margin-left: 0;
+}
+
+/* 选包那一行：label 只负责长相，input 铺满它（同 .drop 的做法），
+   所以 Tab 能停在这枚按钮上、回车/空格直接打开文件选择器。 */
+.pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 4px;
+}
+.pick__btn {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+.pick__btn input[type="file"] {
+  position: absolute;
+  /* -1px：连那 1px 边框一起盖住，否则贴着边框点下去没反应（点的是 label 的边，不是 input）。 */
+  inset: -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  margin: 0;
+  opacity: 0;
+  font-size: 0;
+  cursor: pointer;
+}
+.pick__btn:focus-within {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+.pick__out {
+  margin: 0;
+  font: 400 12px/1.6 var(--mono);
+  color: var(--ink-3);
+}
+.pick__out:empty {
+  display: none;
+}
+
+/* 那三条承诺是只读的话、不是可点的控件：不带勾选框，所以也不吃 .tick 的框和底，
+   只在左沿立一道细线 —— 与下面那枚真正要勾的 .tick 一眼分得开。 */
+.ticks--flat li {
+  padding: 9px 12px;
+  border-left: 2px solid var(--amber-edge);
+  border-radius: 0 var(--r) var(--r) 0;
+  background: var(--void-2);
+}
+.ticks--flat .tick__txt {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.ticks--flat .tick__txt .no {
+  color: var(--amber);
+  letter-spacing: 0.08em;
+}
+.tick--pledge {
+  margin-top: 12px;
+}
+
+/* 身份页的错误条：形态跟 .callout 一致，只换「红」这一档。 */
+.callout--err {
+  border-color: var(--red-line);
+  background: linear-gradient(90deg, var(--red-wash), transparent 70%);
+  color: var(--red-ink);
+}
+.callout--err b {
+  color: var(--red);
+}
+
+/* —— 上传记录页 ——
+   一行一枚：窄屏折成「名字一行、读数 + 按钮一行」，宽屏挤在一行里。
+   这里只补 mineRow 新长出来的那几个格子，.mine 的外框沿用原样式。 */
+.mine__row {
+  flex-wrap: wrap;
+}
+.mine__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.mine__name {
+  font: 600 12px/1.3 var(--sans);
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mine__link {
+  font: 600 11.5px/1.2 var(--mono);
+  color: var(--amber);
+  text-decoration: none;
+  border-bottom: 1px solid var(--amber-edge);
+  padding-bottom: 1px;
+}
+.mine__link:hover {
+  color: var(--amber-hot);
+  border-bottom-color: var(--amber);
+}
+/* 空清单那一句：它是「一条都还没有」，不是报错，所以用灰字、不带任何红黄。 */
+.mine__empty {
+  margin: 0;
+  padding: 16px 2px;
+  color: var(--ink-3);
+  font: 400 12.5px/1.8 var(--mono);
+}
+
+/* ==========================================================================
    举报与处置：两半的切换器
    公示与举报原本是两条独立的地址，读到的是同一件事的两面（这边公示、那边递材料），
    合成一屏后需要一个「现在是哪一半」的显式开关。这里不复用 .btn：

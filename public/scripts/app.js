@@ -31,6 +31,7 @@ import {
   reportModule,
   fetchReportQueue,
   fetchMine,
+  issueIdentitySession,
   checkSession,
   revokeSession,
 } from "./api.js";
@@ -126,6 +127,15 @@ const state = {
      degraded 单独留着：索引读不到时清单是空的，界面上那句「没读过索引」与「你确实还没有模块」
      必须说得不一样，否则一次索引抖动就变成一句关于用户的假话。 */
   mine: { asked: "", rows: [], degraded: false, loading: false },
+  /* 身份闸的三档。初值由 index.html 那段首屏内联脚本按 localStorage 里有没有令牌先钉住
+     （有 → pending，没有 → out），这里再兜一次底。它的意思是：
+       pending —— 正在问后端「本地这串令牌还认不认」，**什么都还不能说**（表单先藏起来）；
+       out     —— 没有有效会话：上传页/记录页一律送去身份页；
+       in      —— 后端认下来了：身份页直接跳上传页，顶栏露出那个人。 */
+  auth: document.documentElement.dataset.auth === "out" ? "out" : "pending",
+  // 身份验证那一发在飞（按钮禁用 + 文案改口），以及上一次失败的原话（空串 = 没有错误）。
+  idBusy: false,
+  idError: "",
 };
 
 /* ------------------------------------------------------------------ 小工具 */
@@ -227,7 +237,7 @@ function makeCard(file) {
     // 一律当作「不知道」，绝不当成 true —— 猜 true 会放人去烧签名，猜 false 会诬告一次。
     updateEligible: null,
     updateReason: "",
-    // 这张卡是从「我的模块」点「上传新版本」来的：它带着已收录那一版的读数，
+    // 这张卡是从「我的模块」点「上传更新版」来的：它带着已收录那一版的读数，
     // 用来卡住「版本号必须大于当前值」这条，也用来在卡上写出「当前是第几版」。
     fromMine: null,
     values: emptyValues(),
@@ -422,12 +432,21 @@ function setCheck(card, status, key, why) {
 
 /* ------------------------------------------------------- 路由：hash 三视图 */
 
+// 六屏：上传、身份验证、上传记录、已收录、举报与处置、说明。
+// 身份验证与上传记录不进导航 —— 它们是「验证」这条线的两站，入口在顶栏那个人身上。
 const VIEWS = {
   submit: { el: "#view-submit", label: "上传" },
+  identity: { el: "#view-identity", label: "身份验证" },
+  records: { el: "#view-records", label: "上传记录" },
   index: { el: "#view-index", label: "已收录" },
   moderation: { el: "#view-moderation", label: "举报与处置" },
   about: { el: "#view-about", label: "说明" },
 };
+
+// 这两屏必须「已经验证过」才给看：上传要带签名与承诺，记录读的是本人的清单。
+// 判据只认 state.auth（由 refreshSession 问过后端才定），**不认** localStorage 里有没有串 ——
+// 有串不等于后端还认它，而「让一张过期令牌把表单铺出来」正是这次要修掉的那件事。
+const GATED_VIEWS = ["submit", "records"];
 
 // 举报与处置是同一屏的两半：tab 写在查询串里，永远显式（连默认的那一半也写），
 // 这样刷新、收藏、贴给别人，落点都唯一。旧的两条地址只是入口，进来后会被 replaceState 收敛。
@@ -476,13 +495,36 @@ function currentModTab() {
 }
 
 function renderRoute() {
-  const { name, params, tab, legacy } = parseHash();
+  const parsed = parseHash();
+  let { name, params, tab, legacy } = parsed;
   if (legacy || (name === "moderation" && location.hash !== canonicalHash(name, params))) {
     history.replaceState(null, "", canonicalHash(name, params));
+  }
+  // 身份闸只在这一处：进来的每一屏都先过它，别处不许再各判一次。
+  //
+  // 「pending」这一档什么地址都不改：正在问后端的时候，说「没验证」会闪一下身份页、
+  // 说「验证过」会闪一下表单，两边都是错话。加载态由 paintAuth 藏表单、亮那一行字。
+  if (state.auth === "pending") {
+    if (name === "identity") {
+      name = "submit";
+      history.replaceState(null, "", "#/submit");
+    }
+  } else if (state.auth === "in") {
+    // 已经验证过的人不需要身份页：那一屏要填的 UID 与签名，后端早就认过了。
+    if (name === "identity") {
+      name = "submit";
+      history.replaceState(null, "", "#/submit");
+    }
+  } else if (GATED_VIEWS.includes(name)) {
+    // 没有有效会话：这两屏一律先送去身份页，地址也一起改掉（replace，不留后退链）。
+    name = "identity";
+    history.replaceState(null, "", "#/identity");
   }
   // 版心按视图分档：数据密集的几屏在宽屏上放宽（见 panel.css「宽屏版心」），
   // 因此根元素上要挂一个「现在是哪一屏」，CSS 才有得选。文字为主的说明页不参与。
   document.documentElement.dataset.view = name;
+  // 身份闸的档位也挂到根上：CSS 与调试都读得到，不必再去问模块里的 state。
+  document.documentElement.dataset.auth = state.auth;
   for (const [key, view] of Object.entries(VIEWS)) {
     $(view.el).classList.toggle("is-active", key === name);
   }
@@ -493,7 +535,10 @@ function renderRoute() {
     if (isNow) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   });
-  $("#dock").hidden = name !== "submit";
+  // 底栏只在「真能上传」的那一屏出现：加载态与未验证的人看见它只会点进一个空表单。
+  $("#dock").hidden = name !== "submit" || state.auth !== "in";
+  paintAuth();
+  paintWho();
   // 状态表里有「实测状态」这种会随时间变的内容，进 about 时重画一次，别让人看到过期值
   if (name === "about") renderAbout();
   if (params.has("q")) {
@@ -504,6 +549,11 @@ function renderRoute() {
     $("#q-inc").value = state.query;
   }
   if (name === "index") renderIndex();
+  if (name === "records") {
+    // 进来就问一次（同一串令牌只问一次，见 loadMine），标出加载态再画。
+    paintMine();
+    loadMine();
+  }
   if (name === "moderation") {
     renderModerationTabs(tab);
     if (tab === "ledger") {
@@ -1480,7 +1530,7 @@ const CHECK_EXTRA = {
     "摘出去之后屏幕上那一串签名就按剩下的那几枚重算 —— 已经抄进签名的那串要重抄一次。" +
     "它只看公开索引里的模块 ID：索引里不带酷安 UID，所以分不清「已被上传过」那一条是谁上传的；" +
     "还在审核里、没合进索引的上传今天查不到。想留着看就由你留着，队列里点「移除」。" +
-    "自己的模块不用在这一页猜：验证过 UID 之后，「我的模块」那一格列着它们，点「上传新版本」就接着发。",
+    "自己的模块不用在这一页猜：验证过 UID 之后，「我的模块」那一格列着它们，点「上传更新版」就接着发。",
   // 这句原来说「不会被自动合进索引」—— 那是假话（契约 §4.1 点名要改）。版本更新与首投走
   // 同一套机器判据，过了就自动进索引；页面从前教人「更新永远进不去」，而它其实进得去。
   version_update:
@@ -2068,6 +2118,9 @@ function refreshGate() {
   $("#dock-s").textContent = blocking ? "还差这一步" : "点「去确认」勾完四项";
   $("#gate-note").textContent = ready && !firstNotShown ? "四项上传前确认还没勾" : "先把上面几项填齐";
   if (state.attempted) paintFieldErrors();
+  // 身份页那颗「验证并继续」的亮灭与这一处同一口感：都是「还差什么」——
+  // 所以挂在 refreshGate 尾巴上，凡是会改这些输入的地方都不必各自记得再叫一次。
+  renderIdentityGate();
 }
 
 const FIELD_MSGS = {
@@ -2434,6 +2487,8 @@ function adoptSession(res) {
     avatar: (state.uidInfo && state.uidInfo.avatar) || "",
     expiresAt: Number(s.expiresAt) || 0,
   };
+  // 后端刚给了令牌 = 这一刻起这趟浏览器算「已验证」，闸要跟着开（否则下次刷新还会被送回来）。
+  state.auth = "in";
   saveSession(state.session);
   paintSession();
   // 会话一到手，「我的模块」当场可以问了 —— 刚提交成功的人正是最想看见自己那几枚的人。
@@ -2455,20 +2510,120 @@ function clearSession() {
   }
 }
 
+/* ---------------------------------------------------- 顶栏：那个人与他的菜单 */
+
+/**
+ * 顶栏右上角那一个人：验证过之后露出头像 + 昵称，点开是「上传记录 / 退出」。
+ *
+ * 读的是 state.session，不是输入框里那串 UID：这个控件回答的是「这张浏览器上现在是谁」，
+ * 而身份页那一格输入框是**草稿** —— 让草稿决定顶栏显示谁，一改输入框头像就跟着换人。
+ */
+function paintWho() {
+  const box = $("#who");
+  if (!box) return;
+  const s = state.session;
+  // pending 时不露：此刻还不知道这串令牌算不算数，先露头像等于替后端答应了。
+  const on = state.auth === "in" && Boolean(s && s.token);
+  box.hidden = !on;
+  if (!on) {
+    closeWhoMenu();
+    return;
+  }
+  const mono = $("#who-mono");
+  if (mono) mono.textContent = (s.nickname || s.uid || "?").trim().slice(0, 1).toUpperCase();
+  const name = $("#who-name");
+  if (name) name.textContent = s.nickname || (s.uid ? `UID ${s.uid}` : "已验证");
+  const avatar = $("#who-avatar");
+  const src = safeUrl(s.avatar || "");
+  if (avatar) {
+    if (src) {
+      avatar.hidden = false;
+      if (avatar.getAttribute("src") !== src) avatar.setAttribute("src", src);
+      // 头像取自酷安那边，跨域加载失败是常态之一：退回「首字」那一枚，别留一个破图标。
+      avatar.onerror = () => {
+        avatar.hidden = true;
+        if (mono) mono.hidden = false;
+      };
+      if (mono) mono.hidden = true;
+    } else {
+      avatar.hidden = true;
+      if (mono) mono.hidden = false;
+    }
+  }
+  const btn = $("#who-btn");
+  if (btn) btn.setAttribute("aria-label", `已登录：${s.nickname || s.uid || "已验证"}，打开菜单`);
+}
+
+function closeWhoMenu() {
+  const menu = $("#who-menu");
+  const btn = $("#who-btn");
+  if (menu) menu.hidden = true;
+  if (btn) btn.setAttribute("aria-expanded", "false");
+}
+
+function toggleWhoMenu(open) {
+  const menu = $("#who-menu");
+  const btn = $("#who-btn");
+  if (!menu) return;
+  const want = open === undefined ? menu.hidden : Boolean(open);
+  menu.hidden = !want;
+  if (btn) btn.setAttribute("aria-expanded", want ? "true" : "false");
+  if (want) {
+    const first = menu.querySelector(".who__item");
+    if (first) first.focus();
+  }
+}
+
+/** 菜单是浮层：点外面 / 按 Esc 都得收起来，否则它会一直压着下面的按钮。 */
+function bindWho() {
+  const btn = $("#who-btn");
+  if (btn) {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleWhoMenu();
+    });
+  }
+  document.addEventListener("click", (e) => {
+    const box = $("#who");
+    if (box && !box.hidden && !box.contains(e.target)) closeWhoMenu();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const menu = $("#who-menu");
+    if (!menu || menu.hidden) return;
+    closeWhoMenu();
+    const b = $("#who-btn");
+    if (b) b.focus();
+  });
+  // 「上传记录」点了就收起浮层（跳转本身由 hash 完成）。
+  const records = $("#who-records");
+  if (records) records.addEventListener("click", () => closeWhoMenu());
+}
+
+/** 身份闸的加载态：pending 时把上传表单整个藏起来，只留那一行字。 */
+function paintAuth() {
+  const pending = state.auth === "pending";
+  const form = $("#form");
+  if (form) form.hidden = pending;
+  const wait = $("#auth-wait");
+  if (wait) wait.hidden = !pending;
+}
+
 /** 会话条：只在真有会话、且它属于输入框里这串 UID 时出现。 */
 function paintSession() {
   const bar = $("#session-bar");
-  if (!bar) return;
   const uid = fieldValue("coolapkUid");
-  if (!sessionFor(uid)) {
-    bar.hidden = true;
-    return;
+  const on = sessionFor(uid);
+  if (bar) {
+    bar.hidden = !on;
+    if (on) {
+      const t = $("#session-t");
+      const d = $("#session-d");
+      if (t) t.textContent = `已验证：${state.session.nickname || uid}`;
+      if (d) d.textContent = "90 天内再投稿不用改签名。换账号请点「退出」。";
+    }
   }
-  const t = $("#session-t");
-  const d = $("#session-d");
-  if (t) t.textContent = `已验证：${state.session.nickname || uid}`;
-  if (d) d.textContent = "90 天内再投稿不用改签名。换账号请点右边。";
-  bar.hidden = false;
+  paintWho();
 }
 
 /**
@@ -2486,20 +2641,42 @@ function paintSession() {
 async function refreshSession() {
   const saved = loadSession();
   if (!saved) {
+    // 本地没有可用的串（没有 / 形状不对 / 已过期）：直接判「没验证」，闸会把上传页送去身份页。
+    state.auth = "out";
     paintSession();
     paintMine();
+    renderRoute();
     return;
   }
   const res = await checkSession(saved.token);
   if (!res || !res.ok) {
-    // 问不到答案的那一档不清本地：一次网络抖动就把 90 天令牌永久删掉，用户下次必须
-    // 重改签名且再也取不回来 —— 那是比「这一次多改一次签名」贵得多的代价。
+    // 「问不到答案」那一档（断网 / 超时 / 5xx / 非 JSON）与「服务端看了并拒了」必须分开：
+    // 前者一次抖动就销毁 90 天令牌，比让用户多改一次签名贵得多。
+    const transient = Boolean(res && res.transient);
+    // 只有服务端明确说了「不认这串」才清本地 —— 这一行的形状被 selftest 钉住，别拆成块。
     if (!res || !res.transient) clearSession();
+    if (transient) {
+      // 按「还是已登录」撑住：uid / 昵称 / 头像这一档拿不到，先按本地那串把闸撑起来。
+      state.session = {
+        token: saved.token,
+        uid: "",
+        nickname: "",
+        avatar: "",
+        level: null,
+        expiresAt: saved.expiresAt,
+      };
+      state.auth = "in";
+    } else {
+      // 服务端看了这串并拒了：判「没验证」，地址由闸收敛到身份页。
+      state.auth = "out";
+    }
     paintSession();
     paintMine();
     refreshGate();
+    renderRoute();
     return;
   }
+  state.auth = "in";
   state.session = {
     token: saved.token,
     uid: res.uid ? String(res.uid) : "",
@@ -2508,7 +2685,8 @@ async function refreshSession() {
     level: res.level,
     expiresAt: res.expiresAt || saved.expiresAt,
   };
-  // 把 UID 填进表单并派发 input：核实那一步会走 session 那条近路（见 runUidCheck）。
+  // 把 UID 填进表单并派发 input：核实那一步会走 session 那条近路（见 runUidCheck），
+  // 也就是「一次上传一份署名」那两格仍然有值可读 —— 提交载荷里的 coolapkUid 就是它。
   const el = fieldEls.coolapkUid;
   if (el && state.session.uid && !el.value.trim()) {
     el.value = state.session.uid;
@@ -2516,35 +2694,58 @@ async function refreshSession() {
   }
   paintSession();
   refreshGate();
+  // 已经有会话了：身份页不必再看（renderRoute 会把 #/identity 收敛到 #/submit）。
+  renderRoute();
   // 令牌刚被后端认下来：顺手把「我的模块」问一次（同一串令牌只问一次，见 loadMine）。
   // 不 await —— 这一格是便利，它慢不该让会话条的刷新跟着慢。
   loadMine();
 }
 
-/** 退出验证：注销令牌（幂等，失败也照样清本地）+ 把 UID 一起清掉，回到「每次改签名」那一档。 */
+/**
+ * 退出验证：注销令牌（幂等，失败也照样清本地）+ 把 UID 一起清掉，回到「每次改签名」那一档。
+ *
+ * 判「退出成功」不认网络：令牌注销那一发只是让服务端也忘掉这串，退不出去也要退 ——
+ * 本地那份留着才是真问题（下次刷新又会自称「已验证」，而顶栏还会挂着别人的昵称）。
+ */
+async function logout() {
+  const token = state.session ? state.session.token : "";
+  if (token) {
+    try {
+      await revokeSession(token);
+    } catch {
+      // 注销失败照样往下走：本地这份必须清掉，见上面的注释。
+    }
+  }
+  clearSession();
+  state.auth = "out";
+  state.idError = "";
+  const el = fieldEls.coolapkUid;
+  if (el) {
+    el.value = "";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  closeWhoMenu();
+  paintSession();
+  // 立刻收起来，不等 runUidCheck 那 500ms 的防抖 —— 退出验证之后还挂着自己的模块清单，
+  // 是那种「看起来已经退出了其实没有」的界面。
+  paintMine();
+  renderProof();
+  refreshGate();
+  // 地址先落地再画：闸看到 auth=out 会把 #/submit 与 #/records 都收敛到身份页。
+  if (location.hash !== "#/identity") history.replaceState(null, "", "#/identity");
+  renderRoute();
+}
+
 function bindSession() {
   const forget = $("#session-forget");
   if (!forget) return;
   forget.addEventListener("click", async () => {
-    const token = state.session ? state.session.token : "";
     forget.disabled = true;
     try {
-      if (token) await revokeSession(token);
+      await logout();
     } finally {
       forget.disabled = false;
     }
-    // 退不出去也要退：本地这份留着才是真问题（下次刷新又会自称「已验证」）。
-    clearSession();
-    paintSession();
-    // 立刻收起来，不等 runUidCheck 那 500ms 的防抖 —— 退出验证之后还挂着自己的模块清单，
-    // 是那种「看起来已经退出了其实没有」的界面。
-    paintMine();
-    const el = fieldEls.coolapkUid;
-    if (el) {
-      el.value = "";
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-    refreshGate();
   });
 }
 
@@ -2560,6 +2761,8 @@ function bindSession() {
  * 去骗用户说他没投过东西。
  */
 function paintMine() {
+  // 记录页那一格空态跟着这一条线走：清单的三种「没东西」由它说清，别处不再各判一次。
+  paintRecords();
   const bar = $("#mine-bar");
   if (!bar) return;
   const uid = fieldValue("coolapkUid");
@@ -2592,22 +2795,43 @@ function paintMine() {
     else if (mine.degraded) note.textContent = "这次没读到公开索引，清单可能不全 —— 不影响你继续上传。";
     else if (mine.rows.length)
       note.textContent =
-        "点「上传新版本」会把 ID / 名称 / 作者 / 出处填好、版本号预填成当前值 +1，接着让你选包。";
+        "点「上传更新版」会把 ID / 名称 / 作者 / 出处填好、版本号预填成当前值 +1，接着让你选包。";
     else note.textContent = "";
   }
 }
 
 function mineRow(row) {
   const li = node("li", "mine__row");
-  li.append(node("span", "mine__id", row.id));
-  const meta = [row.version ? `v${row.version}` : "", row.versionCode ? `code ${row.versionCode}` : ""]
-    .filter(Boolean)
-    .join(" · ");
-  li.append(node("span", "mine__meta", meta || "—"));
-  const go = node("button", "mine__go", "上传新版本");
+  const head = node("div", "mine__head");
+  head.append(node("span", "mine__id", row.id));
+  // 模块名是记录页最想先看到的那一格：没有它，一行「abcdef12」认不出是哪一枚。
+  if (row.name) head.append(node("span", "mine__name", row.name));
+  li.append(head);
+  const bits = [];
+  bits.push(
+    row.version ? `当前收录 v${row.version}${row.versionCode ? `（code ${row.versionCode}）` : ""}` : "当前收录版本未知"
+  );
+  // 历史版本与提交时间、PR 链接后端今天都还没回 —— 有就显示，没有就一个字都不编。
+  if (Array.isArray(row.versions) && row.versions.length) bits.push(`投过的版本 ${row.versions.join(" / ")}`);
+  if (row.submittedAt) bits.push(`最近提交 ${row.submittedAt}`);
+  li.append(node("span", "mine__meta", bits.join(" · ")));
+  const pr = row.pr ? safeUrl(row.pr) : "";
+  if (pr) {
+    const link = node("a", "mine__link", "看这次 PR");
+    link.href = pr;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    li.append(link);
+  }
+  const go = node("button", "mine__go", "上传更新版");
   go.type = "button";
-  go.setAttribute("aria-label", `给 ${row.id} 上传新版本`);
-  go.addEventListener("click", () => prefillFromMine(row));
+  go.setAttribute("aria-label", `给 ${row.id} 上传更新版`);
+  go.addEventListener("click", () => {
+    // 复用上传页那条「为已收录模块挑新版」的路：ID / 名称 / 作者 / 出处预填、版本号 +1。
+    prefillFromMine(row);
+    if (location.hash !== "#/submit") history.replaceState(null, "", "#/submit");
+    renderRoute();
+  });
   li.append(go);
   return li;
 }
@@ -2676,7 +2900,7 @@ function prefillFromMine(row) {
   selectCardNow(card.key);
   renderQueue();
   // 就在这次点击里把选包对话框打开（同一个用户手势，浏览器不会拦）：
-  // 「上传新版本」之后紧接着要做的唯一一件事就是选包，多一步点击只是多一次卡壳的机会。
+  // 「上传更新版」之后紧接着要做的唯一一件事就是选包，多一步点击只是多一次卡壳的机会。
   // 取消也不要紧 —— 卡留在队列里，之后点这一枚右边的 ↻ 还能把包选上。
   requestSwap(card);
 }
@@ -2692,6 +2916,186 @@ function bindMine() {
   bar.addEventListener("mousedown", (e) => {
     if (e.target === bar) e.preventDefault();
   });
+}
+
+/* -------------------------------------------------------- 身份验证（#/identity） */
+
+/**
+ * 身份页的闸：那颗「验证并继续」亮不亮、还差什么。
+ *
+ * 它挂在 refreshGate() 的尾巴上（那条链已经被所有输入触发），所以这里只负责读现状，
+ * 不自己找人调 —— 少一处「改了值忘了重画」的机会。
+ */
+function renderIdentityGate() {
+  // 那一行「用哪个包当凭据」也跟着刷新：解析是异步的，包到货之后这句话必须自己改口。
+  renderIdentityPick();
+  const btn = $("#id-verify");
+  const note = $("#id-note");
+  if (!btn) return;
+  const uid = fieldValue("coolapkUid");
+  const card = state.cards.find((c) => c && c.zipSha) || null;
+  const pledge = $("#ck-pledge");
+  const ready = Boolean(
+    !state.idBusy && isCoolapkUid(uid) && card && pledge && pledge.checked
+  );
+  btn.disabled = !ready;
+  if (!note) return;
+  if (state.idBusy) note.textContent = "正在跟后端核对…";
+  else if (!uid) note.textContent = "先填你的酷安 UID";
+  else if (!isCoolapkUid(uid)) note.textContent = "UID 应是 4-12 位纯数字";
+  else if (!card) note.textContent = "还差一个模块 zip（拿它当凭据）";
+  else if (!pledge || !pledge.checked) note.textContent = "把下面那条承诺勾上";
+  else note.textContent = "可以去验证了";
+}
+
+/** 身份页第二段那一行：拿哪个包当凭据（读的是队列里第一枚有整包哈希的卡）。 */
+function renderIdentityPick() {
+  const line = $("#id-pick");
+  if (!line) return;
+  if (state.intakeError) {
+    line.textContent = state.intakeError;
+    return;
+  }
+  const card = state.cards.find((c) => c && c.zipSha) || null;
+  if (!card) {
+    line.textContent = "还没选包。选一个 zip —— 它只用来证明这个号是你的，验证完接着从这一枚上传。";
+    return;
+  }
+  const name = card.file ? card.file.name : "包体";
+  const id = (card.values && card.values.id) || fieldValue("id") || "（读不出 module.prop）";
+  line.textContent = `${id} · ${name} · sha256 ${card.zipSha.slice(0, 8)}…`;
+}
+
+function paintIdentityError() {
+  const box = $("#id-err");
+  if (!box) return;
+  box.hidden = !state.idError;
+  box.textContent = state.idError || "";
+}
+
+/**
+ * 验证并继续：拿「一个包 + 一次签名 + 一条承诺」换一张 90 天会话（契约 §2）。
+ *
+ * 成功之后做两件容易被漏掉的事：
+ * ① 把 state.nonce 清掉 —— 这一串已经在服务端用掉了，留着它等于让人把一串**已经烧掉的字节**
+ *    再抄一次进酷安签名，而上传页要用的本来就是「这次上传自己那一串」；
+ * ② 把 uid / 昵称写回那两格输入框并走一次 syncUploaderField —— 上传页的提交载荷读的就是它们。
+ */
+async function submitIdentity() {
+  if (state.idBusy) return;
+  const uid = fieldValue("coolapkUid");
+  const card = state.cards.find((c) => c && c.zipSha) || null;
+  const pledge = $("#ck-pledge");
+  if (!isCoolapkUid(uid) || !card || !pledge || !pledge.checked) {
+    refreshGate();
+    return;
+  }
+  state.idBusy = true;
+  state.idError = "";
+  paintIdentityError();
+  renderIdentityGate();
+  try {
+    const res = await issueIdentitySession({
+      coolapkUid: uid,
+      nonce: state.nonce,
+      items: [{ id: (card.values && card.values.id) || fieldValue("id"), zipSha: card.zipSha }],
+      pledge: "pledge-v1",
+    });
+    state.session = {
+      token: res.session.token,
+      uid: res.identity.uid || uid,
+      nickname: res.identity.nickname || "",
+      avatar: res.identity.avatar || "",
+      level: res.identity.level,
+      expiresAt: res.session.expiresAt,
+    };
+    saveSession(state.session);
+    state.auth = "in";
+    // 这一串签名已经在服务端用掉了（契约 §2 的一次性凭据）：清空重发，别带进上传。
+    state.nonce = "";
+    state.uidStatus = "verified";
+    state.uidInfo = {
+      uid: state.session.uid,
+      nickname: state.session.nickname,
+      avatar: state.session.avatar,
+    };
+    const el = fieldEls.coolapkUid;
+    if (el && state.session.uid) el.value = state.session.uid;
+    const nick = fieldEls.uploader;
+    if (nick && state.session.nickname) nick.value = state.session.nickname;
+    showUid("ok", "已验证", state.session.nickname || state.session.uid, "这张凭据 90 天内有效，再投稿不用再改签名。");
+    syncUploaderField();
+    renderProof();
+    // 换了人就是换了清单：asked 清空让 loadMine 重问一次。
+    state.mine = { asked: "", rows: [], degraded: false, loading: false };
+    paintSession();
+    paintMine();
+    refreshGate();
+    if (location.hash !== "#/submit") history.replaceState(null, "", "#/submit");
+    renderRoute();
+    loadMine();
+  } catch (err) {
+    // backendFailure 已经把那句中文写好了（含服务端原话），这里原样显示，不改写。
+    state.idError = err && err.message ? err.message : "验证没有成功，稍后再试一次。";
+  } finally {
+    state.idBusy = false;
+    paintIdentityError();
+    renderIdentityGate();
+  }
+}
+
+function bindIdentity() {
+  const file = $("#id-file");
+  if (file) {
+    file.addEventListener("change", () => {
+      // 只收一枚：这一屏的凭据就是「一个包」，多选在这里没有意义（上传页才是一整套）。
+      const picked = Array.from(file.files || []).slice(0, 1);
+      // 选完立刻清空 value：同一个包再选一次也要能触发 change。
+      file.value = "";
+      if (!picked.length) return;
+      state.idError = "";
+      paintIdentityError();
+      // 复用上传页那条解析链（上限、根目录、整包哈希全在 intakeBatch 里，不另写一份）。
+      scheduleIntake(picked);
+    });
+  }
+  const pledge = $("#ck-pledge");
+  if (pledge) pledge.addEventListener("change", () => refreshGate());
+  const verify = $("#id-verify");
+  if (verify) verify.addEventListener("click", () => submitIdentity());
+  paintIdentityError();
+  renderIdentityGate();
+}
+
+/* -------------------------------------------------------- 上传记录（#/records） */
+
+/**
+ * 记录页那一格空态：加载中 / 一条都没有 / 索引读不到 / 没验证，四种说法不许混。
+ *
+ * 有内容时由 paintMine() 的清单说话（那一格已经是本页主体），这里只补它不说话的那一格：
+ * 「你还没投过模块」**不是**错误，而「这次没读到索引」也**不是**「你没投过」。
+ */
+function paintRecords() {
+  const box = $("#records-state");
+  if (!box) return;
+  const mine = state.mine;
+  const on = state.auth === "in" && Boolean(state.session && state.session.token);
+  let text = "";
+  if (!on) {
+    text = "这一页要先看过身份 —— 回身份页验证一次，这里就会列出你投过的每一枚。";
+  } else if (!mine.loading && !mine.rows.length && !mine.degraded) {
+    text = "你还没投过模块。上传第一枚之后，这里会列出它的当前收录版本，也能直接接着发更新版。";
+  }
+  box.hidden = !text;
+  box.textContent = text;
+}
+
+/**
+ * 「我的模块」那一格现在是记录页的主体（它搬到了 #/records），所以这里没有额外的绑定；
+ * 保留这个钩子是为了让 init() 里那一串 bind 与其它视图形状一致。
+ */
+function bindRecords() {
+  paintRecords();
 }
 
 const runUidCheck = debounce(async () => {
@@ -4846,8 +5250,13 @@ function init() {
   bindStage();
   bindSession();
   bindMine();
+  bindWho();
+  bindIdentity();
+  bindRecords();
   wireModerationTabs(); // 切换器是静态的两枚，绑一次就够，不随路由重绑
   renderQueue(); // 一开始是空队列：整条收起，上传页与今天一模一样
+  // 先把「还不知道」那一档画出来（表单藏起、露出一行字），免得身份区先闪一下再消失。
+  paintAuth();
   // 会话刷新是异步的，不 await：本地那串令牌有没有效，不该拦住首屏。
   refreshSession();
   renderAbout();
