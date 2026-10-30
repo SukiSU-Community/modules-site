@@ -177,6 +177,29 @@ function safeUrl(href) {
   }
 }
 
+/**
+ * 头像地址抬到 https。
+ *
+ * 酷安给的是 `http://avatar.coolapk.com/...`；本站是 https 页面，http 图片会被当
+ * mixed content 拦掉，头像于是永远不显示。同一路径的 https 可用，所以这里换协议。
+ * 老会话（localStorage 里存着 http 地址）也靠这一步救回来。
+ */
+const SECURE_AVATAR_HOSTS = ["coolapk.com", "sinaimg.cn", "weibo.com"];
+function secureAvatarUrl(raw) {
+  const href = safeUrl(raw);
+  if (!href || href.startsWith("https://")) return href;
+  try {
+    const u = new URL(href);
+    const host = u.hostname.toLowerCase();
+    const upgradable = SECURE_AVATAR_HOSTS.some((h) => host === h || host.endsWith("." + h));
+    if (!upgradable) return href;
+    u.protocol = "https:";
+    return u.href;
+  } catch {
+    return href;
+  }
+}
+
 function node(tag, cls, text) {
   const el = document.createElement(tag);
   if (cls) el.className = cls;
@@ -2177,7 +2200,7 @@ function showUid(tone, chip, title, desc, avatar) {
   chipEl.className = `chip${tone === "bad" ? " chip--bad" : tone === "ok" ? " chip--ok" : tone === "warn" ? " chip--warn" : tone === "idle" ? " chip--idle" : ""}`;
   const img = $("#uid-avatar");
   if (avatar) {
-    img.src = avatar;
+    img.src = secureAvatarUrl(avatar);
     img.hidden = false;
     // 头像的淡入也挂在同一个判据上（.uid__avatar.is-verified），两处必须同步：
     // 勾号动、头像不动就是「验过了但没验过」两种说法。
@@ -2546,7 +2569,7 @@ function paintWho() {
   const name = $("#who-name");
   if (name) name.textContent = s.nickname || (s.uid ? `UID ${s.uid}` : "已验证");
   const avatar = $("#who-avatar");
-  const src = safeUrl(s.avatar || "");
+  const src = secureAvatarUrl(s.avatar || "");
   if (avatar) {
     if (src) {
       avatar.hidden = false;
