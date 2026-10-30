@@ -37,7 +37,15 @@ import {
 } from "./api.js";
 import { canInflateRaw, listEntries, readEntry, inspectEntries } from "./zipread.js";
 import { parseModuleProp } from "./moduleprop.js";
-import { buildProofString, buildProofStringV2, canonicalProofSet, makeNonce, sha256HexBytes } from "./proof.js";
+import {
+  buildProofString,
+  buildProofStringV2,
+  canonicalProofSet,
+  identityCommitment,
+  identitySecret,
+  makeNonce,
+  sha256HexBytes,
+} from "./proof.js";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -2921,49 +2929,82 @@ function bindMine() {
 /* -------------------------------------------------------- 身份验证（#/identity） */
 
 /**
+ * 本机那枚 secret 的存储键（契约 v2 §5）。续期复用同一串 —— 只有「换一串」才重新生成。
+ *
+ * 为什么非存下来不可：要填进酷安签名的承诺串是从 secret 现算的（commit = sha256(前缀+secret)
+ * 前 24 位）。secret 一丢，commit 就变成另一串，用户得到酷安再改一次签名 —— 而我们承诺的是
+ * 「验过之后 90 天内不用再碰签名」。存储只在这一台浏览器里，别处没有副本。
+ */
+const IDENTITY_SECRET_KEY = "sukisu.identity.secret";
+
+function readIdentitySecret() {
+  try {
+    const saved = localStorage.getItem(IDENTITY_SECRET_KEY) || "";
+    return /^[0-9a-f]{32}$/.test(saved) ? saved : "";
+  } catch {
+    return "";
+  }
+}
+
+function saveIdentitySecret(secret) {
+  try {
+    localStorage.setItem(IDENTITY_SECRET_KEY, secret);
+  } catch {
+    // 无痕 / 存储被禁：这一串只活到这次刷新。承诺照样算得出、验证照样过，
+    // 只是下次进来会换一串、得再去改一次签名 —— 那是浏览器的限制，不该把整页拦下来。
+  }
+}
+
+/** 取本机这一串；没有或形状不对就现生成一枚并落盘。 */
+function ensureIdentitySecret() {
+  const saved = readIdentitySecret();
+  if (saved) return saved;
+  const fresh = identitySecret();
+  saveIdentitySecret(fresh);
+  return fresh;
+}
+
+/**
+ * 画出第二段那一串承诺（24 位小写十六进制）。
+ *
+ * 派生值每次现算、不缓存：secret 变了（点「换一串」）或页面回来了都重画一遍，
+ * 于是屏幕上这一串与 localStorage 里那一枚在结构上不可能脱钩。
+ */
+async function paintIdentityCommit() {
+  const code = $("#identity-commit");
+  if (!code) return;
+  const secret = ensureIdentitySecret();
+  try {
+    const commit = await identityCommitment(secret);
+    // sha256 是异步的，中间可能点了「换一串」：那就不画这枚过期的。
+    if (readIdentitySecret() !== secret) return;
+    code.textContent = commit;
+  } catch {
+    code.textContent = "（这一串算不出来，刷新一次试试）";
+  }
+}
+
+/**
  * 身份页的闸：那颗「验证并继续」亮不亮、还差什么。
  *
  * 它挂在 refreshGate() 的尾巴上（那条链已经被所有输入触发），所以这里只负责读现状，
  * 不自己找人调 —— 少一处「改了值忘了重画」的机会。
+ * v2 之后这一屏不再需要包：凭据只有「UID + 签名里那一串 + 一条承诺」。
  */
 function renderIdentityGate() {
-  // 那一行「用哪个包当凭据」也跟着刷新：解析是异步的，包到货之后这句话必须自己改口。
-  renderIdentityPick();
   const btn = $("#id-verify");
   const note = $("#id-note");
   if (!btn) return;
   const uid = fieldValue("coolapkUid");
-  const card = state.cards.find((c) => c && c.zipSha) || null;
   const pledge = $("#ck-pledge");
-  const ready = Boolean(
-    !state.idBusy && isCoolapkUid(uid) && card && pledge && pledge.checked
-  );
+  const ready = Boolean(!state.idBusy && isCoolapkUid(uid) && pledge && pledge.checked);
   btn.disabled = !ready;
   if (!note) return;
   if (state.idBusy) note.textContent = "正在跟后端核对…";
   else if (!uid) note.textContent = "先填你的酷安 UID";
   else if (!isCoolapkUid(uid)) note.textContent = "UID 应是 4-12 位纯数字";
-  else if (!card) note.textContent = "还差一个模块 zip（拿它当凭据）";
   else if (!pledge || !pledge.checked) note.textContent = "把下面那条承诺勾上";
   else note.textContent = "可以去验证了";
-}
-
-/** 身份页第二段那一行：拿哪个包当凭据（读的是队列里第一枚有整包哈希的卡）。 */
-function renderIdentityPick() {
-  const line = $("#id-pick");
-  if (!line) return;
-  if (state.intakeError) {
-    line.textContent = state.intakeError;
-    return;
-  }
-  const card = state.cards.find((c) => c && c.zipSha) || null;
-  if (!card) {
-    line.textContent = "还没选包。选一个 zip —— 它只用来证明这个号是你的，验证完接着从这一枚上传。";
-    return;
-  }
-  const name = card.file ? card.file.name : "包体";
-  const id = (card.values && card.values.id) || fieldValue("id") || "（读不出 module.prop）";
-  line.textContent = `${id} · ${name} · sha256 ${card.zipSha.slice(0, 8)}…`;
 }
 
 function paintIdentityError() {
@@ -2974,19 +3015,20 @@ function paintIdentityError() {
 }
 
 /**
- * 验证并继续：拿「一个包 + 一次签名 + 一条承诺」换一张 90 天会话（契约 §2）。
+ * 验证并继续：拿「UID + 本机 secret + 一条承诺」换一张 90 天会话（契约 v2 §2）。
+ *
+ * 发上去的是 secret 本身；签名里那一串是这个 secret 的哈希承诺 —— 所以这条信道里
+ * 只会出现 secret 一次，而酷安签名那个**公开可读**的字段里永远只有抄不走的前 24 位。
  *
  * 成功之后做两件容易被漏掉的事：
- * ① 把 state.nonce 清掉 —— 这一串已经在服务端用掉了，留着它等于让人把一串**已经烧掉的字节**
- *    再抄一次进酷安签名，而上传页要用的本来就是「这次上传自己那一串」；
- * ② 把 uid / 昵称写回那两格输入框并走一次 syncUploaderField —— 上传页的提交载荷读的就是它们。
+ * ① 把 uid / 昵称写回那两格输入框并走一次 syncUploaderField —— 上传页的提交载荷读的就是它们；
+ * ② 清掉「待问清单」的缓存（state.mine.asked），让记录页按新的身份重问一次。
  */
 async function submitIdentity() {
   if (state.idBusy) return;
   const uid = fieldValue("coolapkUid");
-  const card = state.cards.find((c) => c && c.zipSha) || null;
   const pledge = $("#ck-pledge");
-  if (!isCoolapkUid(uid) || !card || !pledge || !pledge.checked) {
+  if (!isCoolapkUid(uid) || !pledge || !pledge.checked) {
     refreshGate();
     return;
   }
@@ -2997,8 +3039,7 @@ async function submitIdentity() {
   try {
     const res = await issueIdentitySession({
       coolapkUid: uid,
-      nonce: state.nonce,
-      items: [{ id: (card.values && card.values.id) || fieldValue("id"), zipSha: card.zipSha }],
+      secret: ensureIdentitySecret(),
       pledge: "pledge-v1",
     });
     state.session = {
@@ -3011,8 +3052,8 @@ async function submitIdentity() {
     };
     saveSession(state.session);
     state.auth = "in";
-    // 这一串签名已经在服务端用掉了（契约 §2 的一次性凭据）：清空重发，别带进上传。
-    state.nonce = "";
+    // v2 的 secret 是**长期**凭据（90 天内复用的就是这一串），所以这里不清它 ——
+    // 清了就等于让人每次都去酷安改一次签名。上传页那枚包绑定 nonce 与它无关，也不动。
     state.uidStatus = "verified";
     state.uidInfo = {
       uid: state.session.uid,
@@ -3044,27 +3085,71 @@ async function submitIdentity() {
   }
 }
 
-function bindIdentity() {
-  const file = $("#id-file");
-  if (file) {
-    file.addEventListener("change", () => {
-      // 只收一枚：这一屏的凭据就是「一个包」，多选在这里没有意义（上传页才是一整套）。
-      const picked = Array.from(file.files || []).slice(0, 1);
-      // 选完立刻清空 value：同一个包再选一次也要能触发 change。
-      file.value = "";
-      if (!picked.length) return;
-      state.idError = "";
-      paintIdentityError();
-      // 复用上传页那条解析链（上限、根目录、整包哈希全在 intakeBatch 里，不另写一份）。
-      scheduleIntake(picked);
-    });
+/**
+ * 「复制这串」：写进剪贴板，按钮上回一句结果。
+ *
+ * 不能假定 clipboard 一定在：非安全上下文（拿内网 http 地址调试时）navigator.clipboard 是
+ * undefined，静默失败最糟 —— 那时退回「把这段字选中」，让用户自己按一次 Ctrl+C。
+ */
+async function copyIdentityCommit(btn) {
+  const code = $("#identity-commit");
+  const text = code ? code.textContent.trim() : "";
+  if (!text) return;
+  const label = btn ? btn.textContent : "";
+  let ok = false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    }
+  } catch {
+    ok = false;
   }
+  if (!ok) {
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(code);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch {
+      // 选不中也算了：24 位字就在屏幕上，手抄一条不算什么。
+    }
+  }
+  if (btn) {
+    btn.textContent = ok ? "已复制" : "请按 Ctrl+C";
+    setTimeout(() => (btn.textContent = label), 1500);
+  }
+}
+
+/**
+ * 「换一串」：重新生成本机 secret、重画承诺串。
+ *
+ * 不弹确认框：点它的意思本来就是「这一串不要了」，而改签名这件事写在旁边那行说明里，
+ * 换完立刻看得见 —— 多一次「确定吗」只是多一次点击，拦不住任何真错误。
+ */
+function renewIdentitySecret(btn) {
+  saveIdentitySecret(identitySecret());
+  paintIdentityCommit();
+  if (btn) {
+    const label = btn.textContent;
+    btn.textContent = "换好了，去改签名";
+    setTimeout(() => (btn.textContent = label), 1800);
+  }
+}
+
+function bindIdentity() {
   const pledge = $("#ck-pledge");
   if (pledge) pledge.addEventListener("change", () => refreshGate());
   const verify = $("#id-verify");
   if (verify) verify.addEventListener("click", () => submitIdentity());
+  const copy = $("#identity-copy");
+  if (copy) copy.addEventListener("click", () => copyIdentityCommit(copy));
+  const renew = $("#identity-renew");
+  if (renew) renew.addEventListener("click", () => renewIdentitySecret(renew));
   paintIdentityError();
   renderIdentityGate();
+  paintIdentityCommit();
 }
 
 /* -------------------------------------------------------- 上传记录（#/records） */

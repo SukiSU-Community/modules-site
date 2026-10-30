@@ -28,6 +28,9 @@ import {
   proofPrefixV2,
   buildProofStringV2,
   canonicalProofSet,
+  identityCommitment,
+  identitySecret,
+  IDENTITY_COMMIT_LEN,
   PROOF_PREFIX_LEN_V2,
 } from "../public/scripts/proof.js";
 
@@ -97,6 +100,19 @@ const PROOF_V2_GOLDENS = [
   },
   { name: "中文 id", items: [{ id: "含中文的模块id", zipSha: ZIP_SHA_CN }], prefix: "4ce4c553abc5" },
 ];
+
+/* 身份承诺的黄金值（设计文档 v2 §1.1 / §2）：
+     commit = sha256(UTF-8("sukisu-identity-v2:" + secret)) 的十六进制前 24 位
+   secret 是本地生成的 32 位小写十六进制（128 bit）；填进酷安签名的是 commit，不是 secret。
+   签名是公开可读的字段，所以那边只有承诺 —— 冒充要反推 sha256 的原像（2^128），抄不走。
+   期望值同样由 node:crypto 独立推得、不从被测实现里取：两条向量分别钉「换 secret 就换一串」
+   与「不是全零输入」两个面。 */
+const IDENTITY_GOLDENS = [
+  { secret: "0123456789abcdef0123456789abcdef", commit: "1c081f9de97c937b5cb5dc80" },
+  { secret: "fedcba9876543210fedcba9876543210", commit: "383aeebacf4976b539f12c77" },
+];
+const identityCommitOracle = (secret) =>
+  createHash("sha256").update(`sukisu-identity-v2:${secret}`, "utf8").digest("hex").slice(0, 24);
 
 /** 规范串的第二份算法，写在测试里是故意的（上面那条「公式形状独立复算」同一个理由）：
  *  拿 canonicalProofSet 自己去复算 canon，改了排序键也测不出来。 */
@@ -1052,6 +1068,78 @@ async function main() {
     "makeNonce 产出合法形状且不是定值",
     [...nonceSamples].every((n) => /^[a-z0-9]{6}$/.test(n)) && nonceSamples.size > 150,
     `${nonceSamples.size}/200 个不同，首个 ${[...nonceSamples][0]}`
+  );
+
+  /* ---------------------------------------------- 身份承诺：签名的只有哈希，没有原像（§1.1 / §2）
+     换代之后身份页唯一的新凭据形状就是这一串 24 位。它要守三件事：
+     ① 公式与黄金值一致 —— 换 secret 就必须换一串，否则两把钥匙开同一把锁；
+     ② 长度恒 24、字符集只含小写十六进制 —— 多一位就填不进签名，换成大写则服务端那次
+        `/^[0-9a-f]{32}$/` 判据当场把请求打成 identity_invalid，而界面上一切正常；
+     ③ 形状不合法的 secret 一律拒，不许「先截断再算」：那样同一串签名能对上无数个 secret。 */
+  const idWrong = [];
+  for (const g of IDENTITY_GOLDENS) {
+    const got = await identityCommitment(g.secret);
+    if (got !== g.commit) idWrong.push(`${g.secret}: 实现=${got} 黄金值=${g.commit}`);
+    const want = identityCommitOracle(g.secret);
+    if (got !== want) idWrong.push(`${g.secret}: 实现=${got} node:crypto=${want}`);
+  }
+  check(
+    '身份承诺：commit = sha256("sukisu-identity-v2:" + secret) 前 24 位（两条黄金值 + node:crypto 独立复算）',
+    idWrong.length === 0,
+    idWrong.join(" | ")
+  );
+  const idCommits = new Set();
+  for (const g of IDENTITY_GOLDENS) idCommits.add(await identityCommitment(g.secret));
+  const idShape = await identityCommitment(IDENTITY_GOLDENS[0].secret);
+  check(
+    "承诺串恒 24 位小写十六进制、且与 secret 一一对应（两条不同 secret 不得撞成同一串）",
+    IDENTITY_COMMIT_LEN === 24 &&
+      idShape.length === 24 &&
+      /^[0-9a-f]{24}$/.test(idShape) &&
+      idCommits.size === IDENTITY_GOLDENS.length,
+    `长度=${idShape.length} 常量=${IDENTITY_COMMIT_LEN} 不同结果数=${idCommits.size}/${IDENTITY_GOLDENS.length}`
+  );
+  const idRejects = [];
+  const idBadSecrets = [
+    ["空串", ""],
+    ["太短", "0123456789abcdef"],
+    ["太长", "0123456789abcdef0123456789abcdef00"],
+    ["非十六进制", "0123456789abcdef0123456789abcdeZ"],
+    ["大写", "0123456789ABCDEF0123456789ABCDEF"],
+    ["null", null],
+  ];
+  for (const [label, bad] of idBadSecrets) {
+    try {
+      await identityCommitment(bad);
+      idRejects.push(`${label} 没抛错`);
+    } catch (err) {
+      if (!/32 位小写十六进制/.test(err.message)) idRejects.push(`${label} 抛的不是那一句：${err.message}`);
+    }
+  }
+  check(
+    "承诺函数拒收形状不合法的 secret（空 / 太短 / 太长 / 非十六进制 / 大写 / null 各一条）",
+    idRejects.length === 0,
+    idRejects.join(" | ")
+  );
+  // 128 bit 随机：退化成定值就等于全站共用一把钥匙，而这个错误在界面上完全看不出来。
+  const secretSamples = new Set();
+  for (let i = 0; i < 50; i++) secretSamples.add(identitySecret());
+  check(
+    "identitySecret 产出 32 位小写十六进制且不是定值（128 bit 随机）",
+    [...secretSamples].every((s) => /^[0-9a-f]{32}$/.test(s)) && secretSamples.size === 50,
+    `${secretSamples.size}/50 个不同，首个 ${[...secretSamples][0]}`
+  );
+  // 身份页不再借包：契约 v2 §5 要求删掉「拿一个包当凭据」整段。
+  // 这里同时钉住「新的一串在 DOM 里」与「旧的那套不在」——只钉前者的话，改回选包那一屏照样绿。
+  check(
+    "身份页只剩「验证串」那一段：有 #identity-commit / #identity-copy / #identity-renew，没有选包与 #id-pick",
+    formHtml.includes('id="identity-commit"') &&
+      formHtml.includes('id="identity-copy"') &&
+      formHtml.includes('id="identity-renew"') &&
+      !formHtml.includes('id="id-file"') &&
+      !formHtml.includes('id="id-pick"') &&
+      !/renderIdentityPick/.test(appSrc),
+    "另一条钉子在检查 #proof-list 的唯一性（口令那一格没留第二份）"
   );
   // 派生值一旦进 state，就和来源脱钩了：改了 id / 换了包还缓存着旧口令。只准缓存来源。
   /* 旧断言（v1）钉的是 `buildProofString(id, zipSha, nonce)` 那三个来源。§15 之后口令绑的不再是

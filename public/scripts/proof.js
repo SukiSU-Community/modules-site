@@ -103,3 +103,34 @@ export function makeNonce() {
   for (const b of bytes) out += ALPHABET[b % ALPHABET.length];
   return out;
 }
+
+/* ------------------------------------------- 身份承诺（哈希承诺，设计文档 v2 §1.1）
+
+   身份证明不再借用「包」：本机生成一枚 32 位十六进制的 secret（128 bit，只在本地，
+   除了发给 /session/issue 复核之外不写进任何地方），要填进酷安签名的是它的哈希承诺：
+
+     commit = sha256(UTF-8("sukisu-identity-v2:" + secret)) 的前 24 位小写十六进制
+
+   为什么发承诺而不是发 secret 本身：酷安签名是**公开可读**的字段，任何人随时能看到。
+   签名里只放 commit，冒充者就得先反推 sha256 的原像（2^128 次），而这种「先公开、后消费」
+   的信道里唯一的攻击面就是读到它的人能不能复用 —— 复用需要原像，抄不走。
+   服务端因此也不需要记任何状态：它只做「重算一遍 sha256，看前 24 位对不对」。
+   与上面的包绑定口令一样，这里只提供纯函数，派生值每次现算、不缓存。 */
+
+export const IDENTITY_COMMIT_LEN = 24;
+
+/** 本机生成一枚 secret：16 字节随机 → 32 位小写十六进制。 */
+export function identitySecret() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return toHex(bytes);
+}
+
+/** secret → 承诺串（24 位小写十六进制）。形如不合法就抛，绝不返回半截值。
+ *  这里**不做**大小写规范化：Worker 侧按 `/^[0-9a-f]{32}$/` 判，前端替它「顺手改成小写」
+ *  只会造出两种口径 —— 界面上算得出、发上去却被判 identity_invalid。 */
+export async function identityCommitment(secret) {
+  const s = typeof secret === "string" ? secret.trim() : "";
+  if (!/^[0-9a-f]{32}$/.test(s)) throw new Error("secret 必须是 32 位小写十六进制");
+  return (await sha256Hex(`sukisu-identity-v2:${s}`)).slice(0, IDENTITY_COMMIT_LEN);
+}

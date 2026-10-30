@@ -786,12 +786,18 @@ export async function revokeSession(token) {
 }
 
 /**
- * POST /session/issue —— 契约 §2：**用一个包换一张会话**（网页端的身份前置那一步）。
+ * POST /session/issue —— 契约 v2 §2：**拿一枚 secret 换一张会话**（网页端的身份前置那一步）。
+ *
+ * 发上去的是 secret 本身（32 位小写十六进制），服务端把它哈希成 24 位承诺串、跟酷安签名里
+ * 那一串对。签名里**没有** secret，所以这个字节序列只在这一条信道里走一次。
+ * 请求体只有三个字段（v1 的 `nonce` / `items` 已随「用包当凭据」那套一起下线；
+ * 老后端要是不认多余的字段也没关系，这边不再发它们）。
  *
  * 与 /session/check 的两条口径分得开：那一条是「我手里这串还行不行」，恒 200、只读 ok；
- * 这一条是「拿一次签名去换一张新的」，**失败是有原因的**，所以走 backendFailure，
- * 让 `proof_used` / `not_owner` / `owner_unknown` / `index_unavailable` / `identity_required`
- * 各自的现成中文照着显示 —— 这几个码要用户做的事互不相同（改包 / 换号 / 等我们 / 重走验证）。
+ * 这一条是「拿一次签名核验去换一张新的」，**失败是有原因的**，所以走 backendFailure，
+ * 让 `not_owner` / `owner_unknown` / `index_unavailable` / `identity_invalid` /
+ * `body_too_large` / `rate_limited` 各自的现成中文照着显示 —— 这几个码要用户做的事互不相同
+ * （去改签名 / 换号 / 等我们 / 重发 / 少带东西 / 隔一会儿再来）。
  *
  * 应答 `{ ok, session: { token, expiresAt }, identity: { uid, nickname, avatar, level } }`：
  * 昵称与头像**只认后端这一格**，不许拿输入框里那串字当昵称 —— 那是用户自己填的，
@@ -802,14 +808,9 @@ export async function issueIdentitySession(body) {
   if (!IS_API_CONFIGURED) {
     throw new BackendError("not-configured", "后端地址还没配置：请在 config.js 填入 API_BASE 后再验证身份。");
   }
-  const items = Array.isArray(body && body.items) ? body.items : [];
   const payload = {
     coolapkUid: String((body && body.coolapkUid) || "").trim(),
-    nonce: String((body && body.nonce) || "").trim(),
-    items: items.map((it) => ({
-      id: String((it && it.id) || "").trim(),
-      zipSha: String((it && it.zipSha) || "").trim(),
-    })),
+    secret: String((body && body.secret) || "").trim(),
     pledge: String((body && body.pledge) || ""),
   };
   let res;
@@ -824,10 +825,10 @@ export async function issueIdentitySession(body) {
       SESSION_TIMEOUT_MS
     );
   } catch {
-    // 断网 / 超时 abort / 跨域被拦：这一发没打出去。签名没被烧，重试一次即可。
+    // 断网 / 超时 abort / 跨域被拦：这一发没打出去。签名和本地那串都没被动过，重试一次即可。
     throw new BackendError(
       "network",
-      "验证请求没发出去（断网、超时，或后端没给跨域许可）。你的签名与包都不用动 —— 检查网络后再点一次「验证并继续」。"
+      "验证请求没发出去（断网、超时，或后端没给跨域许可）。你的签名和本地这串都不用动 —— 检查网络后再点一次「验证并继续」。"
     );
   }
   let text = "";
@@ -847,7 +848,7 @@ export async function issueIdentitySession(body) {
   if (!json || json.ok !== true || !session || !SESSION_TOKEN_RE.test(session.token)) {
     throw new BackendError(
       "rejected",
-      "服务端回了 200，但应答里没有可用的会话令牌 —— 这一次没换成。签名可能已经记在服务端那一侧了，重试前先看一眼回包里那句原话；反复这样就把这一屏发给站点维护者。",
+      "服务端回了 200，但应答里没有可用的会话令牌 —— 这一次没换成。你的签名和本地那串都没被动过：重试一次；反复这样就把这一屏发给站点维护者。",
       text,
       { code: "session_issue_empty", owner: "us" }
     );

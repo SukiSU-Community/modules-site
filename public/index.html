@@ -150,7 +150,7 @@
               <p class="hero__lede" id="hero-lede">
                 大量国内自制模块只存在于酷安帖子里的网盘链接，几个月后就成死链，主流索引也搜不到。
                 这里就是给这些模块开的上传入口：把 zip 传上来、写清出处，服务端把它存成长期可用的下载地址，
-                审核通过后进入公开索引，所有人就能在管理器里<span class="hl">搜到并一键安装</span>。
+                自动检查通过后进入公开索引，所有人就能在管理器里<span class="hl">搜到并一键安装</span>。
               </p>
             </div>
             <!-- 四条硬性条件排成 2×2：窄屏占满整行（与下面的 .panel 同宽），
@@ -643,8 +643,10 @@
         <div class="hero rise">
           <h1 id="h-identity">先证明<span class="hi">是你</span></h1>
           <p class="hero__lede" id="identity-lede">
-            上传是公开且长期保留的动作，所以先认人：填你的酷安 UID，挑一个<b>这次要上传的包</b>，
-            把算出来的口令写进酷安签名。验过这一次，<b>90 天内</b>再投稿都不用再改签名。
+            上传链路<b>没有复核这一环</b>：过了这道身份闸与自动检查，包就直接进索引、进公开仓库。
+            而模块是以 <b>root 权限</b>跑在别人的设备上的 —— 一条恶意模块能造成的损害没有上限，
+            所以「谁交的」必须可追溯。填你的酷安 UID，把这一屏算出的<b>验证串</b>写进酷安签名，
+            我们只读一次签名来核对，之后 <b>90 天内</b>再上传都不用再碰签名。
           </p>
         </div>
 
@@ -696,37 +698,28 @@
           <section class="panel" aria-labelledby="pid2t">
             <div class="panel__hd">
               <span class="panel__no">02</span>
-              <h2 id="pid2t">拿一个包当凭据</h2>
-              <span class="panel__tag">proof</span>
+              <h2 id="pid2t">你的验证串</h2>
+              <span class="panel__tag">commit</span>
             </div>
             <p class="panel__note">
-              口令绑的是「模块 ID + 整包 sha256」，所以得有一个<b>真包</b>才算得出来。挑这次要上传的那一枚 ——
-              验完之后它跟着进上传队列，不用再选一遍。
+              这一串由<b>你这一台浏览器</b>生成的一枚随机数算出（sha256 的前 24 位承诺）：
+              填进签名的是它，核对时我们重算一遍，就知道签名的人手里有没有那枚随机数。
+              签名是公开可读的字段，可它里面只有承诺、没有原像 —— 抄走也没用。
             </p>
-            <div class="pick">
-              <!-- 真正可点、可 Tab 到的是这枚铺满按钮的 input（与上传页 .drop 同一套做法）：
-                   label 只负责长相，键盘与读屏拿到的是原生的文件选择器，不是一块好看的假按钮。 -->
-              <label class="btn btn--sm pick__btn">
-                <input type="file" id="id-file" accept=".zip,application/zip,application/x-zip-compressed" aria-label="选一个模块 zip" />
-                选一个模块 zip
-              </label>
-              <p class="pick__out" id="id-pick"></p>
+            <div class="commit">
+              <code class="mono commit__val" id="identity-commit" aria-live="polite">……</code>
+              <div class="commit__acts">
+                <button type="button" class="btn btn--ghost btn--sm" id="identity-copy">复制这串</button>
+                <button type="button" class="btn btn--ghost btn--sm" id="identity-renew">换一串</button>
+              </div>
             </div>
-            <div class="field" id="proof-field" hidden>
-              <span class="field__lab">酷安签名<span class="req">*</span></span>
-              <!-- 整套一串：v2 的签名绑的是「这一整套的 (模块 ID + 整包 sha256) 全集」，
-                   长度恒 19 字符、与枚数无关。下面那一行小字点名这一串到底绑了哪几枚 ——
-                   增删任一枚、改任一枚的 ID、重选任一枚的包，这一串就变成另一串。 -->
-              <div class="proofs" id="proof-list"></div>
-              <p class="field__help" id="proof-cap"></p>
-              <p class="field__help">
-                打开酷安「我的 → 编辑资料 → 签名」，把上面那一串<b>填进去并保存</b>，然后回来点下面的「验证并继续」。
-                为什么要这么做：为了让这个账号的所有权归属明确 —— 我们读取你的签名，确认和上面这一串吻合，
-                才认定这次投稿是你本人提交的。
-                这一串绑的是<b>本次这一整套模块</b>：少一枚、多一枚、换任何一枚的包，都会变成另一串。
-                所以它只对这一次上传有效。
-              </p>
-            </div>
+            <p class="field__help" id="identity-commit-cap">
+              把这串写进酷安签名，验过之后 90 天内不用再改。
+            </p>
+            <p class="field__help">
+              酷安 App「我的」→ <b>点头像进个人主页</b> → 右上角<b>三点</b> →「编辑资料」→ 粘进<b>签名</b>并保存。
+              我们只在验证这一下读一次签名；「换一串」等于换一把新钥匙，旧的那串当场作废，得再去改一次签名。
+            </p>
           </section>
 
           <section class="panel" aria-labelledby="pid3t">
@@ -739,16 +732,26 @@
               下面三条跟着这次验证一起记下来，是<b>你为这个账号投的每一份包</b>都成立的话。
             </p>
             <ul class="ticks ticks--flat">
-              <li><span class="tick__txt"><span class="no">01 / SAFE</span>这个模块<b>不含恶意代码</b>，不损害设备或数据。</span></li>
+              <li><span class="tick__txt"><span class="no">01 / SAFE</span>我提交的模块<b>不含恶意代码</b>，不损害设备或数据。</span></li>
               <li><span class="tick__txt"><span class="no">02 / OWN</span>我为自己提交的内容与来源<b>负责</b>，出处是真的。</span></li>
               <li><span class="tick__txt"><span class="no">03 / PUBLIC</span>我知道上传是<b>公开</b>动作（会进公开仓库与 PR），包里<b>不含密钥或隐私</b>。</span></li>
             </ul>
             <label class="tick tick--pledge" for="ck-pledge">
               <input type="checkbox" id="ck-pledge" />
-              <span class="tick__txt">上面三条我认，写进签名的口令也是我自己填的。</span>
+              <span class="tick__txt">上面三条我认，签名里那一串也是我自己填的。</span>
             </label>
           </section>
         </form>
+
+        <!-- 上传页那一格「包绑定签名」的容器。身份闸在 v2 里不再借包，所以它在身份页上没有可
+             显示的路径（renderProof() 会因为没有 targets 自己收起）；留着它只是为了让
+             renderProof() / paintProofs() 仍有一份可写的容器，而不是在删掉 DOM 之后当场抛错。
+             这一格平时恒 hidden；等上传页那条链彻底不用包绑定口令了，连代码一起删。 -->
+        <div class="field" id="proof-field" hidden>
+          <span class="field__lab">酷安签名</span>
+          <div class="proofs" id="proof-list"></div>
+          <p class="field__help" id="proof-cap"></p>
+        </div>
 
         <div class="btn-row cta-inline">
           <button type="button" class="btn btn--go" id="id-verify" disabled>验证并继续</button>

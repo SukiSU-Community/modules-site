@@ -3556,42 +3556,33 @@ mark {
   margin-left: 0;
 }
 
-/* 选包那一行：label 只负责长相，input 铺满它（同 .drop 的做法），
-   所以 Tab 能停在这枚按钮上、回车/空格直接打开文件选择器。 */
-.pick {
+/* —— 「你的验证串」那一格 ——
+   24 位十六进制要一位一位抄进酷安签名，所以等宽、字号给足、字距放宽；
+   复制与「换一串」在同一行尾，窄屏整块折到下一行（代码那行自己横向滚动，不硬折字）。 */
+.commit {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  margin: 12px 0 4px;
+  margin: 12px 0 8px;
+  padding: 12px 13px;
+  border: 1px solid var(--amber-line);
+  border-radius: var(--r);
+  background: var(--amber-wash);
 }
-.pick__btn {
-  position: relative;
-  overflow: hidden;
-  cursor: pointer;
+.commit__val {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  color: var(--amber-ink);
+  font: 600 15px/1.5 var(--mono);
+  letter-spacing: 0.1em;
 }
-.pick__btn input[type="file"] {
-  position: absolute;
-  /* -1px：连那 1px 边框一起盖住，否则贴着边框点下去没反应（点的是 label 的边，不是 input）。 */
-  inset: -1px;
-  width: calc(100% + 2px);
-  height: calc(100% + 2px);
-  margin: 0;
-  opacity: 0;
-  font-size: 0;
-  cursor: pointer;
-}
-.pick__btn:focus-within {
-  outline: 2px solid var(--amber);
-  outline-offset: 2px;
-}
-.pick__out {
-  margin: 0;
-  font: 400 12px/1.6 var(--mono);
-  color: var(--ink-3);
-}
-.pick__out:empty {
-  display: none;
+.commit__acts {
+  display: flex;
+  flex: none;
+  gap: 8px;
 }
 
 /* 那三条承诺是只读的话、不是可点的控件：不带勾选框，所以也不吃 .tick 的框和底，
