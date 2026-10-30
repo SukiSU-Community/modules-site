@@ -1373,49 +1373,66 @@ async function main() {
         "上传需要酷安等级 Lv2 及以上",
       ].every((s) => !SPENT_TEXT_RE_FALLBACK.test(s))
   );
-  // 四条勾选是「逐条知情」的载体，而解锁按钮数的是真的 checkbox 元素（app.js 里
-  // $$("#layer-confirm input[type=checkbox]")）：勾少一条，04 那条承诺就再没人被要过，
-  // 按钮却照常亮 —— 这是静默的一半对，界面看着还是四条文字。
-  // 反过来 <label for> 指着不存在的 input 时，那条勾点不动，文字还在但收不到确认，所以两条分开钉。
-  const ticks = [...formHtml.matchAll(/<label[^>]*class="tick"[^>]*for="(ck\d)">([\s\S]*?)<\/label>/g)].map(
-    (m) => ({ id: m[1], body: m[2] })
-  );
-  // checkbox 那侧按标签整取，不写死属性顺序与自闭合写法：钉的是「有四条点得动的勾」，不是钉我排版。
-  const tickInputs = new Set(
-    [...formHtml.matchAll(/<input\b[^>]*>/g)]
-      .map((m) => m[0])
-      .filter((tag) => /type="checkbox"/.test(tag))
-      .map((tag) => /\bid="(ck\d)"/.exec(tag)?.[1])
-      .filter(Boolean)
+  /* 界面上现在有两枚「勾」，分属两层时间效力，别再把它们混着数：
+     - 身份页 = **账号级**三条承诺（90 天验一次，覆盖此后该账号提交的每一份），那一枚
+       `#ck-pledge` 与 `/session/issue` 的 `pledge` 版本号一起存档；
+     - 提交弹窗 = **这一次**的告知，只剩一枚 `#ck-confirm`。
+     原来这里钉的是「四道勾全中」。改单勾后仍要钉两件事：
+     ① 弹窗里真的只有一枚点得动的 checkbox —— 孤儿 label 会让文字还在、勾却点不动，
+        而 app.js 里的按钮照常亮，等于**没人被要过确认**；
+     ② 弹窗里不许再出现 `customize.sh` 那句自查建议（用户明确要求整句删掉，别又被人加回来）。 */
+  const confirmSlice = (() => {
+    const from = formHtml.indexOf('id="layer-confirm"');
+    const to = formHtml.indexOf('id="layer-run"');
+    return from < 0 ? "" : formHtml.slice(from, to > from ? to : formHtml.length);
+  })();
+  // checkbox 那侧按标签整取，不写死属性顺序与自闭合写法：钉的是「有一枚点得动的勾」，不是钉我排版。
+  const confirmBoxes = [...confirmSlice.matchAll(/<input\b[^>]*>/g)]
+    .map((m) => m[0])
+    .filter((tag) => /type="checkbox"/.test(tag))
+    .map((tag) => /\bid="([^"]+)"/.exec(tag)?.[1])
+    .filter(Boolean);
+  check(
+    "确认弹窗只剩一枚勾（#ck-confirm），label 拴着它、文案是「这一次」的告知",
+    confirmBoxes.length === 1 &&
+      confirmBoxes[0] === "ck-confirm" &&
+      /<label[^>]*for="ck-confirm"/.test(confirmSlice) &&
+      /我已知晓以上两条/.test(confirmSlice),
+    `弹窗里 checkbox=${confirmBoxes.join(",") || "无"} / 有配对 label=${/<label[^>]*for="ck-confirm"/.test(confirmSlice)}`
   );
   check(
-    "确认弹窗是四条勾选（label 与 checkbox 都是四条），最后一条是 04 / MALICE 的承诺",
-    ticks.length === 4 &&
-      tickInputs.size === 4 &&
-      /04 \/ MALICE/.test(ticks[3].body) &&
-      /不含恶意代码/.test(ticks[3].body),
-    `label ${ticks.length} 条 / checkbox ${tickInputs.size} 个`
+    "被删掉的那句自查建议没有回来：确认弹窗里不出现 customize.sh",
+    !/customize\.sh/.test(confirmSlice),
+    "确认弹窗里又出现了 customize.sh（用户要求整句删掉，不要留变体）"
   );
   check(
-    "每条勾选的 label 与 checkbox 成对（孤儿 label 那条勾点不动）",
-    ticks.every((t) => tickInputs.has(t.id)) && tickInputs.size === ticks.length,
-    `label ${ticks.map((t) => t.id).join(",")} / input ${[...tickInputs].join(",")}`
+    "旧的四勾计数没有残留：不写「三项」「三道」，也不再说「四项全部勾上」「勾完四项」",
+    !formHtml.includes("三项") &&
+      !appSrc.includes("三项") &&
+      !formHtml.includes("三道") &&
+      !/四项全部勾上/.test(formHtml) &&
+      !/勾完四项/.test(appSrc)
   );
-  check("「三项」这种旧文案没有残留（第四勾加上了）", !formHtml.includes("三项") && !appSrc.includes("三项") && !formHtml.includes("三道"));
   /* 承诺的版本号与那段文案必须绑在一起。
-     归档里那句「他接受过承诺」以后是要被人拿出来的，它的可辩护性全靠「pledge-v1 指的是哪段话」
-     还答得出来：文案改了而版本号照旧，归档就写着「他接受过 pledge-v1」，而 pledge-v1 今天指的
+     归档里那句「他接受过承诺」以后是要被人拿出来的，它的可辩护性全靠「pledge-v2 指的是哪段话」
+     还答得出来：文案改了而版本号照旧，归档就写着「他接受过 pledge-v2」，而 pledge-v2 今天指的
      已经不是用户当时勾的那段话 —— 这一句就成了假话，且没有任何一处会报错。
      所以两条必须**同时**成立，缺一条就算红；版本字面量也在本文件里钉死一份，
-     不让它靠「和 Worker 同值」那条跨仓库检查来兜 —— fork 里那条根本不跑。 */
+     不让它靠「和 Worker 同值」那条跨仓库检查来兜 —— fork 里那条根本不跑。
+     钉的是**身份页**那三条：账号级承诺上移之后，随 `/session/issue` 存档、能代表
+     「他接受了什么」的只剩它；提交弹窗那一枚是逐次的告知，不承担版本语义。 */
+  const identitySlice = (() => {
+    const from = formHtml.indexOf('id="view-identity"');
+    const to = formHtml.indexOf('id="view-records"');
+    return from < 0 ? "" : formHtml.slice(from, to > from ? to : formHtml.length);
+  })();
   const pledgeSent = /pledge:\s*["']([^"']+)["']/.exec(appSrc)?.[1] ?? "";
   check(
-    "承诺版本字面量与 ck4 那段文案绑在一起：pledge-v1 与「不含恶意代码」必须同时存在",
-    pledgeSent === "pledge-v1" &&
-      ticks.length === 4 &&
-      /04 \/ MALICE/.test(ticks[3].body) &&
-      ticks[3].body.includes("不含恶意代码"),
-    `app.js 发的 pledge=${JSON.stringify(pledgeSent)}，ck4 文案里有「不含恶意代码」=${ticks[3]?.body.includes("不含恶意代码") ?? "无 ck4"}`
+    "承诺版本字面量与身份页三条绑在一起：pledge-v2、「不窃取凭据」、「随账号存档」必须同时存在",
+    pledgeSent === "pledge-v2" &&
+      identitySlice.includes("不窃取凭据") &&
+      identitySlice.includes("随账号存档"),
+    `app.js 发的 pledge=${JSON.stringify(pledgeSent)}，身份页有「不窃取凭据」=${identitySlice.includes("不窃取凭据")}、有「随账号存档」=${identitySlice.includes("随账号存档")}`
   );
   check(
     "COOLAPK_VERIFY_REQUIRED 被彻底删除 —— 能关掉安全闸的开关本身就是洞",

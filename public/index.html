@@ -334,7 +334,7 @@
               <span class="panel__tag">irreversible</span>
             </div>
             <p class="panel__note">
-              上传是<b style="color: var(--amber)">公开且长期保留</b>的动作，所以下面几条要逐条确认。
+              上传是<b style="color: var(--amber)">公开且长期保留</b>的动作，所以上传前要点开确认层勾一次。
             </p>
 
             <ul class="gate" id="gate" aria-label="提交前自检"></ul>
@@ -729,16 +729,16 @@
               <span class="panel__tag">pledge</span>
             </div>
             <p class="panel__note">
-              下面三条跟着这次验证一起记下来，是<b>你为这个账号投的每一份包</b>都成立的话。
+              此后以该账号提交的每一份模块，都适用以下三条；本次承诺随账号存档。
             </p>
             <ul class="ticks ticks--flat">
-              <li><span class="tick__txt"><span class="no">01 / SAFE</span>我提交的模块<b>不含恶意代码</b>，不损害设备或数据。</span></li>
-              <li><span class="tick__txt"><span class="no">02 / OWN</span>我为自己提交的内容与来源<b>负责</b>，出处是真的。</span></li>
-              <li><span class="tick__txt"><span class="no">03 / PUBLIC</span>我知道上传是<b>公开</b>动作（会进公开仓库与 PR），包里<b>不含密钥或隐私</b>。</span></li>
+              <li><span class="tick__txt">我提交的模块<b>不含恶意代码</b>：不窃取凭据、不静默回传、不破坏系统与数据。</span></li>
+              <li><span class="tick__txt">我是所提交模块的<b>作者或已获授权</b>，标注的出处真实可查。</span></li>
+              <li><span class="tick__txt">我提交的压缩包<b>不含个人隐私、账号信息与密钥</b>。</span></li>
             </ul>
             <label class="tick tick--pledge" for="ck-pledge">
               <input type="checkbox" id="ck-pledge" />
-              <span class="tick__txt">上面三条我认，签名里那一串也是我自己填的。</span>
+              <span class="tick__txt">我确认以上三条，并接受违反时的公开处置与追责。</span>
             </label>
           </section>
         </form>
@@ -793,11 +793,11 @@
 
     <!-- 移动端常驻操作条 -->
     <div class="dock" id="dock">
-      <span class="dock__txt"><b id="dock-t">待填：模块 zip</b><span id="dock-s">四项必填 + 四项上传前确认</span></span>
+      <span class="dock__txt"><b id="dock-t">待填：模块 zip</b><span id="dock-s">四项必填 + 一次上传前确认</span></span>
       <button type="button" class="btn btn--go btn--sm" data-open-confirm disabled>去确认</button>
     </div>
 
-    <!-- 上传前确认（仿 Bootloader 解锁警告）：四道勾全中才解锁「上传」 -->
+    <!-- 上传前确认（仿 Bootloader 解锁警告）：勾这一下才解锁「上传」 -->
     <div class="layer" id="layer-confirm" role="dialog" aria-modal="true" aria-labelledby="warn-ttl" hidden>
       <div class="warn">
         <div class="warn__hazard" aria-hidden="true"></div>
@@ -809,38 +809,19 @@
           </svg>
           <div>
             <div class="warn__ttl" id="warn-ttl">Confirm Upload</div>
-            <p class="warn__sub">四项全部勾上，「上传」按钮才会亮 —— 少一项都传不出去。勾的是<b>这一次这一整套</b>，不是某一枚。</p>
+            <p class="warn__sub">勾上下面的确认，「上传」按钮才会亮。账号级的三条承诺已在身份验证那一页确认过，这里只确认<b>这一次这一整套</b>。</p>
           </div>
         </div>
         <div class="warn__body">
           <p class="warn__lead">! 你即将把这个文件公开到互联网上</p>
-          <ul class="ticks">
-            <li><label class="tick" for="ck1">
-              <input type="checkbox" id="ck1" />
-              <span class="tick__txt"><span class="no">01 / PUBLIC</span>
-                我知道这个 zip 会被<b>公开存储、任何人都能下载、长期保留</b>，
-                提交不是私有的，也不是可撤销的草稿。</span>
-            </label></li>
-            <li><label class="tick" for="ck2">
-              <input type="checkbox" id="ck2" />
-              <span class="tick__txt"><span class="no">02 / PRIVACY</span>
-                我确认包里<b>不含个人隐私、账号信息、密钥</b>。
-                自制模块里经常藏着作者的个人路径、调试脚本、硬编码 token ——
-                先打开 <code>module.prop</code>、<code>customize.sh</code>、<code>service.sh</code> 看一遍再传。</span>
-            </label></li>
-            <li><label class="tick" for="ck3">
-              <input type="checkbox" id="ck3" />
-              <span class="tick__txt"><span class="no">03 / REVIEW</span>
-                我知道上传后<b>需要过机器判据才会进公开索引，不是提交就立刻上线</b>；
-                已收录模块的版本更新只接受原作者，别人发同一枚会被归属闸拒掉。</span>
-            </label></li>
-            <li><label class="tick" for="ck4">
-              <input type="checkbox" id="ck4" />
-              <span class="tick__txt"><span class="no">04 / MALICE</span>
-                我承诺这个包里<b>不含恶意代码</b>：不窃取凭据、不静默联网回传、不破坏系统。
-                违反将被公开处置并可能被追究责任 —— 本条承诺会随包体一起存档。</span>
-            </label></li>
+          <ul class="ticks ticks--flat">
+            <li><span class="tick__txt">这个压缩包会被<b>公开存储：任何人都能下载、长期保留，提交后无法撤回</b>。</span></li>
+            <li><span class="tick__txt">提交后需通过<b>机器判据</b>才会进入公开索引；已收录且自带更新源的模块，只接受原作者发版。</span></li>
           </ul>
+          <label class="tick tick--pledge" for="ck-confirm">
+            <input type="checkbox" id="ck-confirm" />
+            <span class="tick__txt">我已知晓以上两条，确认继续上传。</span>
+          </label>
           <div class="warn__sum" id="warn-sum"></div>
         </div>
         <div class="warn__ft">

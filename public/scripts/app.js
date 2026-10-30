@@ -1715,7 +1715,7 @@ function gateNote(card) {
   if (ownershipOf(card) !== "other") return "";
   const why = card.updateReason ? `（服务端原话：「${card.updateReason}」）` : "";
   return (
-    " 但这一版**发不了**：这个模块已被别人收录，只有原作者能发更新版本" +
+    " 但这一版**发不了**：这个模块已被别人收录，按现在的归属规则不接受他人发版" +
     why +
     "。整单提交会被 403 拒掉 —— 先确认「酷安 UID」填的是当初首发那个账号；不是你的模块就别试了。"
   );
@@ -2026,7 +2026,7 @@ function gateItems() {
     });
   }
   // 人机校验：Worker 那边没令牌就是 403，所以它必须自己占一格 —— 否则用户会被放进那个
-  // 全屏确认层，勾完四项才吃到一个 403，再被退回来找这个部件。
+  // 全屏确认层，勾完确认才吃到一个 403，再被退回来找这个部件。
   // ok 落进 ready（就绪判据还是唯一的 items.every），「上传前确认」跟着灭；
   // shown 说的是「这一格在不在屏幕上」：部件是按需加载的，还没到加载时机（没选包、没开确认层）
   // 时先不显示，免得首屏就写一句「还没完成」。
@@ -2123,8 +2123,8 @@ function refreshGate() {
   const firstNotShown = firstBad ? null : items.find((i) => i.ok && i.shown === false);
   const blocking = firstBad || firstNotShown;
   $("#dock-t").textContent = blocking ? blocking.text : "全部就绪，可以确认";
-  $("#dock-s").textContent = blocking ? "还差这一步" : "点「去确认」勾完四项";
-  $("#gate-note").textContent = ready && !firstNotShown ? "四项上传前确认还没勾" : "先把上面几项填齐";
+  $("#dock-s").textContent = blocking ? "还差这一步" : "点「去确认」勾一下";
+  $("#gate-note").textContent = ready && !firstNotShown ? "上传前确认还没勾" : "先把上面几项填齐";
   if (state.attempted) paintFieldErrors();
   // 身份页那颗「验证并继续」的亮灭与这一处同一口感：都是「还差什么」——
   // 所以挂在 refreshGate 尾巴上，凡是会改这些输入的地方都不必各自记得再叫一次。
@@ -2734,6 +2734,12 @@ async function logout() {
   }
   closeWhoMenu();
   paintSession();
+  // 退出验证 = 换人：确认层那一枚勾是上一个人点过的，跟着一起复原，
+  // 别让下一个人一进确认层就看见「我已知晓」已经勾好（openConfirm 故意不清零，见那里的注释）。
+  const ack = $("#ck-confirm");
+  if (ack) ack.checked = false;
+  const goBtn = $("#confirm-go");
+  if (goBtn) goBtn.disabled = true;
   // 立刻收起来，不等 runUidCheck 那 500ms 的防抖 —— 退出验证之后还挂着自己的模块清单，
   // 是那种「看起来已经退出了其实没有」的界面。
   paintMine();
@@ -3040,7 +3046,7 @@ async function submitIdentity() {
     const res = await issueIdentitySession({
       coolapkUid: uid,
       secret: ensureIdentitySecret(),
-      pledge: "pledge-v1",
+      pledge: "pledge-v2",
     });
     state.session = {
       token: res.session.token,
@@ -3267,7 +3273,7 @@ function openConfirm() {
   // 兜底：万一是手填一切、没走过选包那条路，进确认层时补上。
   ensureTurnstile();
   // 人机校验没过就别开层。这个全屏层 position:fixed; z-index:80 会把 04 区的校验部件
-  // 整个盖住：用户在这儿勾完四项、点确认，才吃一个 403，再被「返回修改」退出来找部件。
+  // 整个盖住：用户在这儿勾完确认、点确认，才吃一个 403，再被「返回修改」退出来找部件。
   // 按钮平时已经是 disabled（ready 由 items.every 决定），这里是给强行调用的兜底，
   // 顺便把人往部件那儿送一下。
   if (!turnstileOk()) {
@@ -3281,8 +3287,11 @@ function openConfirm() {
   layer.hidden = false;
   layer.classList.add("is-open");
   document.body.style.overflow = "hidden";
-  $$("#layer-confirm input[type=checkbox]").forEach((c) => (c.checked = false));
-  $("#confirm-go").disabled = true;
+  // 确认层现在只有一枚勾（#ck-confirm）。它**不在这里清零**：Escape 关掉多半只是想再看一眼
+  // 清单，回来时勾还在是合理的；真正的复原放在提交成功之后（resetForm）与退出登录之后。
+  // 「确认并上传」的亮灭跟着这一枚的当前值走，不再无条件灭。
+  const ack = $("#ck-confirm");
+  $("#confirm-go").disabled = !(ack && ack.checked);
   $("#confirm-go").textContent =
     targets.length > 1 ? `确认并上传这一整套（${targets.length} 枚）` : "确认并上传";
 
@@ -3384,6 +3393,8 @@ function closeConfirm() {
 function bindConfirm() {
   $$("[data-open-confirm]").forEach((btn) => btn.addEventListener("click", openConfirm));
   $("#confirm-back").addEventListener("click", closeConfirm);
+  // 确认层只有一枚勾（#ck-confirm）：勾上就亮「确认并上传」，取消就灭。仍然用 $$ 取一遍而不是
+  // 写死 id —— 万一将来有人再加一条，至少不会因为漏绑而让按钮在没勾时亮着。
   const boxes = $$("#layer-confirm input[type=checkbox]");
   boxes.forEach((box) =>
     box.addEventListener("change", () => {
@@ -3450,7 +3461,7 @@ function batchPayload() {
     uploader: fieldValue("uploader"),
     coolapkUid: fieldValue("coolapkUid"),
     // 承诺文本的版本号：一次整套勾一次那四条，所以它是顶层那一个字段，不逐枚重复。
-    pledge: "pledge-v1",
+    pledge: "pledge-v2",
     // 签名的随机部分：一次上传一份，覆盖这一整套。派生串不在这里算 —— 后端自己重算。
     nonce: state.nonce,
     // 长效会话令牌（90 天免改签名）：属于输入框里这串 UID 才发。判据只有 sessionFor 一份，
@@ -3845,6 +3856,12 @@ function resetForm() {
   renderProof(); // nonce 清空后这一行跟着收起，别留一串还能提交的旧签名在屏幕上
   syncUploaderField(); // 顺手把 readOnly / 标签 / 说明一起还原，别留一个锁着的空框
   $$(".field").forEach((f) => f.classList.remove("is-bad", "is-pre"));
+  // 上传成功后再传一枚：确认层那一枚勾要复原成未勾，别把上一轮的「我已知晓」带进下一次。
+  // （Escape 关层不清勾，所以复原只能放在这里 —— 那是「还没传成」与「传成了」的分界。）
+  const ack = $("#ck-confirm");
+  if (ack) ack.checked = false;
+  const goBtn = $("#confirm-go");
+  if (goBtn) goBtn.disabled = true;
   refreshGate();
   location.hash = "#/submit";
 }

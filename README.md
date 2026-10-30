@@ -192,7 +192,7 @@ versionCode 只在 module.prop 声明了它时才被绑。
 | 出处 / 署名必填 + 明确说明为什么要填 | 面板 03「出处与身份」：出处限酷安站内链接、署名与酷安 UID 双字段；说明页 D 节解释为什么必须是 UID |
 | 酷安 UID 核实（含端点未接入时的降级） | `api.js:lookupCoolapkUser()` + `app.js:runUidCheck()`，四种状态 verified / not_found / unavailable / off，通过后自动填昵称并显示头像 |
 | 投稿口令绑「模块 ID + 整包 sha256」 | `proof.js`（与 Worker `src/proof.ts` 同一套算法的第二份）+ `app.js:intake()` 算整包哈希、`renderProof()` 现算显示串；载荷只发 `sha256` / `pledge` / `nonce`，派生串不发 —— 见第 2 节 |
-| 上传前四项确认，未勾完不能提交 | `#layer-confirm`，仿 Bootloader 解锁警告；四项勾选全中才解锁「上传」 |
+| 承诺分两层：账号级三条 + 本次级两条 | 身份页 `#ck-pledge`（90 天验一次，随 `/session/issue` 的 `pledge` 版本存档）；提交弹窗 `#layer-confirm` 只留一枚 `#ck-confirm` 确认「公开存储 / 机审判据」两条，勾上才解锁「上传」 |
 | 成功给 PR 链接 | `app.js:showSuccess()`，含「点进去看审核进度」与后续流程说明 |
 | 失败显示中文原因且能重试 | `app.js:showFailure()`：表单内容与已选文件都留着，「重试提交」直接复用 |
 | 已收录模块浏览页（MMRL） | `#view-index` + `api.js:fetchIndex()/normalizeIndex()`，搜索按 ID/名称/作者/描述过滤并高亮 |
