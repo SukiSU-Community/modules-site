@@ -166,7 +166,7 @@
               </div>
               <div class="spec__cell">
                 <span class="spec__k">上传要求</span>
-                <span class="spec__v">上传人酷安等级 <b>≥ 2</b></span>
+                <span class="spec__v">需要酷安等级 <b>Lv2 及以上</b></span>
               </div>
               <div class="spec__cell">
                 <span class="spec__k">提交之后</span>
@@ -659,6 +659,7 @@
             </div>
             <p class="panel__note">
               只填 UID：昵称与头像由酷安那边回给我们，你改不了，也不用改。
+              这一屏<b>需要酷安等级 Lv2 及以上</b>，等级不够的话验证过不去。
             </p>
             <div class="field">
               <div class="field__lab"><label for="f-uid">上传人酷安 UID<span class="req">*</span></label></div>
@@ -698,7 +699,7 @@
           <section class="panel" aria-labelledby="pid2t">
             <div class="panel__hd">
               <span class="panel__no">02</span>
-              <h2 id="pid2t">你的验证串</h2>
+              <h2 id="pid2t">酷安签名改成下面这串</h2>
               <span class="panel__tag">commit</span>
             </div>
             <p class="panel__note">
@@ -710,7 +711,6 @@
               <code class="mono commit__val" id="identity-commit" aria-live="polite">……</code>
               <div class="commit__acts">
                 <button type="button" class="btn btn--ghost btn--sm" id="identity-copy">复制这串</button>
-                <button type="button" class="btn btn--ghost btn--sm" id="identity-renew">换一串</button>
               </div>
             </div>
             <p class="field__help" id="identity-commit-cap">
@@ -718,7 +718,7 @@
             </p>
             <p class="field__help">
               酷安 App「我的」→ <b>点头像进个人主页</b> → 右上角<b>三点</b> →「编辑资料」→ 粘进<b>签名</b>并保存。
-              我们只在验证这一下读一次签名；「换一串」等于换一把新钥匙，旧的那串当场作废，得再去改一次签名。
+              我们只在验证这一下读一次签名，之后不再碰它。
             </p>
           </section>
 
@@ -753,8 +753,16 @@
           <p class="field__help" id="proof-cap"></p>
         </div>
 
+        <!-- 等级不足会把账号卡成死局：Worker 那边每发一次 /session/issue 都回 level_too_low，
+             光重试永远过不去。所以这一屏认下这个码之后把该 uid 记进 localStorage，按钮锁住，
+             并在按钮旁边留一条手动出路（升完级点一下才解除 —— 不自动解除，否则就是每 30 秒
+             白烧一次接口额度）。 -->
+        <p class="callout callout--err" id="id-level-block" hidden>
+          <b>先去酷安把等级提升到 Lv2 及以上，再回来验证</b>
+        </p>
         <div class="btn-row cta-inline">
           <button type="button" class="btn btn--go" id="id-verify" disabled>验证并继续</button>
+          <button type="button" class="btn btn--ghost btn--sm" id="id-level-recheck" hidden>我已升级，重新验证</button>
           <span class="count hide-sm" id="id-note">先把上面几项填齐</span>
         </div>
         <p class="callout callout--err" id="id-err" hidden></p>

@@ -1131,11 +1131,18 @@ async function main() {
   );
   // 身份页不再借包：契约 v2 §5 要求删掉「拿一个包当凭据」整段。
   // 这里同时钉住「新的一串在 DOM 里」与「旧的那套不在」——只钉前者的话，改回选包那一屏照样绿。
+  /* 2026-10-30 改：身份页的「换一串」整条路删掉了。那一下只在「换人/换钥匙」时才用得上，
+     而换钥匙意味着酷安签名要跟着改一次；留着按钮等于让人以为多点一下就能换一把钥匙，
+     点完发现签名对不上、还得自己回去改 —— 于是这个入口只制造两种坏结果：白改一次签名，
+     或者一串对不上的更长的失败。删掉之后 secret 一经生成就是长期的（契约 v2 §5 的原意）。
+     所以这条从「钉 #identity-renew 在」翻成「钉它不在」：有人把它加回来，这条立刻红。
+     钉的方向反了，守的性质没变 —— 屏幕上能抄的东西只有那一串、入口只有「复制」。 */
   check(
-    "身份页只剩「验证串」那一段：有 #identity-commit / #identity-copy / #identity-renew，没有选包与 #id-pick",
+    "身份页只剩「验证串」那一段：有 #identity-commit / #identity-copy，没有 #identity-renew、没有选包与 #id-pick",
     formHtml.includes('id="identity-commit"') &&
       formHtml.includes('id="identity-copy"') &&
-      formHtml.includes('id="identity-renew"') &&
+      !formHtml.includes('id="identity-renew"') &&
+      !/renewIdentitySecret/.test(appSrc) &&
       !formHtml.includes('id="id-file"') &&
       !formHtml.includes('id="id-pick"') &&
       !/renderIdentityPick/.test(appSrc),
@@ -1433,6 +1440,60 @@ async function main() {
       identitySlice.includes("不窃取凭据") &&
       identitySlice.includes("随账号存档"),
     `app.js 发的 pledge=${JSON.stringify(pledgeSent)}，身份页有「不窃取凭据」=${identitySlice.includes("不窃取凭据")}、有「随账号存档」=${identitySlice.includes("随账号存档")}`
+  );
+  /* 身份页那几句与 App 端 strings.xml 是同一份话（module_upload_identity_commit_title 等），
+     两边一起改才叫「同一件事一个说法」。旧写法「上传人酷安等级 ≥ 2」把门槛说成**上传人的属性**，
+     而这里要的是「点这颗按钮要什么」—— 两句话对不上时用户会去查错地方（去翻自己的等级页，
+     而不是看这一段说明）。所以门槛统一成「需要酷安等级 Lv2 及以上」，旧写法整页不许残留。
+     举报那半的「换一串签名」**留着**：那是用过即废的举报 nonce，必须能再生成。
+     于是这条正反两侧都钉：身份段里没有「换一串」；整页也不再有不带「签名」二字的「换一串」，
+     而「换一串签名」那一处还在 —— 少任何一侧，都等于悄悄把一半的入口换了名。 */
+  check(
+    "身份页文案与 App 端同一句话：标题「酷安签名改成下面这串」、门槛「需要酷安等级 Lv2 及以上」，且这一段里不再有「换一串」",
+    identitySlice.includes("酷安签名改成下面这串") &&
+      identitySlice.includes("需要酷安等级") &&
+      identitySlice.includes("Lv2 及以上") &&
+      !identitySlice.includes("换一串") &&
+      !/换一串(?!签名)/.test(formHtml) &&
+      formHtml.includes("换一串签名") &&
+      !formHtml.includes("上传人酷安等级"),
+    `身份段：有标题=${identitySlice.includes("酷安签名改成下面这串")}、有 Lv2 门槛=${identitySlice.includes("Lv2 及以上")}、含「换一串」=${identitySlice.includes("换一串")}；整页残留的无「签名」二字「换一串」=${/换一串(?!签名)/.test(formHtml)}`
+  );
+  /* 冷却门控：同一指纹（uid + commit）连续失败 30s / 60s / 120s / 之后 300s 封顶，成功清零。
+     三件事必须同时钉住，少一条这道门都是装饰品：
+       ① 落盘键名与档位（刷新就清零 ⇒ 拿同一对输入每三秒撞一次后端，额度照样烧光）；
+       ② 指纹里**带 commit**（换 uid 或换一串都是另一个人/另一把钥匙，不该被上一轮连坐）；
+       ③ 成功路径真的把计数清了（不清 ⇒ 一个月后第一次失败就吃 300s）。
+     档位表写死在自检里是有意的：它一改就是「同一个输入要等更久」，属于对用户可见的承诺。 */
+  check(
+    "身份冷却这门闸：指纹 = uid + commit、档位 30/60/120/300、落盘键 sukisu.identity.cooldown、成功清零",
+    appSrc.includes('IDENTITY_COOLDOWN_KEY = "sukisu.identity.cooldown"') &&
+      appSrc.includes("IDENTITY_COOLDOWN_STEPS = [30, 60, 120, 300]") &&
+      /function identityFingerprint\(uid, commit\)[\s\S]{0,400}?`\$\{u\}:\$\{c\}`/.test(appSrc) &&
+      /fp: cd\.fp, fails: cd\.fails, until: cd\.until/.test(appSrc) &&
+      appSrc.includes("请 ${wait} 秒后再试") &&
+      (appSrc.match(/countIdentityFailure\(fp\)/g) || []).length >= 2 &&
+      /saveIdentityCooldown\(null\)/.test(appSrc)
+  );
+  /* 「等级不足」是死局，不是「再试一次」能过的：服务端 code=level_too_low 时把 uid 记下来、
+     锁住按钮，只有用户自己升完级点「我已升级，重新验证」才解除。
+     为什么不自动解除：等级是**用户去酷安改**的外部状态，这里没有任何可信信号知道它变了；
+     按时间自动解锁只会在还是 Lv1 时再吃一个 level_too_low，而每吃一次都烧一格额度。
+     反过来，锁得没有出路也不行 —— 所以 #id-level-recheck 必须真的绑到一个清键的函数上，
+     只把 hidden 一改就完事的「手动解除」是假的（点了没反应，用户只会连点）。
+     另外 api.js 里那条 level_too_low 的中文条目也一起钉：后端回这个码时页面上得有一句人话。 */
+  check(
+    "等级不足的死局：code=level_too_low → 记 sukisu.identity.levelBlocked + 锁按钮 + 「我已升级，重新验证」手动解除（api.js 有人话条目）",
+    appSrc.includes('IDENTITY_LEVEL_BLOCKED_KEY = "sukisu.identity.levelBlocked"') &&
+      /err\.code === "level_too_low"/.test(appSrc) &&
+      /markIdentityLevelBlocked\(uid\)/.test(appSrc) &&
+      /recheck\.hidden = !blocked/.test(appSrc) &&
+      /#id-level-recheck"\)[\s\S]{0,120}?clearIdentityLevelBlock\(\)/.test(appSrc) &&
+      formHtml.includes('id="id-level-block"') &&
+      formHtml.includes("先去酷安把等级提升到 Lv2 及以上，再回来验证") &&
+      formHtml.includes('id="id-level-recheck"') &&
+      formHtml.includes("我已升级，重新验证") &&
+      /level_too_low:\s*\{\s*\n\s*owner:\s*["'](you|us|both)["']/.test(apiSrc)
   );
   check(
     "COOLAPK_VERIFY_REQUIRED 被彻底删除 —— 能关掉安全闸的开关本身就是洞",

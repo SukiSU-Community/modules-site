@@ -144,6 +144,10 @@ const state = {
   // 身份验证那一发在飞（按钮禁用 + 文案改口），以及上一次失败的原话（空串 = 没有错误）。
   idBusy: false,
   idError: "",
+  /* 这一屏算出来的那串承诺（sha256(前缀 + 本机 secret) 的前 24 位）。缓存它只为一件事：
+     「冷却 / 解锁」的指纹是 (uid, commit) 这一对，而 renderIdentityGate 是同步的、现算不了 sha256。
+     它不是凭据 —— 每次验证照样从 secret 重算，这一格只是界面上那一份的投影。 */
+  idCommit: "",
 };
 
 /* ------------------------------------------------------------------ 小工具 */
@@ -2935,11 +2939,12 @@ function bindMine() {
 /* -------------------------------------------------------- 身份验证（#/identity） */
 
 /**
- * 本机那枚 secret 的存储键（契约 v2 §5）。续期复用同一串 —— 只有「换一串」才重新生成。
+ * 本机那枚 secret 的存储键（契约 v2 §5）。它一经生成就不再变 —— 页面上没有换一串的入口了。
  *
  * 为什么非存下来不可：要填进酷安签名的承诺串是从 secret 现算的（commit = sha256(前缀+secret)
  * 前 24 位）。secret 一丢，commit 就变成另一串，用户得到酷安再改一次签名 —— 而我们承诺的是
  * 「验过之后 90 天内不用再碰签名」。存储只在这一台浏览器里，别处没有副本。
+ * （清站点数据、换设备、换浏览器仍会换一串：那是本机凭据的边界，这一屏补不了，也不该假装能补。）
  */
 const IDENTITY_SECRET_KEY = "sukisu.identity.secret";
 
@@ -2970,11 +2975,168 @@ function ensureIdentitySecret() {
   return fresh;
 }
 
+/* -------------------------------------------------- 身份闸的两枚本地记忆（冷却 / 等级死局）
+
+   两条键都落在本机 localStorage，键名写进自检钉子，改名等于把用户手里那一份锁丢掉：
+
+   - sukisu.identity.cooldown     同一个指纹（uid + commit）连续失败后的截止时刻与失败次数
+   - sukisu.identity.levelBlocked 「等级不足」这个死局记的那个 uid
+
+   冷却为什么必须落盘：刷新一次页面就清零的话，这道门等于没有 —— 它挡的正是「拿同一对
+   uid + 签名串每三秒撞一次后端」这种白烧额度的折腾法。而指纹里带上 commit 是故意的：
+   换 uid 或换 secret 都是**另一个人/另一把钥匙**，不该被上一轮的失败连坐。 */
+const IDENTITY_COOLDOWN_KEY = "sukisu.identity.cooldown";
+const IDENTITY_LEVEL_BLOCKED_KEY = "sukisu.identity.levelBlocked";
+
+/* 同一个指纹连续失败：第 1 次等 30s、第 2 次 60s、第 3 次 120s、之后 300s 封顶。
+   成功一次就整段清掉（见 submitIdentity）。服务端那边自有限流，这一层只负责别让
+   同一个人在同一个输入上连点 —— 所以它宁可短，不要长。 */
+const IDENTITY_COOLDOWN_STEPS = [30, 60, 120, 300];
+
+/**
+ * 读回那一份冷却。形状不对一律当「没有」：这枚键躺在用户可编辑的 localStorage 里，
+ * 一个手改出来的 until: "明天" 不该让这一屏永远点不动。
+ */
+function readIdentityCooldown() {
+  try {
+    const raw = localStorage.getItem(IDENTITY_COOLDOWN_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const fp = typeof parsed.fp === "string" ? parsed.fp : "";
+    const fails = Number(parsed.fails);
+    const until = Number(parsed.until);
+    if (!fp || !Number.isFinite(fails) || fails < 1 || !Number.isFinite(until)) return null;
+    return { fp, fails, until };
+  } catch {
+    return null;
+  }
+}
+
+/** 写回（传 null 就是清掉）。存储被禁时静默退化 —— 这一层是节流，不是安全边界。 */
+function saveIdentityCooldown(cd) {
+  try {
+    if (cd) {
+      localStorage.setItem(
+        IDENTITY_COOLDOWN_KEY,
+        JSON.stringify({ fp: cd.fp, fails: cd.fails, until: cd.until })
+      );
+    } else {
+      localStorage.removeItem(IDENTITY_COOLDOWN_KEY);
+    }
+  } catch {
+    // 无痕 / 存储被禁：退化成「每次都能点」。不该为了节流把整屏拦下来。
+  }
+}
+
+/** 那一枚「等级不足」的 uid；空串 = 没有死局。 */
+function readIdentityLevelBlocked() {
+  try {
+    return localStorage.getItem(IDENTITY_LEVEL_BLOCKED_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function markIdentityLevelBlocked(uid) {
+  try {
+    localStorage.setItem(IDENTITY_LEVEL_BLOCKED_KEY, uid);
+  } catch {
+    // 同上：存不下就只在这次刷新里生效。
+  }
+}
+
+function clearIdentityLevelBlocked() {
+  try {
+    localStorage.removeItem(IDENTITY_LEVEL_BLOCKED_KEY);
+  } catch {
+    // 同上。
+  }
+}
+
+/**
+ * 指纹 = uid + ":" + commit。commit 还没算出来时返回空串 —— 那不是「不在冷却里」，
+ * 而是「现在还判不了」：真正的判据在 submitIdentity 里现算一次（那里 wait 秒数就是真的）。
+ *
+ * 分隔符用 ":" 是因为左半边恒为纯数字、右半边恒为小写十六进制，拼起来不可能撞车。
+ */
+function identityFingerprint(uid, commit) {
+  const u = uid === undefined ? fieldValue("coolapkUid") : uid;
+  const c = commit === undefined ? state.idCommit : commit;
+  return u && c ? `${u}:${c}` : "";
+}
+
+/** 这个指纹还剩几秒冷却（0 = 没有冷却 / 已经过了）。 */
+function identityCooldownRemaining(fp) {
+  if (!fp) return 0;
+  const cd = readIdentityCooldown();
+  if (!cd || cd.fp !== fp) return 0;
+  const left = Math.ceil((cd.until - Date.now()) / 1000);
+  return left > 0 ? left : 0;
+}
+
+/**
+ * 记一次失败并给出这一轮的冷却秒数；同一个指纹第 N 次失败 ⇒ STEPS[N-1] 秒（末档封顶）。
+ *
+ * 「连续」的意思是：成功一次才清零。冷却过了但没成功，下一次失败仍按下一档算 ——
+ * 否则每过 30 秒就又能白撞一次，档位永远停在第一档。
+ */
+function countIdentityFailure(fp) {
+  if (!fp) return 0;
+  const prev = readIdentityCooldown();
+  const fails = (prev && prev.fp === fp ? prev.fails : 0) + 1;
+  const secs = IDENTITY_COOLDOWN_STEPS[Math.min(fails, IDENTITY_COOLDOWN_STEPS.length) - 1];
+  saveIdentityCooldown({ fp, fails, until: Date.now() + secs * 1000 });
+  return secs;
+}
+
+/**
+ * 指纹变了（改了 uid 或换了 secret）就把上一轮的失败计数与冷却一起丢掉：那把锁锁的是
+ * 另一个输入，不该连坐到眼前这个人身上。
+ *
+ * commit 还没算出来的那一瞬间什么都不做 —— 否则每次刷新都会在得知 commit 之前
+ * 把刚存下的冷却误清掉，那这道门只在「算完 commit 之前」有效，等于没有。
+ */
+function dropIdentityCooldownIfStale() {
+  const cd = readIdentityCooldown();
+  if (!cd) return;
+  const fp = identityFingerprint();
+  if (fp && cd.fp !== fp) saveIdentityCooldown(null);
+}
+
+/** 这个 uid 是不是正卡在「等级不足」的死局里。 */
+function identityLevelBlocked() {
+  const uid = fieldValue("coolapkUid");
+  return Boolean(uid) && readIdentityLevelBlocked() === uid;
+}
+
+/* 每秒把「请 N 秒后再试」往下数一格的那条定时器。全局一条而不是每次重画新建一条：
+   renderIdentityGate 是被所有输入触发的，新建就会在打字时堆出一串定时器。 */
+let identityCooldownTimer = 0;
+
+function syncIdentityCooldownTicker() {
+  const running = Boolean(identityCooldownTimer);
+  if (identityCooldownRemaining(identityFingerprint()) > 0) {
+    if (running) return;
+    identityCooldownTimer = setInterval(() => {
+      // 数到 0 时 renderIdentityGate 里的这一句会把它停掉，之后的空闲期不留后台动作。
+      renderIdentityGate();
+    }, 1000);
+    return;
+  }
+  if (running) {
+    clearInterval(identityCooldownTimer);
+    identityCooldownTimer = 0;
+  }
+}
+
+
 /**
  * 画出第二段那一串承诺（24 位小写十六进制）。
  *
- * 派生值每次现算、不缓存：secret 变了（点「换一串」）或页面回来了都重画一遍，
- * 于是屏幕上这一串与 localStorage 里那一枚在结构上不可能脱钩。
+ * 派生值每次现算、不缓存：页面回来了都重画一遍，于是屏幕上这一串与 localStorage 里
+ * 那一枚在结构上不可能脱钩。算出来顺手记进 state.idCommit —— 冷却是按 (uid, commit)
+ * 这一对认人的，而闸是同步画的。
  */
 async function paintIdentityCommit() {
   const code = $("#identity-commit");
@@ -2982,9 +3144,12 @@ async function paintIdentityCommit() {
   const secret = ensureIdentitySecret();
   try {
     const commit = await identityCommitment(secret);
-    // sha256 是异步的，中间可能点了「换一串」：那就不画这枚过期的。
+    // sha256 是异步的：这中间 localStorage 里那一串要是被另一个标签页换掉了，就别画过期的。
     if (readIdentitySecret() !== secret) return;
+    state.idCommit = commit;
     code.textContent = commit;
+    // 指纹刚齐：冷却的锁与「请 N 秒后再试」都要靠它才画得出来。
+    renderIdentityGate();
   } catch {
     code.textContent = "（这一串算不出来，刷新一次试试）";
   }
@@ -2996,6 +3161,9 @@ async function paintIdentityCommit() {
  * 它挂在 refreshGate() 的尾巴上（那条链已经被所有输入触发），所以这里只负责读现状，
  * 不自己找人调 —— 少一处「改了值忘了重画」的机会。
  * v2 之后这一屏不再需要包：凭据只有「UID + 签名里那一串 + 一条承诺」。
+ *
+ * 三档「点不了」各有各的说法，不许混成一句通用话：等级不足是死局（要先升等级，或者点
+ * 「我已升级」）、冷却是等一会儿自己就过去、其余是还没填齐。按钮亮不亮只有这一处判。
  */
 function renderIdentityGate() {
   const btn = $("#id-verify");
@@ -3003,14 +3171,30 @@ function renderIdentityGate() {
   if (!btn) return;
   const uid = fieldValue("coolapkUid");
   const pledge = $("#ck-pledge");
-  const ready = Boolean(!state.idBusy && isCoolapkUid(uid) && pledge && pledge.checked);
+  // 指纹变了就解锁；commit 还没算出来的那一瞬间它什么都不做（见 dropIdentityCooldownIfStale）。
+  dropIdentityCooldownIfStale();
+  const blocked = identityLevelBlocked();
+  const wait = identityCooldownRemaining(identityFingerprint());
+  const ready = Boolean(
+    !state.idBusy && !blocked && wait <= 0 && isCoolapkUid(uid) && pledge && pledge.checked
+  );
   btn.disabled = !ready;
-  if (!note) return;
-  if (state.idBusy) note.textContent = "正在跟后端核对…";
-  else if (!uid) note.textContent = "先填你的酷安 UID";
-  else if (!isCoolapkUid(uid)) note.textContent = "UID 应是 4-12 位纯数字";
-  else if (!pledge || !pledge.checked) note.textContent = "把下面那条承诺勾上";
-  else note.textContent = "可以去验证了";
+  // 死局的提示与手动出路：那一格只在 block 成立时出场（升完级点一下才解除，不自动解除）。
+  const block = $("#id-level-block");
+  if (block) block.hidden = !blocked;
+  const recheck = $("#id-level-recheck");
+  if (recheck) recheck.hidden = !blocked;
+  if (note) {
+    if (state.idBusy) note.textContent = "正在跟后端核对…";
+    else if (!uid) note.textContent = "先填你的酷安 UID";
+    else if (!isCoolapkUid(uid)) note.textContent = "UID 应是 4-12 位纯数字";
+    else if (blocked) note.textContent = "先去酷安升级，再回来点「我已升级，重新验证」";
+    else if (wait > 0) note.textContent = `请 ${wait} 秒后再试`;
+    else if (!pledge || !pledge.checked) note.textContent = "把下面那条承诺勾上";
+    else note.textContent = "可以去验证了";
+  }
+  // 冷却中才留一条每秒的定时器，数到 0 自己停。
+  syncIdentityCooldownTicker();
 }
 
 function paintIdentityError() {
@@ -3038,6 +3222,26 @@ async function submitIdentity() {
     refreshGate();
     return;
   }
+  // 等级死局没解除之前这一发不必发：服务端会照原样再回一次 level_too_low。
+  if (identityLevelBlocked()) {
+    refreshGate();
+    return;
+  }
+  const secret = ensureIdentitySecret();
+  /* 冷却判据是 (uid, commit) 这一对，而 commit 得现算 —— 所以先算完再决定发不发。
+     按钮那层禁用已经挡了一道，这里再判一次：键盘、书签脚本、另一个标签页都能绕过 DOM 状态。 */
+  let fp = "";
+  try {
+    state.idCommit = await identityCommitment(secret);
+    fp = identityFingerprint(uid, state.idCommit);
+  } catch {
+    fp = "";
+  }
+  if (identityCooldownRemaining(fp) > 0) {
+    // 屏幕上那句「请 N 秒后再试」已经把话说完了，这里只负责别把这一发送出去。
+    renderIdentityGate();
+    return;
+  }
   state.idBusy = true;
   state.idError = "";
   paintIdentityError();
@@ -3045,9 +3249,15 @@ async function submitIdentity() {
   try {
     const res = await issueIdentitySession({
       coolapkUid: uid,
-      secret: ensureIdentitySecret(),
+      secret,
       pledge: "pledge-v2",
     });
+    /* 成功一次就清零：这一对 (uid, commit) 的连续失败到此为止。
+       顺手清掉「等级不足」那把锁 —— 能走到这里说明服务端这一次认了等级，而同一个 uid
+       卡着锁时按钮根本点不动，所以这条锁记的只可能是**另一个人**（换号验证成功）。
+       留着它只会在换回那个号时莫名其妙地锁住 —— 那不是「不自动解除」，那是锁错了人。 */
+    saveIdentityCooldown(null);
+    if (readIdentityLevelBlocked()) clearIdentityLevelBlocked();
     state.session = {
       token: res.session.token,
       uid: res.identity.uid || uid,
@@ -3082,8 +3292,20 @@ async function submitIdentity() {
     renderRoute();
     loadMine();
   } catch (err) {
-    // backendFailure 已经把那句中文写好了（含服务端原话），这里原样显示，不改写。
-    state.idError = err && err.message ? err.message : "验证没有成功，稍后再试一次。";
+    if (err && err.code === "level_too_low") {
+      /* 等级不足是死局，不是「再试一次」能过的：把这个 uid 记下来、锁住按钮，
+         只有用户自己升完级点「我已升级，重新验证」才解除（见 clearIdentityLevelBlock）。
+         这一次照样记进冷却 —— 解除之后若等级还没到，他又能连点，那正是要节流的那只手。 */
+      markIdentityLevelBlocked(uid);
+      countIdentityFailure(fp);
+      // 这句话由 #id-level-block 那一格说（它常驻、窄屏也不藏），这里不再重复一遍。
+      state.idError = "";
+    } else {
+      // backendFailure 已经把那句中文写好了（含服务端原话），这里原样显示，不改写。
+      state.idError = err && err.message ? err.message : "验证没有成功，稍后再试一次。";
+      // 任何失败都记数（断网 / 超时 / 被拒）：不记的话「再点一次」就能无限绕过冷却。
+      countIdentityFailure(fp);
+    }
   } finally {
     state.idBusy = false;
     paintIdentityError();
@@ -3129,19 +3351,14 @@ async function copyIdentityCommit(btn) {
 }
 
 /**
- * 「换一串」：重新生成本机 secret、重画承诺串。
+ * 「我已升级，重新验证」：把「这个 uid 等级不够」那条死局手动解开，按钮交回用户。
  *
- * 不弹确认框：点它的意思本来就是「这一串不要了」，而改签名这件事写在旁边那行说明里，
- * 换完立刻看得见 —— 多一次「确定吗」只是多一次点击，拦不住任何真错误。
+ * 不在这一下自动发一次验证：升没升级只有他本人知道，替他去撞一次后端只会在还是 Lv1 时
+ * 再吃一个 level_too_low（而那一次也进冷却）。解开之后屏幕上那句「可以去验证了」立刻回来。
  */
-function renewIdentitySecret(btn) {
-  saveIdentitySecret(identitySecret());
-  paintIdentityCommit();
-  if (btn) {
-    const label = btn.textContent;
-    btn.textContent = "换好了，去改签名";
-    setTimeout(() => (btn.textContent = label), 1800);
-  }
+function clearIdentityLevelBlock() {
+  clearIdentityLevelBlocked();
+  refreshGate();
 }
 
 function bindIdentity() {
@@ -3151,8 +3368,9 @@ function bindIdentity() {
   if (verify) verify.addEventListener("click", () => submitIdentity());
   const copy = $("#identity-copy");
   if (copy) copy.addEventListener("click", () => copyIdentityCommit(copy));
-  const renew = $("#identity-renew");
-  if (renew) renew.addEventListener("click", () => renewIdentitySecret(renew));
+  // 等级死局唯一的手动出路。
+  const recheck = $("#id-level-recheck");
+  if (recheck) recheck.addEventListener("click", () => clearIdentityLevelBlock());
   paintIdentityError();
   renderIdentityGate();
   paintIdentityCommit();
