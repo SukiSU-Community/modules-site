@@ -1449,15 +1449,15 @@ async function main() {
      于是这条正反两侧都钉：身份段里没有「换一串」；整页也不再有不带「签名」二字的「换一串」，
      而「换一串签名」那一处还在 —— 少任何一侧，都等于悄悄把一半的入口换了名。 */
   check(
-    "身份页文案与 App 端同一句话：标题「酷安签名改成下面这串」、门槛「需要酷安等级 Lv2 及以上」，且这一段里不再有「换一串」",
-    identitySlice.includes("酷安签名改成下面这串") &&
+    "身份页文案与 App 端同一句话：标题「酷安签名临时改成下面这串」、门槛「需要酷安等级 Lv2 及以上」，且这一段里不再有「换一串」",
+    identitySlice.includes("酷安签名临时改成下面这串") &&
       identitySlice.includes("需要酷安等级") &&
       identitySlice.includes("Lv2 及以上") &&
       !identitySlice.includes("换一串") &&
       !/换一串(?!签名)/.test(formHtml) &&
       formHtml.includes("换一串签名") &&
       !formHtml.includes("上传人酷安等级"),
-    `身份段：有标题=${identitySlice.includes("酷安签名改成下面这串")}、有 Lv2 门槛=${identitySlice.includes("Lv2 及以上")}、含「换一串」=${identitySlice.includes("换一串")}；整页残留的无「签名」二字「换一串」=${/换一串(?!签名)/.test(formHtml)}`
+    `身份段：有标题=${identitySlice.includes("酷安签名临时改成下面这串")}、有 Lv2 门槛=${identitySlice.includes("Lv2 及以上")}、含「换一串」=${identitySlice.includes("换一串")}；整页残留的无「签名」二字「换一串」=${/换一串(?!签名)/.test(formHtml)}`
   );
   /* 冷却门控：同一指纹（uid + commit）连续失败 30s / 60s / 120s / 之后 300s 封顶，成功清零。
      三件事必须同时钉住，少一条这道门都是装饰品：
