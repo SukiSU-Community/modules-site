@@ -285,6 +285,26 @@
                     <input type="text" id="f-author" data-k="author" placeholder="原作者的署名或酷安昵称" autocomplete="off" />
                     <p class="field__help">写<b>原作者</b>，不是上传人。</p>
                   </div>
+                  <!-- 作者主页两格：跟着「模块作者」走，因为说的都是同一个人。选了作者名却没给主页，
+                       列表里就只有名字、点不过去；给了主页才画链接，且一律标「未验证」。 -->
+                  <div class="field span2">
+                    <div class="field__lab"><label for="f-author-coolapk">作者酷安主页<span class="opt">选填</span></label></div>
+                    <input class="mono" type="text" id="f-author-coolapk" data-k="authorCoolapkUrl" placeholder="https://www.coolapk.com/u/123456" autocomplete="off" spellcheck="false" />
+                    <p class="field__help">
+                      作者<b>本人</b>的酷安主页，形如 <b>https://www.coolapk.com/u/123456</b> —— 不是这个模块的帖子链接。
+                      这一格由上传的人代填，本站不核实它属于谁；已登记的模块留空就沿用上一次的值。
+                    </p>
+                    <p class="field__err" data-err="authorCoolapkUrl">必须是作者的个人主页，如 https://www.coolapk.com/u/123456</p>
+                  </div>
+                  <div class="field span2">
+                    <div class="field__lab"><label for="f-author-github">作者 GitHub 主页<span class="opt">选填</span></label></div>
+                    <input class="mono" type="text" id="f-author-github" data-k="authorGithubUrl" placeholder="https://github.com/octocat" autocomplete="off" spellcheck="false" />
+                    <p class="field__help">
+                      作者<b>本人</b>的 GitHub 主页，形如 <b>https://github.com/octocat</b>（只有账号这一层，不带仓库名）。
+                    </p>
+                    <p class="field__err" data-err="authorGithubUrl">必须是作者的个人主页，如 https://github.com/octocat</p>
+                    <p class="field__help" id="author-hint" hidden></p>
+                  </div>
                   <div class="field span2">
                     <div class="field__lab"><label for="f-description">描述<span class="opt">选填</span></label></div>
                     <textarea class="mono" id="f-description" data-k="description" placeholder="模块做什么，一两句话" rows="3"></textarea>

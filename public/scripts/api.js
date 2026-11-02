@@ -220,8 +220,12 @@ export function submitContribution(batch, { onProgress } = {}) {
   });
 }
 
-/** §17.3 那份 JSON：`{ version:'batch-v1', modules:[{ id, sha256, name, version, versionCode, author, description, source, repoUrl }] }`。 */
-function buildManifest(modules) {
+/**
+ * §17.3 那份 JSON：`{ version:'batch-v1', modules:[{ id, sha256, name, version, versionCode,
+ * author, authorCoolapkUrl?, authorGithubUrl?, description, source, repoUrl }] }`。
+ * 带 `?` 的两格是作者主页（契约 §2）：选填，没值就不出现（理由见下面那段注释）。
+ */
+export function buildManifest(modules) {
   return JSON.stringify({
     version: "batch-v1",
     modules: modules.map((m) => ({
@@ -231,6 +235,16 @@ function buildManifest(modules) {
       version: String(m.version || "").trim(),
       versionCode: Number(m.versionCode),
       author: String(m.author || ""),
+      /* 作者主页两格（契约 §2）**只在有值时出现**，这一点与上面那些固定字段不同：
+         Worker 的继承与 owner-lock 是按「请求里给没给」判的（§4 第 2 条）。空串照发会被读成
+         「要清空」—— 非归属人清一次就是 403 author_locked，而页面上那句「留空将沿用」
+         说的正好相反。所以「空」在这里的意思是**没说**，键直接不出现。 */
+      ...(String(m.authorCoolapkUrl || "").trim()
+        ? { authorCoolapkUrl: String(m.authorCoolapkUrl).trim() }
+        : {}),
+      ...(String(m.authorGithubUrl || "").trim()
+        ? { authorGithubUrl: String(m.authorGithubUrl).trim() }
+        : {}),
       description: String(m.description || ""),
       source: String(m.source || ""),
       // 空串照发：契约 §1 要求「没填就省略键」是索引侧的写法，投稿清单这里固定字段更好对账
@@ -347,6 +361,20 @@ export const SUBMIT_ERROR_TEXT = {
   repo_locked: {
     owner: "you",
     text: "「源码仓库」只能由模块的归属人设置或修改 —— 你不是这一枚的归属人，所以整单被拒了。两条路：① 仓库那一格留空（空着就沿用索引里作者已经登记的那个地址，不影响提交）；② 用当初首发这一枚的账号来发。别为了绕过它换 UID：归属判的就是首发那次记下的号。",
+  },
+  // 作者主页那两格（契约 §2 / §3.3）：与仓库那条同一种「字段形状 / 归属」失败，
+  // 但说的对象不同 —— 这两格是上传人替作者写的声明，写错了被拒的是声明，不是包。
+  bad_author_coolapk_url: {
+    owner: "you",
+    text: "作者酷安主页必须是 https://www.coolapk.com/u/<4-12 位数字>：那一格要的是作者的个人主页，不是帖子链接，也不是别的站点。整单在收包之前就被拒了 —— 改成这个形状再来一次就行，包不用重选、签名也还在。作者没有酷安账号就把那一格留空。",
+  },
+  bad_author_github_url: {
+    owner: "you",
+    text: "作者 GitHub 主页必须是 https://github.com/<用户名>：只有一段路径，不是仓库地址（/owner/repo 两段会被拒），也不带 ?tab=repositories 这种尾巴。整单在收包之前就被拒了 —— 改成这个形状再来一次，包不用重选。作者没有 GitHub 账号就把那一格留空。",
+  },
+  author_locked: {
+    owner: "you",
+    text: "作者主页只能由模块归属人设置或修改：这一枚已经登记过作者主页，而你不是它的归属人（归属按首发那次上传记的酷安 UID 判），所以整单被拒。两条路：① 两格留空 —— 空着就沿用索引里已经登记的那一份，不影响提交；② 用当初首发这一枚的账号来发。别为了绕过它换 UID：归属判的就是首发那次记下的号。",
   },
   no_evidence_cited: {
     owner: "you",
@@ -591,6 +619,90 @@ export function normalizeCoolapkUrl(raw) {
   const host = u.hostname.toLowerCase();
   if (host !== "coolapk.com" && !host.endsWith(".coolapk.com")) return "";
   return u.href;
+}
+
+/* --------------------------------------------- 作者主页（契约 §2 / §3.1 / §3.2）
+   这两格是**上传人替作者填的声明**，与「来源」那格（帖子链接）不是一回事：一个指向人，
+   一个指向那条动态。两格都选填，填了就必须是「个人主页」的形状 —— 帖子、仓库、组织页都不算。
+   索引里那一串属于外部数据：渲染前要拿这两个函数**再归一一次**，形状不对只当文本显示，
+   绝不把它直接塞进 href（`javascript:`、`//evil` 这类串不可能靠「看着像」过滤干净）。 */
+
+const COOLAPK_USER_HOSTS = new Set(["coolapk.com", "www.coolapk.com"]);
+const COOLAPK_USER_PATH_RE = /^\/u\/(\d{4,12})\/?$/;
+
+export function normalizeCoolapkUserUrl(raw) {
+  const v = String(raw || "").trim();
+  if (!v) return "";
+  let u;
+  try {
+    u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`);
+  } catch {
+    return "";
+  }
+  // http 只是升级成 https 再接受（与「来源」同一档宽容）；端口 / userinfo / query / fragment
+  // 一个都不属于个人主页 —— 带着它们说明粘错了，不该「多了一点也认」。
+  if (u.protocol !== "https:" && u.protocol !== "http:") return "";
+  if (u.search || u.hash || u.port || u.username || u.password) return "";
+  if (!COOLAPK_USER_HOSTS.has(u.hostname.toLowerCase())) return "";
+  const m = COOLAPK_USER_PATH_RE.exec(u.pathname);
+  if (!m || !UID_RE.test(m[1])) return "";
+  // 输出 host 固定 www：索引里只留这一个规范形，读取端不必再猜「这条是哪个子域」。
+  return `https://www.coolapk.com/u/${m[1]}`;
+}
+
+// GitHub 的个人主页是 github.com 下**一段**路径；两段就是仓库，不算作者主页。
+// 保留路径（settings / orgs / topics 这些）不是某个人，按非法处理 —— 允许它们等于
+// 允许一个指向「页面」而不是「作者」的链接冒充作者。
+const GITHUB_USER_RESERVED = new Set([
+  // 与 Worker / 索引仓共用同一张 76 项保留路径表，顺序无关，全部小写。
+  "about", "account", "admin", "api", "apps", "blog", "business", "codespaces", "collections",
+  "contact", "customer-stories", "dashboard", "developer", "discussions", "download", "downloads",
+  "edu", "education", "enterprise", "events", "explore", "features", "followers", "following",
+  "gist", "git", "git-guides", "github", "help", "home", "hovercards", "issues", "join", "login",
+  "logout", "marketplace", "mobile", "new", "nonprofit", "notifications", "open-source",
+  "organizations", "orgs", "pages", "partners", "personal", "plans", "prebuilds", "pricing",
+  "privacy", "projects", "pulls", "readme", "resources", "search", "security", "sessions",
+  "settings", "shop", "showcases", "signup", "site", "solutions", "sponsors", "stars", "status",
+  "team", "teams", "terms", "topics", "trending", "users", "watching", "welcome", "wiki",
+  "workflows",
+]);
+
+function isGithubLogin(login) {
+  // 1-39 个 [A-Za-z0-9-]；不许以 - 开头/结尾，不许连续 --。
+  // 带 `.git` 尾巴的会自动在这一步被拒（`.` 不在字符集里），不需要另外剥。
+  if (!/^[A-Za-z0-9-]{1,39}$/.test(login)) return false;
+  if (login.startsWith("-") || login.endsWith("-") || login.includes("--")) return false;
+  return !GITHUB_USER_RESERVED.has(login.toLowerCase());
+}
+
+export function normalizeGithubUserUrl(raw) {
+  const v = String(raw || "").trim();
+  if (!v) return "";
+  let u;
+  try {
+    u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`);
+  } catch {
+    return "";
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return "";
+  // 主机必须正好是 github.com：www.github.com 会 301，但那不是规范形，让用户自己改；
+  // 端口 / userinfo / query / fragment 同样不属于个人主页。
+  if (u.search || u.hash || u.port || u.username || u.password) return "";
+  if (u.hostname.toLowerCase() !== "github.com") return "";
+  const parts = u.pathname.split("/").filter(Boolean);
+  if (parts.length !== 1) return "";
+  if (!isGithubLogin(parts[0])) return "";
+  // login 保留原始大小写：GitHub 自己不区分，但作者写下的那个写法是他的签名。
+  return `https://github.com/${parts[0]}`;
+}
+
+/**
+ * 上传者主页不落库（契约 §2）：由 `coolapkUid` 现拼。
+ * UID 不是 4-12 位纯数字时返回空串 —— 界面据此只显示昵称，不画一个猜出来的链接。
+ */
+export function uploaderCoolapkUrl(uid) {
+  const v = String(uid || "").trim();
+  return UID_RE.test(v) ? `https://www.coolapk.com/u/${v}` : "";
 }
 
 /**
@@ -1134,6 +1246,15 @@ export function normalizeIndex(json) {
         id: String(m.id || ""),
         name: String(m.name || m.id || ""),
         author: String(m.author || ""),
+        // 作者主页两格是后加的（契约 §2）：与仓库那几格同一条容错规则 —— 缺字段就是没填，
+        // 不猜、不补。这里只 trim：归一是**渲染前**的事（app.js 按 §3 现做），
+        // 读进来的串一律当成不可信的外部数据。
+        authorCoolapkUrl: typeof m.authorCoolapkUrl === "string" ? m.authorCoolapkUrl.trim() : "",
+        authorGithubUrl: typeof m.authorGithubUrl === "string" ? m.authorGithubUrl.trim() : "",
+        // 列表那一行的「上传人」一侧：昵称与 UID 都是可选四格里的两格，老条目可能一个都没有。
+        // UID 只用来现拼主页链接，索引里没有（也不该有）派生出来的 URL 字段。
+        uploader: typeof m.uploader === "string" ? m.uploader.trim() : "",
+        coolapkUid: typeof m.coolapkUid === "string" ? m.coolapkUid.trim() : "",
         description: String(m.description || ""),
         verified: Boolean(m.verified),
         versions,

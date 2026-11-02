@@ -1630,6 +1630,50 @@ textarea:focus {
   color: var(--ink);
   border-color: var(--ink-2);
 }
+/* 两个身份（契约 §6 第 3 条）：作者与上传人并排，名字有主页就可点。
+   它夹在描述与那串等宽读数之间 —— 不是读数的一部分，说的是「谁做的、谁传上来的」。 */
+.mod__who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 8px;
+  font: 400 12px/1.7 var(--mono);
+  color: var(--ink-3);
+}
+.mod__who-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.mod__who-k {
+  color: var(--ink-3);
+}
+.mod__who-a {
+  color: var(--ink-2);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+  transition: color 0.16s var(--ease), border-color 0.16s var(--ease);
+}
+.mod__who-a:hover {
+  color: var(--amber);
+  border-color: var(--amber-line);
+}
+/* 没有主页时就是纯文字：不画下边框 —— 看着像能点却点不动，比不可点更糟 */
+.mod__who-v {
+  color: var(--ink-2);
+}
+/* 「未验证」是这一行的免责声明：给一圈细边就够，别用亮色，让它比名字还抢眼 */
+.mod__who-tag {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 4px;
+  cursor: help;
+}
 /* 源码证据块（契约 §4 第 5 条）：折叠着，不给它第二条视觉主轴 —— 只有要核的人才会点开 */
 .mod__repo {
   margin-top: 10px;

@@ -1616,12 +1616,24 @@ async function main() {
     `顶层 part=${sentFields.join(",")} manifest位置=${submitBody.indexOf('form.append("manifest"')} 第一个zip=${submitBody.indexOf('form.append("zip"')}`
   );
   // manifest 里那九项是 §17.3 的原文形状 + §1 的 repoUrl，也是 §16 那条闸的判据输入；多一项少一项都算两边形状不一。
+  // 再往后是契约 §2 的两格作者主页：它们是**选填**，所以这里钉的是「有这两个键的位置」而不是「必定出现」——
+  // 真形状（有才写、空则省略）下面那组按函数调用钉，不靠读源码。
   check(
-    "manifest 的形状逐字对着 §17.3 + §1：version='batch-v1' + modules[] 里 id/sha256/name/version/versionCode/author/description/source/repoUrl 九项，共享字段不在里面",
+    "manifest 的形状逐字对着 §17.3 + §1 + 契约 §2：version='batch-v1' + modules[] 里九项必有、两格作者主页选填，共享字段不在里面",
     /version: "batch-v1"/.test(manifestBody) &&
-      ["id:", "sha256:", "name:", "version:", "versionCode:", "author:", "description:", "source:", "repoUrl:"].every((k) =>
-        manifestBody.includes(k)
-      ) &&
+      [
+        "id:",
+        "sha256:",
+        "name:",
+        "version:",
+        "versionCode:",
+        "author:",
+        "description:",
+        "source:",
+        "repoUrl:",
+        "authorCoolapkUrl:",
+        "authorGithubUrl:",
+      ].every((k) => manifestBody.includes(k)) &&
       !/nonce|pledge|turnstile|coolapkUid|uploader/.test(manifestBody),
     manifestBody.slice(0, 60)
   );
@@ -1717,19 +1729,29 @@ async function main() {
   );
   check(
     "预填继承只填空格（不覆盖用户输入），并把「留空将沿用」挂出来",
-    inheritBody.includes('for (const key of ["source", "repoUrl"])') &&
+    inheritBody.includes('for (const key of ["source", "repoUrl", "authorCoolapkUrl", "authorGithubUrl"])') &&
       inheritBody.includes("if (!fromIndex || values[key]) continue;") &&
       appSrc.includes("该模块已绑定源码仓库，留空将沿用") &&
-      appSrc.includes('$("#repo-hint")'),
+      appSrc.includes("该模块已登记作者主页，留空将沿用") &&
+      appSrc.includes('$("#repo-hint")') &&
+      appSrc.includes('$("#author-hint")'),
     inheritBody.slice(0, 80)
   );
   const paintBundle = appSrc.slice(
     appSrc.indexOf("function paintFieldErrors("),
     appSrc.indexOf("\n}", appSrc.indexOf("function paintFieldErrors("))
   );
+  const urlTable = appSrc.slice(
+    appSrc.indexOf("const OPTIONAL_URL_FIELDS"),
+    appSrc.indexOf("\n};", appSrc.indexOf("const OPTIONAL_URL_FIELDS"))
+  );
   check(
-    "二选一的红字挂在 #src-err 上（它不属于任何 .field，所以走 is-on）",
-    paintBundle.includes('for (const key of ["source", "repoUrl"])') &&
+    "四格「选填形状」共用一张表（来源/仓库/两个作者主页），红字与闸门不会各判一套",
+    urlTable.includes("source: normalizeCoolapkUrl") &&
+      urlTable.includes("repoUrl: normalizeRepoUrl") &&
+      urlTable.includes("authorCoolapkUrl: normalizeCoolapkUserUrl") &&
+      urlTable.includes("authorGithubUrl: normalizeGithubUserUrl") &&
+      paintBundle.includes("for (const [key, normalize] of Object.entries(OPTIONAL_URL_FIELDS))") &&
       paintBundle.includes('$("#src-err")') &&
       paintBundle.includes("is-on"),
     paintBundle.slice(0, 80)
@@ -1746,6 +1768,158 @@ async function main() {
       appHtml.includes('id="src-err"') &&
       appHtml.includes('id="repo-hint"'),
     `source=${sourceInput.slice(0, 60)} repo=${repoInput.slice(0, 60)}`
+  );
+
+  /* =================== 作者主页（契约 §2 / §3 / §6）
+     这一格与「来源」的根本差别：链接是谁说了算。来源是上传人指认这个包从哪来，作者主页是上传人
+     替另一个人做的声明 —— 所以它一律标「未验证」，而且**只在归一之后**才可能变成 href。
+     钉三类：归一函数认什么；空值怎么落进载荷（空=没说，不是=要清空）；没有链接时列表画不画壳。 */
+  const { normalizeCoolapkUserUrl, normalizeGithubUserUrl, uploaderCoolapkUrl, buildManifest } = await import(
+    "../public/scripts/api.js"
+  );
+  check(
+    "作者酷安主页：四种写法归一成同一串；帖子链接 / 子域 / 查询串 / 位数不对一律拒绝",
+    normalizeCoolapkUserUrl("https://www.coolapk.com/u/123456") === "https://www.coolapk.com/u/123456" &&
+      normalizeCoolapkUserUrl("http://coolapk.com/u/123456") === "https://www.coolapk.com/u/123456" &&
+      normalizeCoolapkUserUrl("www.coolapk.com/u/123456") === "https://www.coolapk.com/u/123456" &&
+      normalizeCoolapkUserUrl("coolapk.com/u/123456/") === "https://www.coolapk.com/u/123456" &&
+      normalizeCoolapkUserUrl("https://www.coolapk.com/feed/65432100") === "" &&
+      normalizeCoolapkUserUrl("https://m.coolapk.com/u/123456") === "" &&
+      normalizeCoolapkUserUrl("https://www.coolapk.com/u/123456?from=share") === "" &&
+      normalizeCoolapkUserUrl("https://www.coolapk.com/u/123") === "" &&
+      normalizeCoolapkUserUrl("https://www.coolapk.com/u/123456/pic") === "" &&
+      normalizeCoolapkUserUrl("   ") === "",
+    normalizeCoolapkUserUrl("www.coolapk.com/u/123456")
+  );
+  check(
+    "作者 GitHub 主页：账号这一层才认；仓库 / www 子域 / 保留字 / 连字符位置不对一律拒绝",
+    normalizeGithubUserUrl("https://github.com/octocat") === "https://github.com/octocat" &&
+      normalizeGithubUserUrl("http://github.com/OctoCat/") === "https://github.com/OctoCat" &&
+      normalizeGithubUserUrl("github.com/octocat") === "https://github.com/octocat" &&
+      normalizeGithubUserUrl("https://github.com/octocat/KernelSU") === "" &&
+      normalizeGithubUserUrl("https://www.github.com/octocat") === "" &&
+      normalizeGithubUserUrl("https://github.com/octocat?tab=repositories") === "" &&
+      normalizeGithubUserUrl("https://github.com/-octocat") === "" &&
+      normalizeGithubUserUrl("https://github.com/octo--cat") === "" &&
+      normalizeGithubUserUrl("https://github.com/settings") === "" &&
+      normalizeGithubUserUrl("https://github.com/octocat.git") === "" &&
+      normalizeGithubUserUrl("") === "",
+    normalizeGithubUserUrl("github.com/octocat")
+  );
+  check(
+    "上传人主页由 coolapkUid 现拼：4–12 位数字才有链接，别的一律不编",
+    uploaderCoolapkUrl("123456") === "https://www.coolapk.com/u/123456" &&
+      uploaderCoolapkUrl(" 123456 ") === "https://www.coolapk.com/u/123456" &&
+      uploaderCoolapkUrl("123") === "" &&
+      uploaderCoolapkUrl("1234567890123") === "" &&
+      uploaderCoolapkUrl("27a1460") === "" &&
+      uploaderCoolapkUrl("") === ""
+  );
+  const authorlessModule = {
+    id: "m",
+    sha256: "0".repeat(64),
+    name: "模块",
+    version: "v1",
+    versionCode: 1,
+    author: "作者",
+    description: "",
+    source: "",
+    repoUrl: "",
+  };
+  const manifestPlain = JSON.parse(buildManifest([authorlessModule]));
+  const manifestWithLinks = JSON.parse(
+    buildManifest([
+      {
+        ...authorlessModule,
+        authorCoolapkUrl: "https://www.coolapk.com/u/999999",
+        authorGithubUrl: "https://github.com/octocat",
+      },
+    ])
+  );
+  check(
+    "manifest 里作者主页「有才写」：两格都空就不带这两个键 —— 空串会被读成「请他清空」",
+    !("authorCoolapkUrl" in manifestPlain.modules[0]) &&
+      !("authorGithubUrl" in manifestPlain.modules[0]) &&
+      manifestWithLinks.modules[0].authorCoolapkUrl === "https://www.coolapk.com/u/999999" &&
+      manifestWithLinks.modules[0].authorGithubUrl === "https://github.com/octocat"
+  );
+  const whoBody = appSrc.slice(appSrc.indexOf("function whoRow("), appSrc.indexOf("\n}", appSrc.indexOf("function whoRow(")));
+  const homepageBody = appSrc.slice(
+    appSrc.indexOf("function authorHomepage("),
+    appSrc.indexOf("\n}", appSrc.indexOf("function authorHomepage("))
+  );
+  const authEvBody = appSrc.slice(
+    appSrc.indexOf("function authorEvidence("),
+    appSrc.indexOf("\n}", appSrc.indexOf("function authorEvidence("))
+  );
+  const modRowBody = appSrc.slice(appSrc.indexOf("function modRow("), appSrc.indexOf("\n}", appSrc.indexOf("function modRow(")));
+  check(
+    "列表行两个身份：作者与上传人并排，名字有主页才画链接，作者那侧永远带「未验证」",
+    whoBody.includes('"作者"') &&
+      whoBody.includes('"上传人"') &&
+      whoBody.includes('"未验证"') &&
+      whoBody.includes("authorHomepage(m)") &&
+      whoBody.includes("uploaderCoolapkUrl(m.coolapkUid)") &&
+      whoBody.includes("safeUrl(") &&
+      whoBody.includes("if (!name && !link) return null;") &&
+      homepageBody.includes("normalizeCoolapkUserUrl(m.authorCoolapkUrl)") &&
+      homepageBody.includes("normalizeGithubUserUrl(m.authorGithubUrl)"),
+    whoBody.slice(0, 80)
+  );
+  check(
+    "作者主页那一行：没有链接就整个不画（不留空壳），有链接才挂「由上传人填写，未验证」",
+    authEvBody.includes('"作者主页（由上传人填写，未验证）"') &&
+      authEvBody.includes("if (!links.length) return null;") &&
+      authEvBody.includes("normalizeCoolapkUserUrl(m.authorCoolapkUrl)") &&
+      authEvBody.includes("normalizeGithubUserUrl(m.authorGithubUrl)") &&
+      authEvBody.includes("safeUrl(") &&
+      modRowBody.includes("whoRow(m)") &&
+      modRowBody.includes("authorEvidence(m)") &&
+      !modRowBody.includes("by ${m.author}"),
+    authEvBody.slice(0, 80)
+  );
+  const authorCoolapkInput = /<input[^>]*id="f-author-coolapk"[^>]*>/.exec(appHtml)?.[0] || "";
+  const authorGithubInput = /<input[^>]*id="f-author-github"[^>]*>/.exec(appHtml)?.[0] || "";
+  check(
+    "作者主页两格是选填（不带 required）、data-k 与载荷同名，标签与错误位都在",
+    authorCoolapkInput !== "" &&
+      !/required/.test(authorCoolapkInput) &&
+      /data-k="authorCoolapkUrl"/.test(authorCoolapkInput) &&
+      /data-k="authorGithubUrl"/.test(authorGithubInput) &&
+      appHtml.includes('id="author-hint"') &&
+      appHtml.includes('data-err="authorCoolapkUrl"') &&
+      appHtml.includes('data-err="authorGithubUrl"') &&
+      appHtml.includes("作者酷安主页") &&
+      appHtml.includes("作者 GitHub 主页"),
+    `coolapk=${authorCoolapkInput.slice(0, 60)} github=${authorGithubInput.slice(0, 60)}`
+  );
+  check(
+    "列表那行的样式真的存在（不是只有 JS 建了类名）",
+    /\.mod__who\b/.test(panelCss) && /\.mod__who-tag\b/.test(panelCss) && /\.mod__who-a:hover\b/.test(panelCss)
+  );
+  check(
+    "cardGaps：两格作者主页填了就必须是个人主页的形状，空着不进 gap",
+    gapsBody.includes(
+      'if (v.authorCoolapkUrl && !normalizeCoolapkUserUrl(v.authorCoolapkUrl)) gaps.push("作者酷安主页不是个人主页");'
+    ) &&
+      gapsBody.includes(
+        'if (v.authorGithubUrl && !normalizeGithubUserUrl(v.authorGithubUrl)) gaps.push("作者 GitHub 主页不是个人主页");'
+      ),
+    gapsBody.slice(0, 80)
+  );
+  const authorHintBody = appSrc.slice(
+    appSrc.indexOf("function paintAuthorHint("),
+    appSrc.indexOf("\n}", appSrc.indexOf("function paintAuthorHint("))
+  );
+  check(
+    "「留空将沿用」只在真能沿用时才说：提示与预填共用同一份归一函数，脏数据不会先承诺再食言",
+    authorHintBody.includes("normalizeCoolapkUserUrl(m.authorCoolapkUrl)") &&
+      authorHintBody.includes("normalizeGithubUserUrl(m.authorGithubUrl)") &&
+      inheritBody.includes("INHERIT_NORMALIZED[key] ? INHERIT_NORMALIZED[key](m[key]) : m[key]") &&
+      appSrc.includes("const INHERIT_NORMALIZED = {") &&
+      appSrc.includes("authorCoolapkUrl: normalizeCoolapkUserUrl") &&
+      appSrc.includes("authorGithubUrl: normalizeGithubUserUrl"),
+    authorHintBody.slice(0, 80)
   );
 
   // 「本次要投 N 枚」这句话与队列读数是两份判据的话迟早会漂 —— 所以钉死它们同源。

@@ -161,13 +161,13 @@ versionCode 只在 module.prop 声明了它时才被绑。
 面板 03 的两格**至少填一项**：都空时报「请至少填写「来源」或「源码仓库」之一」，批量上传时每一枚
 都按同一条规则判。两格的分工是「包从哪来」与「源码在哪」。
 
-`normalizeCoolapkUrl()`（`api.js:581`）用 `URL` 解析而不是字符串正则：必须 `http(s)` 协议、
+`normalizeCoolapkUrl()`（`api.js:609`）用 `URL` 解析而不是字符串正则：必须 `http(s)` 协议、
 主机是 `coolapk.com` 或其子域，`coolapk.com.evil.tld`、`https://evil.tld/https://www.coolapk.com`、
 `javascript:` 都会被拒。用户只粘 `www.coolapk.com/feed/123` 时会自动补上 `https://`。
 **服务端已经按同一条规则复核过了**（`contrib/worker` 的 `coolapkSourceUrl()`，与 `normalizeCoolapkUrl()`
 逐条对齐：协议白名单、`URL` 解析后比主机名、拒 `coolapk.com.evil.tld` 与路径藏域名、漏协议补 `https://`）。
 
-`normalizeRepoUrl()`（`api.js:608`）比它更紧：只认 `https://github.com/<owner>/<repo>` 这一个形状 ——
+`normalizeRepoUrl()`（`api.js:713`）比它更紧：只认 `https://github.com/<owner>/<repo>` 这一个形状 ——
 https 且**不替人补协议**、主机必须正好是 `github.com`、路径正好两段（`/tree/main`、`?tab=readme` 一律拒），
 只会顺手吃掉末尾的 `/` 与 `.git`。仓库地址要写进索引、将来由机器人照着它发版，所以半截地址在
 来源那边可以宽容，在这边必须让用户自己补全。服务端同样会复核（`contrib/worker` 的 `normalizeRepoUrl()`
@@ -175,6 +175,29 @@ https 且**不替人补协议**、主机必须正好是 `github.com`、路径正
 留空会沿用索引里作者登记的那个地址。
 
 前端校验只是省一次上传，真正拦人的是服务端 —— 直接打接口的人不受前端约束。
+
+### 作者主页：两格选填，画出来一律标「未验证」
+
+面板 02「模块作者」下面还有两格**选填**：`作者酷安主页`（`https://www.coolapk.com/u/<4-12 位数字>`）
+与 `作者 GitHub 主页`（`https://github.com/<账号>`）。它们说的是「名字背后是谁」，
+与面板 03 那两格（包从哪来、源码在哪）不是一回事，所以跟着 `author` 走、每一枚一份。
+
+- 归一函数是 `normalizeCoolapkUserUrl()` / `normalizeGithubUserUrl()`（`api.js`，契约 §3）：
+  coolapk 只认 `/u/<digits>` 这一段路径（帖子链接、`m.` 子域、查询串都拒），GitHub 只认账号那一层
+  （仓库地址、`www.` 子域、`settings` 这类保留字、连字符位置不对都拒）。空着合法，**填错才红**，
+  红字由 `OPTIONAL_URL_FIELDS` 那张表统一判 —— 与入口闸门、载荷用的是同一批判据。
+- 写了更新版时，索引里已登记的值会预填进这两格（`inheritOrigin()`，只填空格、不覆盖已输入的字），
+  旁边挂一句「该模块已登记作者主页，留空将沿用」。这与服务端的规则是同一个意思：
+  **键缺席 = 沿用，键在且变了 = 只有模块归属人能改**（`author_locked`）。
+- 因为「空」表示「这次没说」，载荷里两格为空时 `buildManifest()` **直接不带这个键**；
+  代价是网页端没有「清空已有作者主页」的入口（只有归属人从别处改）。
+- 列表里那一行同时写「作者：…」与「上传人：…」：作者有主页就给链接，没有就只是名字（不画空壳）；
+  作者链接旁永远有一枚「未验证」标记 —— 这一格是上传人代填的声明，本站没有核实它属于谁。
+  上传人那侧不存链接，由索引里的 `coolapkUid` 现拼（4–12 位数字才拼得出来）。
+- 点开列表项还能看到「作者主页（由上传人填写，未验证）」一行原始读数；一个链接都没有时这一块整个不出现。
+
+前端同样是省一次上传：服务端按契约 §4 复核形状与归属，非法值回 `bad_author_coolapk_url` /
+`bad_author_github_url` / `author_locked`。
 
 ### 索引里的仓库证据：chip 与「源码证据」
 

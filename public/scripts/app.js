@@ -28,7 +28,10 @@ import {
   lookupCoolapkUser,
   isCoolapkUid,
   normalizeCoolapkUrl,
+  normalizeCoolapkUserUrl,
+  normalizeGithubUserUrl,
   normalizeRepoUrl,
+  uploaderCoolapkUrl,
   reportModule,
   fetchReportQueue,
   fetchMine,
@@ -60,9 +63,9 @@ const PREFILL_KEYS = ["id", "name", "version", "versionCode", "author", "descrip
  *                `uploader` / turnstile），**不进卡、不进签名集合**。
  * 把 UID 与署名当 per-card 存是旧语义的残留（那时一枚一个请求、各自带 UID）；现在一次动作
  * 只有一个人，队列里 A 枚的 UID 和 B 枚的 UID 必须同时消失，所以它们根本没有「哪一枚的」这件事。
- * 判据仍然只有一份：这九个字段的 DOM 入口都在同一张表单里。
+ * 判据仍然只有一份：这些字段的 DOM 入口都在同一张表单里。
  */
-const CARD_KEYS = [...PREFILL_KEYS, "source", "repoUrl"];
+const CARD_KEYS = [...PREFILL_KEYS, "source", "repoUrl", "authorCoolapkUrl", "authorGithubUrl"];
 const SHARED_KEYS = ["uploader", "coolapkUid"];
 /** 表单里全部可编辑字段（fieldEls 就按这张表建）。 */
 const FORM_KEYS = [...CARD_KEYS, ...SHARED_KEYS];
@@ -73,6 +76,16 @@ const FORM_KEYS = [...CARD_KEYS, ...SHARED_KEYS];
  */
 const CARD_REQUIRED_KEYS = ["id", "name", "version", "versionCode"];
 const REQUIRED_KEYS = [...CARD_REQUIRED_KEYS, ...SHARED_KEYS];
+
+/**
+ * 预填时先归一的两格（作者主页）。来源与源码仓库沿用旧行为：原样抄进输入框 ——
+ * 那两格本来就是用户自己粘的，抄原文更好对照；作者主页那两格抄的是**别人登记的值**，
+ * 脏数据原样落进输入框会变成用户从没写过的一条红字，所以只抄能归一的形状。
+ */
+const INHERIT_NORMALIZED = {
+  authorCoolapkUrl: normalizeCoolapkUserUrl,
+  authorGithubUrl: normalizeGithubUserUrl,
+};
 
 const state = {
   /* 队列：一次上传动作 = 一整套模块。每枚一张卡，卡上放着**它自己的**那份来源（包、整包哈希）
@@ -372,8 +385,9 @@ function applyView(card) {
   }
   $("#meta-src").textContent = card && card.zip && card.zip.prop ? "来自 module.prop" : "手动填写";
   termSnapshot = card && card.term ? card.term : [];
-  // 切卡时这句提示跟着这一枚的 ID 走：上一枚的仓库绑定不能挂到下一枚头上
+  // 切卡时这两句提示跟着这一枚的 ID 走：上一枚的仓库绑定 / 作者主页不能挂到下一枚头上
   paintRepoHint(card);
+  paintAuthorHint(card);
 }
 
 function renderTerm() {
@@ -979,9 +993,10 @@ async function intake(file) {
     state.zip.prop = prop;
     const { filled, kept } = applyProp(prop);
     commitView(); // 预填的结果写进了视图，而这一刻视图就是这一枚的：立刻归它，别等下一次切换
-    // module.prop 给出了 id：顺手把索引里登记过的来源 / 源码仓库补进还空着的那两格
+    // module.prop 给出了 id：顺手把索引里登记过的来源 / 源码仓库 / 作者主页补进还空着的那几格
     inheritOrigin(card);
     paintRepoHint(card);
+    paintAuthorHint(card);
     out.push([
       "found",
       `已读出 ${Object.keys(prop).length} 个字段，预填 ${filled} 项` +
@@ -1032,11 +1047,12 @@ function indexModuleFor(id) {
 }
 
 /**
- * 来源 / 源码仓库的继承（契约 §4 第 3 条）。
+ * 来源 / 源码仓库 / 作者主页的继承（契约 §4 第 3 条、§6 第 2 条）。
  *
- * 模块 ID 一确定，就从已加载的索引里找同一枚模块，把它登记过的 source / repoUrl 填进
- * **空着**的那一格 —— 用户已经写下的一个字都不动。这不是偷偷改表单：这两样本来就是
- * 作者自己在索引里登记过的那一份，每投一次新版都让他重抄一遍，只会抄出个新错。
+ * 模块 ID 一确定，就从已加载的索引里找同一枚模块，把它登记过的 source / repoUrl /
+ * authorCoolapkUrl / authorGithubUrl 填进**空着**的那一格 —— 用户已经写下的一个字都不动。
+ * 这不是偷偷改表单：这几样本来就是作者（或上传人）自己在索引里登记过的那一份，
+ * 每投一次新版都让他重抄一遍，只会抄出个新错。
  *
  * 返回值 = 有没有往里写过东西（调用方据此决定要不要重算签名/门禁）。
  */
@@ -1047,8 +1063,11 @@ function inheritOrigin(card) {
   const m = indexModuleFor(values.id);
   if (!m) return false;
   let changed = false;
-  for (const key of ["source", "repoUrl"]) {
-    const fromIndex = m[key];
+  for (const key of ["source", "repoUrl", "authorCoolapkUrl", "authorGithubUrl"]) {
+    // 作者主页两格只沿用**归一之后**的值：索引里那一串是外部数据，历史条目可能是脏的，
+    // 原样塞进输入框等于让用户替别人擦一个他从来没写过的红字。归一不出来就当没有这一格 ——
+    // 留空的行为与「索引里没登记」完全一样（服务端那边也确实是沿用旧值）。
+    const fromIndex = INHERIT_NORMALIZED[key] ? INHERIT_NORMALIZED[key](m[key]) : m[key];
     if (!fromIndex || values[key]) continue;
     card.values[key] = fromIndex;
     // 与 module.prop 预填同一档：带 data-auto 的格子，下一次预填可以覆盖；用户一动就不再算预填
@@ -1078,6 +1097,25 @@ function paintRepoHint(card) {
   const bound = Boolean(m && m.repoUrl);
   hint.hidden = !bound;
   hint.textContent = bound ? "该模块已绑定源码仓库，留空将沿用" : "";
+}
+
+/**
+ * 「该模块已登记作者主页，留空将沿用」—— 只在索引里那一枚真有作者主页时出现。
+ * 与仓库那句同一个道理：说的是这一格的行为（留空不等于这次要清掉），所以填上之后也不消失。
+ * 两格合成一句：它们说的是同一件事「作者的链接已经有登记」，逐格各来一句只会把面板撑长。
+ */
+function paintAuthorHint(card) {
+  const hint = $("#author-hint");
+  if (!hint) return;
+  if (card && card !== activeCard()) return;
+  const m = card ? indexModuleFor(cardValues(card).id) : null;
+  // 判据与 inheritOrigin 同一份归一函数：提示说「留空将沿用」，就得真有东西可沿用 ——
+  // 索引里那串归一不出来时，留空其实什么也不会发生，这时候再说这句就是假话。
+  const bound = Boolean(
+    m && (normalizeCoolapkUserUrl(m.authorCoolapkUrl) || normalizeGithubUserUrl(m.authorGithubUrl))
+  );
+  hint.hidden = !bound;
+  hint.textContent = bound ? "该模块已登记作者主页，留空将沿用" : "";
 }
 
 function bindFile() {
@@ -1156,6 +1194,10 @@ function cardGaps(card) {
   if (!v.source && !v.repoUrl) gaps.push("来源或源码仓库");
   if (v.source && !normalizeCoolapkUrl(v.source)) gaps.push("来源不是酷安站内链接");
   if (v.repoUrl && !normalizeRepoUrl(v.repoUrl)) gaps.push("源码仓库地址形状不对");
+  // 作者主页两格都选填（契约 §6 第 1 条）：空着合法，填了就必须是个人主页的形状。
+  // 与来源/仓库同一档 —— 形状不对在闸门清单里点名到枚，别等到服务端 400 才发现。
+  if (v.authorCoolapkUrl && !normalizeCoolapkUserUrl(v.authorCoolapkUrl)) gaps.push("作者酷安主页不是个人主页");
+  if (v.authorGithubUrl && !normalizeGithubUserUrl(v.authorGithubUrl)) gaps.push("作者 GitHub 主页不是个人主页");
   // 版本更新这一档的版本号必须**大于**已收录那一版：后端按同一套判据拦，前端先拦一道，
   // 理由是签名一次性 —— 抄完再被拒，那一串就白烧了。等号也算不行（同版重发没有意义）。
   const base = card.fromMine ? Number(card.fromMine.versionCode) || 0 : 0;
@@ -1848,11 +1890,12 @@ function bindCheck() {
   // 签名文本是 (id, 整包 sha256, nonce) 的派生值，id 一动就得重算 —— 与查重同一个触发点。
   // 另一个来源（包）在 intake 里到货，那里算完哈希自己再渲染一次。
   fieldEls.id.addEventListener("input", renderProof);
-  // 模块 ID 一确定，就知道这是不是索引里已经收录的那一枚：来源 / 源码仓库按索引补空位，
-  // 并把「留空将沿用」那句提示换到这一枚上。只填空格，用户已经写下的不动。
+  // 模块 ID 一确定，就知道这是不是索引里已经收录的那一枚：来源 / 源码仓库 / 作者主页按索引补空位，
+  // 并把「留空将沿用」那两句提示换到这一枚上。只填空格，用户已经写下的不动。
   fieldEls.id.addEventListener("input", () => {
     inheritOrigin(commitView());
     paintRepoHint(activeCard());
+    paintAuthorHint(activeCard());
   });
   fieldEls.coolapkUid.addEventListener("input", () => {
     // 「这个昵称属于上一串 UID」在按键那一刻就已经成立，等不到 debounce 后的核实结果
@@ -1963,6 +2006,16 @@ function gateItems() {
     const v = cardValues(c);
     return v.repoUrl && !normalizeRepoUrl(v.repoUrl);
   });
+  // 作者主页两格（契约 §6 第 1 条）：空着不是错，填错了才进这一格。与来源/仓库同一个判据形状，
+  // 但这两格没有「至少一项」的要求，所以不进 noOrigin —— 没填就是没填，不拦。
+  const badAuthorCoolapk = targets.filter((c) => {
+    const v = cardValues(c);
+    return v.authorCoolapkUrl && !normalizeCoolapkUserUrl(v.authorCoolapkUrl);
+  });
+  const badAuthorGithub = targets.filter((c) => {
+    const v = cardValues(c);
+    return v.authorGithubUrl && !normalizeGithubUserUrl(v.authorGithubUrl);
+  });
   // 二选一：两边都空是「还没填」，不是「填错了」—— 所以既不进 badSource，也不进 badRepo。
   const noOrigin = targets.filter((c) => {
     const v = cardValues(c);
@@ -2046,6 +2099,24 @@ function gateItems() {
           : targets.length
           ? "每一枚的「来源」都是酷安站内链接、「源码仓库」地址形状正确"
           : "填了「来源」就要是酷安站内链接，填了「源码仓库」就要是 https://github.com/<owner>/<repo> 形式",
+    },
+    {
+      // 两格都选填：**空着也通过**（这是与「来源或仓库」那一格的根本区别，别照着抄成必填）。
+      // 填了才校验，且校验的是「个人主页」而不是「帖子/仓库」—— 这一格存在的意义就是指向人。
+      ok: badAuthorCoolapk.length === 0 && badAuthorGithub.length === 0,
+      text:
+        badAuthorCoolapk.length || badAuthorGithub.length
+          ? [
+              badAuthorCoolapk.length
+                ? `作者酷安主页要写成 https://www.coolapk.com/u/<4-12 位数字>（帖子链接不算）：${namesOf(badAuthorCoolapk)}`
+                : "",
+              badAuthorGithub.length
+                ? `作者 GitHub 主页要写成 https://github.com/<用户名>（仓库地址不算）：${namesOf(badAuthorGithub)}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join("；")
+          : "作者主页两格选填：留空不拦，填了就得是作者的个人主页（酷安 /u/<UID> 或 github.com/<用户名>）",
     },
     {
       ok: !missingShared.includes("uploader"),
@@ -2268,10 +2339,26 @@ const FIELD_MSGS = {
   // 这里只管「填了但形状不对」。
   source: (v) => (v ? "必须是酷安站内链接，如 https://www.coolapk.com/feed/65432100" : ""),
   repoUrl: (v) => (v ? "必须是 https://github.com/<owner>/<repo> 形式" : ""),
+  // 作者主页两格（契约 §6 第 1 条）：空着合法，所以文案只在「填了」时才有意义。
+  // 说的是「个人主页」而不是「链接」—— 这两格最常见的错法就是把帖子或仓库地址粘进来。
+  authorCoolapkUrl: (v) => (v ? "必须是作者的个人主页，如 https://www.coolapk.com/u/123456" : ""),
+  authorGithubUrl: (v) => (v ? "必须是作者的个人主页，如 https://github.com/octocat" : ""),
   uploader: (v) => (v ? "" : "这一项没取到昵称，请自己填一个署名"),
   id: (v) => (v ? "" : "请填写模块 ID"),
   name: (v) => (v ? "" : "请填写模块名称"),
   version: (v) => (v ? "" : "请填写版本字符串"),
+};
+
+/**
+ * 表单里「选填 + 形状校验」的那几格：值就是归一函数本身。
+ * 判据只写这一份 —— 红字、闸门清单、载荷三处都从这里取，谁单独抄一份 `v ? ... : ...` 就会漂成
+ * 「红字说行、闸门说不行」。作者主页两格与来源/仓库同一档：空着合法，填错才红。
+ */
+const OPTIONAL_URL_FIELDS = {
+  source: normalizeCoolapkUrl,
+  repoUrl: normalizeRepoUrl,
+  authorCoolapkUrl: normalizeCoolapkUserUrl,
+  authorGithubUrl: normalizeGithubUserUrl,
 };
 
 function paintFieldErrors() {
@@ -2288,14 +2375,13 @@ function paintFieldErrors() {
     // 只换文案，可见性交给 .field.is-bad 的 CSS：内联 display 会把这套规则盖掉
     if (err && FIELD_MSGS[key]) err.textContent = FIELD_MSGS[key](value);
   }
-  // 二选一的两个格子单独判：空着不算错（另一边可能填了），填了但形状不对才挂红。
-  for (const key of ["source", "repoUrl"]) {
+  // 这四格单独判：空着不算错（二选一里另一边可能填了；作者主页本来就可选），填了但形状不对才挂红。
+  for (const [key, normalize] of Object.entries(OPTIONAL_URL_FIELDS)) {
     const el = fieldEls[key];
     if (!el) continue;
     const value = el.value.trim();
-    const ok = key === "source" ? normalizeCoolapkUrl(value) : normalizeRepoUrl(value);
     const field = el.closest(".field");
-    field.classList.toggle("is-bad", Boolean(value) && !ok);
+    field.classList.toggle("is-bad", Boolean(value) && !normalize(value));
     const err = field.querySelector(`[data-err="${key}"]`);
     if (err && FIELD_MSGS[key]) err.textContent = FIELD_MSGS[key](value);
   }
@@ -3825,6 +3911,11 @@ function batchPayload() {
         // 源码仓库同样先过一遍形状归一（去 .git / 末尾斜杠），原样发出没归一的值只是把
         // 「这里看着对、后端说不像」的差异推给别人；空串照发。
         repoUrl: normalizeRepoUrl(v.repoUrl) || v.repoUrl,
+        // 作者主页两格（契约 §2）：同一条写法 —— 先归一，归一不成原样发。原样发的意思是
+        // 「让服务端按 bad_author_* 明确拒掉」，而不是把用户的错悄悄改成「没填」；
+        // 空串留给 buildManifest 那一步省略键（空=没说，不等于要清空）。
+        authorCoolapkUrl: normalizeCoolapkUserUrl(v.authorCoolapkUrl) || v.authorCoolapkUrl,
+        authorGithubUrl: normalizeGithubUserUrl(v.authorGithubUrl) || v.authorGithubUrl,
         // 闸前移之后这一枚的声明值就是签名前缀的输入之一（§16 第 1 句），所以它**必须有**：
         // 缺任何一枚的 sha256，api.js 那一层直接不发这个请求（发出去也必然是 manifest_invalid）。
         // 落盘口径不在这里 —— 服务端逐枚实算，公开记录里只落实算那一份。
@@ -4408,6 +4499,94 @@ function repoEvidence(m) {
   return box;
 }
 
+/**
+ * 作者主页：先按契约 §3 再归一一次，形状不对就是空串。
+ * 索引里那一串是外部数据 —— 这里绝不允许「原样塞进 href」，只认归一之后的值。
+ */
+function authorHomepage(m) {
+  return normalizeCoolapkUserUrl(m.authorCoolapkUrl) || normalizeGithubUserUrl(m.authorGithubUrl) || "";
+}
+
+/**
+ * 列表行的两个身份（契约 §6 第 3 条）：「作者：<name>」与「上传人：<name>」并排，名字有主页就可点。
+ *
+ * 两侧的链接都不是索引里现成的一串：作者那侧来自上传人填的声明（所以标「未验证」），
+ * 上传人那侧由 `coolapkUid` 现拼（契约 §2：这一格不落库）。哪一侧真没东西就不画那一侧 ——
+ * 空壳会让人以为「这个人的主页丢了」。
+ */
+function whoRow(m) {
+  const authorName = String(m.author || "").trim();
+  const authorRaw = authorHomepage(m);
+  const authorLink = authorRaw ? safeUrl(authorRaw) : "";
+  const uploaderName = String(m.uploader || "").trim();
+  const uploaderLink = safeUrl(uploaderCoolapkUrl(m.coolapkUid));
+  if (!authorName && !authorLink && !uploaderName && !uploaderLink) return null;
+
+  const row = node("div", "mod__who");
+  // name 与 link 是两件事：有链接没名字时，链接文字说明它指向哪，不编一个假名字；
+  // 有名字没链接时就是纯文本 —— 「可点」只在真有主页时发生。
+  const side = (label, name, link, tag, tagTitle) => {
+    if (!name && !link) return null;
+    const item = node("span", "mod__who-item");
+    item.append(node("span", "mod__who-k", `${label}：`));
+    const text = name || (link.includes("github.com") ? "GitHub 主页" : "酷安主页");
+    if (link) {
+      const a = node("a", "mod__who-a", text);
+      a.href = link;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      item.append(a);
+    } else {
+      item.append(node("span", "mod__who-v", text));
+    }
+    if (tag) {
+      const badge = node("span", "mod__who-tag", tag);
+      if (tagTitle) badge.title = tagTitle;
+      item.append(badge);
+    }
+    return item;
+  };
+  const authorItem = side(
+    "作者",
+    authorName,
+    authorLink,
+    authorLink ? "未验证" : "",
+    "作者主页由上传人填写，本站没有核实它属于谁"
+  );
+  const uploaderItem = side("上传人", uploaderName, uploaderLink, "", "");
+  if (authorItem) row.append(authorItem);
+  if (uploaderItem) row.append(uploaderItem);
+  return row;
+}
+
+/**
+ * 详情/证据区的那一行「作者主页（契约 §6 第 4 条）」。
+ * 只在真有链接时画：没有链接时作者名已经在那行署名里了，这里再来一个空壳只会看着像坏链。
+ * 折叠起来、样式复用源码证据那一套 —— 它是「要核的人才点开」的读数，不是第二条视觉主轴。
+ */
+function authorEvidence(m) {
+  const links = [];
+  const cool = safeUrl(normalizeCoolapkUserUrl(m.authorCoolapkUrl));
+  const gh = safeUrl(normalizeGithubUserUrl(m.authorGithubUrl));
+  if (cool) links.push(["酷安", cool]);
+  if (gh) links.push(["GitHub", gh]);
+  if (!links.length) return null;
+  const box = node("details", "mod__repo");
+  // 这句话是这一格的全部意义：链接是上传人填的声明，不是本站核实过的身份。
+  box.append(node("summary", "mod__repo-sum", "作者主页（由上传人填写，未验证）"));
+  for (const [key, link] of links) {
+    const row = node("div", "mod__repo-row");
+    row.append(node("span", "mod__repo-k", key));
+    const a = node("a", "mod__repo-a", link.replace(/^https:\/\//, ""));
+    a.href = link;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    row.append(a);
+    box.append(row);
+  }
+  return box;
+}
+
 function modRow(m, q) {
   const li = node("li", "mod");
   const hd = node("div", "mod__hd");
@@ -4426,6 +4605,11 @@ function modRow(m, q) {
     li.append(ds);
   }
 
+  // 署名那一行独立于读数那一行：作者与上传人是两个身份（契约 §1），塞进 mod__ft 的
+  // 那串等宽读数里会读成「又一个数字」，而这两个名字是有链接、可以点过去核的。
+  const who = whoRow(m);
+  if (who) li.append(who);
+
   const ft = node("div", "mod__ft");
   const latest = m.latest;
   const bits = [];
@@ -4433,7 +4617,6 @@ function modRow(m, q) {
   const size = Number(latest && latest.size);
   if (latest && latest.size !== "" && Number.isFinite(size) && size > 0) bits.push(fmtBytes(size));
   if (latest && latest.time) bits.push(fmtDate(Number(latest.time)));
-  if (m.author) bits.push(`by ${m.author}`);
   for (const text of bits) ft.append(node("span", null, text));
 
   const link = latest && safeUrl(latest.zipUrl);
@@ -4451,6 +4634,9 @@ function modRow(m, q) {
     ft.append(rep);
   }
   li.append(ft);
+  // 作者主页（有链接时才有）与源码证据各是一块：一个说的是「这个人是谁」，一个说的是「源码在哪」。
+  const authEv = authorEvidence(m);
+  if (authEv) li.append(authEv);
   li.append(repoEvidence(m));
   return li;
 }
@@ -4467,12 +4653,13 @@ async function loadIndex() {
     state.indexError =
       err instanceof BackendError ? err.message : "索引读取失败，可能是网络或格式问题。";
   }
-  // 索引晚到也算数：当前那张卡若已经填了 ID，空着的来源 / 源码仓库这时补上，
-  // 「留空将沿用」那句提示也才有依据（它读的就是 state.index）。
+  // 索引晚到也算数：当前那张卡若已经填了 ID，空着的来源 / 源码仓库 / 作者主页这时补上，
+  // 「留空将沿用」那两句提示也才有依据（它们读的就是 state.index）。
   const active = activeCard();
   if (active) {
     inheritOrigin(active);
     paintRepoHint(active);
+    paintAuthorHint(active);
   }
   renderIndex();
   // 索引是签名的来源之一：它晚到一步，04 那一屏上「算不出签名」那句就得当场改口。
