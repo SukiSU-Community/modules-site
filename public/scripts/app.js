@@ -28,6 +28,7 @@ import {
   lookupCoolapkUser,
   isCoolapkUid,
   normalizeCoolapkUrl,
+  normalizeRepoUrl,
   reportModule,
   fetchReportQueue,
   fetchMine,
@@ -61,12 +62,16 @@ const PREFILL_KEYS = ["id", "name", "version", "versionCode", "author", "descrip
  * 只有一个人，队列里 A 枚的 UID 和 B 枚的 UID 必须同时消失，所以它们根本没有「哪一枚的」这件事。
  * 判据仍然只有一份：这九个字段的 DOM 入口都在同一张表单里。
  */
-const CARD_KEYS = [...PREFILL_KEYS, "source"];
+const CARD_KEYS = [...PREFILL_KEYS, "source", "repoUrl"];
 const SHARED_KEYS = ["uploader", "coolapkUid"];
 /** 表单里全部可编辑字段（fieldEls 就按这张表建）。 */
 const FORM_KEYS = [...CARD_KEYS, ...SHARED_KEYS];
-/** 每一枚自己必须齐的那些（ uploader / UID 是共享的，由 gateItems 单独一格判）。 */
-const CARD_REQUIRED_KEYS = ["id", "name", "version", "versionCode", "source"];
+/**
+ * 每一枚自己必须齐的那些（ uploader / UID 是共享的，由 gateItems 单独一格判）。
+ * 「来源」与「源码仓库」不在这一张表里：它们是**二选一**（至少填一项），
+ * 单看某一格为空就报错会把另一边填了的人拦下来 —— 那条判据在 cardGaps 里单独写。
+ */
+const CARD_REQUIRED_KEYS = ["id", "name", "version", "versionCode"];
 const REQUIRED_KEYS = [...CARD_REQUIRED_KEYS, ...SHARED_KEYS];
 
 const state = {
@@ -367,6 +372,8 @@ function applyView(card) {
   }
   $("#meta-src").textContent = card && card.zip && card.zip.prop ? "来自 module.prop" : "手动填写";
   termSnapshot = card && card.term ? card.term : [];
+  // 切卡时这句提示跟着这一枚的 ID 走：上一枚的仓库绑定不能挂到下一枚头上
+  paintRepoHint(card);
 }
 
 function renderTerm() {
@@ -972,6 +979,9 @@ async function intake(file) {
     state.zip.prop = prop;
     const { filled, kept } = applyProp(prop);
     commitView(); // 预填的结果写进了视图，而这一刻视图就是这一枚的：立刻归它，别等下一次切换
+    // module.prop 给出了 id：顺手把索引里登记过的来源 / 源码仓库补进还空着的那两格
+    inheritOrigin(card);
+    paintRepoHint(card);
     out.push([
       "found",
       `已读出 ${Object.keys(prop).length} 个字段，预填 ${filled} 项` +
@@ -1013,6 +1023,61 @@ function applyProp(prop) {
     filled++;
   }
   return { filled, kept };
+}
+
+/** 已加载的公开索引里那个模块（索引还没到 / 没有这一枚就是 null）。 */
+function indexModuleFor(id) {
+  if (!state.index || !id) return null;
+  return state.index.modules.find((m) => m.id === id) || null;
+}
+
+/**
+ * 来源 / 源码仓库的继承（契约 §4 第 3 条）。
+ *
+ * 模块 ID 一确定，就从已加载的索引里找同一枚模块，把它登记过的 source / repoUrl 填进
+ * **空着**的那一格 —— 用户已经写下的一个字都不动。这不是偷偷改表单：这两样本来就是
+ * 作者自己在索引里登记过的那一份，每投一次新版都让他重抄一遍，只会抄出个新错。
+ *
+ * 返回值 = 有没有往里写过东西（调用方据此决定要不要重算签名/门禁）。
+ */
+function inheritOrigin(card) {
+  if (!card) return false;
+  const active = card === activeCard();
+  const values = active ? cardValues(card) : card.values;
+  const m = indexModuleFor(values.id);
+  if (!m) return false;
+  let changed = false;
+  for (const key of ["source", "repoUrl"]) {
+    const fromIndex = m[key];
+    if (!fromIndex || values[key]) continue;
+    card.values[key] = fromIndex;
+    // 与 module.prop 预填同一档：带 data-auto 的格子，下一次预填可以覆盖；用户一动就不再算预填
+    card.auto[key] = true;
+    if (active) {
+      const el = fieldEls[key];
+      if (el) {
+        el.value = fromIndex;
+        el.dataset.auto = "1";
+        el.closest(".field").classList.add("is-pre");
+      }
+    }
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * 「该模块已绑定源码仓库，留空将沿用」—— 只在这一枚真有仓库时出现。
+ * 说的是这一格的行为（清空不等于这次没有仓库），所以填上之后也不消失。
+ */
+function paintRepoHint(card) {
+  const hint = $("#repo-hint");
+  if (!hint) return;
+  if (card && card !== activeCard()) return;
+  const m = card ? indexModuleFor(cardValues(card).id) : null;
+  const bound = Boolean(m && m.repoUrl);
+  hint.hidden = !bound;
+  hint.textContent = bound ? "该模块已绑定源码仓库，留空将沿用" : "";
 }
 
 function bindFile() {
@@ -1086,7 +1151,11 @@ function cardGaps(card) {
   const gaps = [];
   for (const key of CARD_REQUIRED_KEYS) if (!v[key]) gaps.push(FIELD_NAMES[key]);
   if (v.versionCode && !/^\d+$/.test(v.versionCode)) gaps.push("版本号不是整数");
-  if (v.source && !normalizeCoolapkUrl(v.source)) gaps.push("出处不是酷安站内链接");
+  // 「来源」与「源码仓库」至少一项（契约 §1）。两者都空才报一次，别写成两行「来源没填」「仓库没填」——
+  // 二选一的规则里，单格为空本身不是错。
+  if (!v.source && !v.repoUrl) gaps.push("来源或源码仓库");
+  if (v.source && !normalizeCoolapkUrl(v.source)) gaps.push("来源不是酷安站内链接");
+  if (v.repoUrl && !normalizeRepoUrl(v.repoUrl)) gaps.push("源码仓库地址形状不对");
   // 版本更新这一档的版本号必须**大于**已收录那一版：后端按同一套判据拦，前端先拦一道，
   // 理由是签名一次性 —— 抄完再被拒，那一串就白烧了。等号也算不行（同版重发没有意义）。
   const base = card.fromMine ? Number(card.fromMine.versionCode) || 0 : 0;
@@ -1109,7 +1178,8 @@ const FIELD_NAMES = {
   name: "名称",
   version: "版本字符串",
   versionCode: "版本号",
-  source: "模块出处",
+  source: "来源",
+  repoUrl: "源码仓库",
 };
 
 /** 图标墙上那一枚 zip 的图形：24×24 的压缩包轮廓，全部由内联 SVG 画（不引图标库）。 */
@@ -1778,6 +1848,12 @@ function bindCheck() {
   // 签名文本是 (id, 整包 sha256, nonce) 的派生值，id 一动就得重算 —— 与查重同一个触发点。
   // 另一个来源（包）在 intake 里到货，那里算完哈希自己再渲染一次。
   fieldEls.id.addEventListener("input", renderProof);
+  // 模块 ID 一确定，就知道这是不是索引里已经收录的那一枚：来源 / 源码仓库按索引补空位，
+  // 并把「留空将沿用」那句提示换到这一枚上。只填空格，用户已经写下的不动。
+  fieldEls.id.addEventListener("input", () => {
+    inheritOrigin(commitView());
+    paintRepoHint(activeCard());
+  });
   fieldEls.coolapkUid.addEventListener("input", () => {
     // 「这个昵称属于上一串 UID」在按键那一刻就已经成立，等不到 debounce 后的核实结果
     syncUploaderField();
@@ -1883,6 +1959,15 @@ function gateItems() {
     const v = cardValues(c);
     return v.source && !normalizeCoolapkUrl(v.source);
   });
+  const badRepo = targets.filter((c) => {
+    const v = cardValues(c);
+    return v.repoUrl && !normalizeRepoUrl(v.repoUrl);
+  });
+  // 二选一：两边都空是「还没填」，不是「填错了」—— 所以既不进 badSource，也不进 badRepo。
+  const noOrigin = targets.filter((c) => {
+    const v = cardValues(c);
+    return !v.source && !v.repoUrl;
+  });
   const incomplete = targets.filter((c) => cardGaps(c).length > 0);
   const metaKeys = ["id", "name", "version", "versionCode"];
   // 这一整套的 (id, 整包 sha256) 能不能算出规范串 —— `canonicalProofSet` 拒「同一个模块 id 出现
@@ -1927,7 +2012,7 @@ function gateItems() {
     {
       ok: targets.length > 0 && incomplete.length === 0,
       text: incomplete.length
-        ? `这一套里有 ${incomplete.length} 枚还没齐：${namesOf(incomplete)} —— 每枚的模块 ID / 名称 / 版本 / 版本号 / 出处都要填，整包哈希也要算出来`
+        ? `这一套里有 ${incomplete.length} 枚还没齐：${namesOf(incomplete)} —— 每枚的模块 ID / 名称 / 版本 / 版本号 都要填，「来源」或「源码仓库」至少一项，整包哈希也要算出来`
         : targets.length
         ? `这一套 ${targets.length} 枚的 zip 都选了、根目录都含 module.prop、元数据都齐了`
         : "还没选包：一次上传可以只传一枚，也可以一整套一起传，先把包拖进来",
@@ -1939,10 +2024,28 @@ function gateItems() {
         : "每一枚的模块 ID / 名称 / 版本 / 版本号 齐全（版本号为整数）",
     },
     {
-      ok: badSource.length === 0 && targets.length > 0,
-      text: badSource.length
-        ? `出处必须是酷安站内链接：${namesOf(badSource)}`
-        : "每一枚的模块出处都是酷安站内链接",
+      ok: noOrigin.length === 0 && targets.length > 0,
+      text: noOrigin.length
+        ? `请至少填写「来源」或「源码仓库」之一：${namesOf(noOrigin)}`
+        : targets.length
+        ? "每一枚都填了「来源」或「源码仓库」至少一项"
+        : "选好包之后，「来源」与「源码仓库」至少填一项（两项都填也可以：填了仓库才能自动跟随新版）",
+    },
+    {
+      ok: badSource.length === 0 && badRepo.length === 0 && targets.length > 0,
+      text:
+        badSource.length || badRepo.length
+          ? [
+              badSource.length ? `来源必须是酷安站内链接：${namesOf(badSource)}` : "",
+              badRepo.length
+                ? `源码仓库必须是 https://github.com/<owner>/<repo> 形式：${namesOf(badRepo)}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join("；")
+          : targets.length
+          ? "每一枚的「来源」都是酷安站内链接、「源码仓库」地址形状正确"
+          : "填了「来源」就要是酷安站内链接，填了「源码仓库」就要是 https://github.com/<owner>/<repo> 形式",
     },
     {
       ok: !missingShared.includes("uploader"),
@@ -2161,8 +2264,10 @@ function refreshGate() {
 const FIELD_MSGS = {
   versionCode: (v) => (v ? "必须是整数" : "请填写版本号（整数，来自 module.prop）"),
   coolapkUid: (v) => (v ? "UID 应是 4-12 位纯数字，不带 https 和 /" : "请填写你的酷安 UID"),
-  source: (v) =>
-    v ? "必须是酷安站内链接，如 https://www.coolapk.com/feed/65432100" : "请填写模块出处",
+  // 「来源」与「源码仓库」二选一：空着不在这里报（那是下面 #src-err 那一行的事），
+  // 这里只管「填了但形状不对」。
+  source: (v) => (v ? "必须是酷安站内链接，如 https://www.coolapk.com/feed/65432100" : ""),
+  repoUrl: (v) => (v ? "必须是 https://github.com/<owner>/<repo> 形式" : ""),
   uploader: (v) => (v ? "" : "这一项没取到昵称，请自己填一个署名"),
   id: (v) => (v ? "" : "请填写模块 ID"),
   name: (v) => (v ? "" : "请填写模块名称"),
@@ -2178,11 +2283,26 @@ function paintFieldErrors() {
     let bad = !value;
     if (value && key === "versionCode") bad = !/^\d+$/.test(value);
     if (value && key === "coolapkUid") bad = !isCoolapkUid(value);
-    if (value && key === "source") bad = !normalizeCoolapkUrl(value);
     field.classList.toggle("is-bad", bad);
     const err = field.querySelector(`[data-err="${key}"]`);
     // 只换文案，可见性交给 .field.is-bad 的 CSS：内联 display 会把这套规则盖掉
     if (err && FIELD_MSGS[key]) err.textContent = FIELD_MSGS[key](value);
+  }
+  // 二选一的两个格子单独判：空着不算错（另一边可能填了），填了但形状不对才挂红。
+  for (const key of ["source", "repoUrl"]) {
+    const el = fieldEls[key];
+    if (!el) continue;
+    const value = el.value.trim();
+    const ok = key === "source" ? normalizeCoolapkUrl(value) : normalizeRepoUrl(value);
+    const field = el.closest(".field");
+    field.classList.toggle("is-bad", Boolean(value) && !ok);
+    const err = field.querySelector(`[data-err="${key}"]`);
+    if (err && FIELD_MSGS[key]) err.textContent = FIELD_MSGS[key](value);
+  }
+  // 两条都没填：这句话不属于任何一个字段，所以单独一行（.field__err.is-on 才显示）。
+  const pairErr = $("#src-err");
+  if (pairErr) {
+    pairErr.classList.toggle("is-on", !fieldValue("source") && !fieldValue("repoUrl"));
   }
 }
 
@@ -2836,7 +2956,7 @@ function paintMine() {
     else if (mine.degraded) note.textContent = "这次没读到公开索引，清单可能不全 —— 不影响你继续上传。";
     else if (mine.rows.length)
       note.textContent =
-        "点「上传更新版」会把 ID / 名称 / 作者 / 出处填好、版本号预填成当前值 +1，接着让你选包。";
+        "点「上传更新版」会把 ID / 名称 / 作者 / 来源填好、版本号预填成当前值 +1，接着让你选包。";
     else note.textContent = "";
   }
 }
@@ -2868,7 +2988,7 @@ function mineRow(row) {
   go.type = "button";
   go.setAttribute("aria-label", `给 ${row.id} 上传更新版`);
   go.addEventListener("click", () => {
-    // 复用上传页那条「为已收录模块挑新版」的路：ID / 名称 / 作者 / 出处预填、版本号 +1。
+    // 复用上传页那条「为已收录模块挑新版」的路：ID / 名称 / 作者 / 来源预填、版本号 +1。
     prefillFromMine(row);
     if (location.hash !== "#/submit") history.replaceState(null, "", "#/submit");
     renderRoute();
@@ -2934,9 +3054,12 @@ function prefillFromMine(row) {
     name: row.name || "",
     author: row.author || "",
     source: row.source || "",
+    repoUrl: row.repoUrl || "",
     version: "",
     versionCode: base ? String(base + 1) : "",
   };
+  // 这一枚在索引里登记过源码仓库的话，这张卡也带上 —— 一键更新这条路同样不该让人重抄
+  inheritOrigin(card);
   state.cards.push(card);
   selectCardNow(card.key);
   renderQueue();
@@ -3564,7 +3687,13 @@ function openConfirm() {
     head.append(node("b", null, `第 ${i + 1} 枚 · ${v.id || "（没 ID）"}`));
     head.append(node("span", null, `${v.name || "—"} · ${v.version || "—"} · code ${v.versionCode || "—"} · ${card.file ? fmtBytes(card.file.size) : "—"}`));
     block.append(head);
-    block.append(node("div", "warn__mod-sub", `文件 ${card.file ? card.file.name : "—"} · 出处 ${v.source || "—"}`));
+    block.append(
+      node(
+        "div",
+        "warn__mod-sub",
+        `文件 ${card.file ? card.file.name : "—"} · 来源 ${v.source || "—"} · 仓库 ${v.repoUrl || "—"}`
+      )
+    );
     block.append(node("div", "warn__mod-sub", `整包 sha256 ${card.zipSha ? `${card.zipSha.slice(0, 16)}…` : "还没算出来"}`));
     sum.append(block);
   }
@@ -3693,6 +3822,9 @@ function batchPayload() {
         author: v.author,
         description: v.description,
         source: normalizeCoolapkUrl(v.source) || v.source,
+        // 源码仓库同样先过一遍形状归一（去 .git / 末尾斜杠），原样发出没归一的值只是把
+        // 「这里看着对、后端说不像」的差异推给别人；空串照发。
+        repoUrl: normalizeRepoUrl(v.repoUrl) || v.repoUrl,
         // 闸前移之后这一枚的声明值就是签名前缀的输入之一（§16 第 1 句），所以它**必须有**：
         // 缺任何一枚的 sha256，api.js 那一层直接不发这个请求（发出去也必然是 manifest_invalid）。
         // 落盘口径不在这里 —— 服务端逐枚实算，公开记录里只落实算那一份。
@@ -4097,6 +4229,9 @@ function resetForm() {
   renderProof(); // nonce 清空后这一行跟着收起，别留一串还能提交的旧签名在屏幕上
   syncUploaderField(); // 顺手把 readOnly / 标签 / 说明一起还原，别留一个锁着的空框
   $$(".field").forEach((f) => f.classList.remove("is-bad", "is-pre"));
+  // 二选一那句错误不属于任何一格，清不了 .field —— 单独摘掉
+  const pairErr = $("#src-err");
+  if (pairErr) pairErr.classList.remove("is-on");
   // 上传成功后再传一枚：确认层那一枚勾要复原成未勾，别把上一轮的「我已知晓」带进下一次。
   // （Escape 关层不清勾，所以复原只能放在这里 —— 那是「还没传成」与「传成了」的分界。）
   const ack = $("#ck-confirm");
@@ -4215,6 +4350,64 @@ function renderIndex() {
   for (const m of shown) list.append(modRow(m, q));
 }
 
+/**
+ * 列表里这一枚的仓库状态（契约 §4 第 4 条）：单状态，只有登记了 repoUrl 才有话可说。
+ * 两档灰字都不是「错误」，是「这条证据现在不成立」—— 所以用 idle 而不是 bad。
+ */
+function repoChip(m) {
+  if (!m.repoUrl) return null;
+  if (!m.repoVerified) return node("span", "chip chip--idle", "源码校验失效");
+  if (!m.repoCoversLatest) return node("span", "chip chip--idle", "最新版未覆盖");
+  return node("span", "chip chip--ok", m.repoLicense ? "✓ 开源" : "✓ 公开源码");
+}
+
+function repoFact(key, value) {
+  const row = node("div", "mod__repo-row");
+  row.append(node("span", "mod__repo-k", key));
+  row.append(node("span", "mod__repo-v", value));
+  return row;
+}
+
+/**
+ * 详情证据块（契约 §4 第 5 条）：仓库、LICENSE、命中的 tag（或 checksums 分支）、
+ * digest 前 12 位、最近校验时间、复验状态。
+ * 索引里没有的格子整行不画 —— 这里每一行都是可选的，「没采到」写满一屏反而看不出哪条要紧。
+ */
+function repoEvidence(m) {
+  const box = node("details", "mod__repo");
+  box.append(node("summary", "mod__repo-sum", "源码证据"));
+  if (!m.repoUrl) {
+    box.append(node("p", "mod__repo-none", "作者未提供公开源码"));
+    return box;
+  }
+  const latest = m.latest || {};
+  // 索引里这一格只是「读出来的字符串」：渲染前按契约再归一一次，
+  // 形状不对就只当文本显示、不给它变成可点链接（绝不把索引里的任意串直接塞进 href）。
+  const norm = normalizeRepoUrl(m.repoUrl);
+  const link = norm ? safeUrl(norm) : "";
+  const row = node("div", "mod__repo-row");
+  row.append(node("span", "mod__repo-k", "仓库"));
+  if (link) {
+    const a = node("a", "mod__repo-a", norm.replace(/^https:\/\//, ""));
+    a.href = link;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    row.append(a);
+  } else {
+    row.append(node("span", "mod__repo-v", m.repoUrl));
+  }
+  box.append(row);
+  if (m.repoLicense) box.append(repoFact("LICENSE", m.repoLicense));
+  const tag = typeof latest.repoTag === "string" ? latest.repoTag : "";
+  const hex = String(latest.repoDigest || "").replace(/^sha256:/i, "");
+  if (tag) box.append(repoFact("命中 Release", tag));
+  else if (hex) box.append(repoFact("命中来源", "checksums 分支"));
+  if (hex) box.append(repoFact("包体 digest", `sha256:${hex.slice(0, 12)}`));
+  if (m.repoCheckedAt) box.append(repoFact("最近校验", fmtDate(Number(m.repoCheckedAt))));
+  box.append(repoFact("复验状态", m.repoVerified ? "通过（包体与仓库一致）" : "未通过（源码校验失效）"));
+  return box;
+}
+
 function modRow(m, q) {
   const li = node("li", "mod");
   const hd = node("div", "mod__hd");
@@ -4223,6 +4416,8 @@ function modRow(m, q) {
   highlight(idEl, m.id, q);
   hd.append(idEl);
   if (m.verified) hd.append(node("span", "chip chip--ok", "verified"));
+  const rchip = repoChip(m);
+  if (rchip) hd.append(rchip);
   li.append(hd);
 
   if (m.description) {
@@ -4256,6 +4451,7 @@ function modRow(m, q) {
     ft.append(rep);
   }
   li.append(ft);
+  li.append(repoEvidence(m));
   return li;
 }
 
@@ -4270,6 +4466,13 @@ async function loadIndex() {
   } catch (err) {
     state.indexError =
       err instanceof BackendError ? err.message : "索引读取失败，可能是网络或格式问题。";
+  }
+  // 索引晚到也算数：当前那张卡若已经填了 ID，空着的来源 / 源码仓库这时补上，
+  // 「留空将沿用」那句提示也才有依据（它读的就是 state.index）。
+  const active = activeCard();
+  if (active) {
+    inheritOrigin(active);
+    paintRepoHint(active);
   }
   renderIndex();
   // 索引是签名的来源之一：它晚到一步，04 那一屏上「算不出签名」那句就得当场改口。
@@ -4894,7 +5097,7 @@ function factsLayer(item, ev) {
     ["包在哪", pkg && (pkg.zipUrl || pkg.assetName) ? pkg.assetName || pkg.zipUrl : "没有固化过，包体位置只能从索引历史里查", pkg && pkg.zipUrl ? pkg.zipUrl : ""],
     ["大小", pkg && pkg.size !== undefined && pkg.size !== null ? `${pkg.size} B` : "没采到", ""],
     ["上传时刻", pkg && pkg.submittedAt ? String(pkg.submittedAt) : "没采到", ""],
-    ["模块出处", (pkg && pkg.source) || "没采到", pkg && pkg.source ? String(pkg.source) : ""],
+    ["模块来源", (pkg && pkg.source) || "没采到", pkg && pkg.source ? String(pkg.source) : ""],
   ];
   box.append(kvRow("ec__kv--2", pairs));
   if (!ev) box.append(node("p", "ec__miss", "这一条没有固化过的证据文件：页面上这些格子只剩公示自己写的那几个选择器。"));

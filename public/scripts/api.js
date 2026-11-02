@@ -220,7 +220,7 @@ export function submitContribution(batch, { onProgress } = {}) {
   });
 }
 
-/** §17.3 那份 JSON：`{ version:'batch-v1', modules:[{ id, sha256, name, version, versionCode, author, description, source }] }`。 */
+/** §17.3 那份 JSON：`{ version:'batch-v1', modules:[{ id, sha256, name, version, versionCode, author, description, source, repoUrl }] }`。 */
 function buildManifest(modules) {
   return JSON.stringify({
     version: "batch-v1",
@@ -233,6 +233,8 @@ function buildManifest(modules) {
       author: String(m.author || ""),
       description: String(m.description || ""),
       source: String(m.source || ""),
+      // 空串照发：契约 §1 要求「没填就省略键」是索引侧的写法，投稿清单这里固定字段更好对账
+      repoUrl: String(m.repoUrl || "").trim(),
     })),
   });
 }
@@ -337,6 +339,14 @@ export const SUBMIT_ERROR_TEXT = {
   owner_unknown: {
     owner: "us",
     text: "服务端查不出这个模块归谁（归属台账读不到，翻提交历史对账也没成），于是 fail-closed 整单拒了 —— **这不是你的包的问题**：包、字段、签名都不用动，稍后再试一次；一直这样就按这一屏的内容找站点维护者。它和「不是你的模块」是两件事，别为了绕过它去换 UID。",
+  },
+  bad_repo_url: {
+    owner: "you",
+    text: "「源码仓库」那一格不是合法形状。只收 https://github.com/<owner>/<repo>（正好两段，不带 /tree、/releases 之类的尾巴，也不替你补协议）。把地址改成这个形状再来一次就行：来源那一格照旧、包不用重选，这一发在收包之前就被拒了。",
+  },
+  repo_locked: {
+    owner: "you",
+    text: "「源码仓库」只能由模块的归属人设置或修改 —— 你不是这一枚的归属人，所以整单被拒了。两条路：① 仓库那一格留空（空着就沿用索引里作者已经登记的那个地址，不影响提交）；② 用当初首发这一枚的账号来发。别为了绕过它换 UID：归属判的就是首发那次记下的号。",
   },
   no_evidence_cited: {
     owner: "you",
@@ -556,7 +566,7 @@ function stripHtml(text) {
   return text.length > 300 ? `${text.slice(0, 300)}…` : text;
 }
 
-/* ------------------------------------------------------- 酷安身份与出处规则 */
+/* ------------------------------------------- 酷安身份、来源与源码仓库规则 */
 
 // UID 就是 https://www.coolapk.com/u/<UID> 末尾那串数字。4 位起收，避免把
 // 「1」「123」这种明显不是 UID 的输入当成合法值送去核实。
@@ -566,7 +576,7 @@ export function isCoolapkUid(value) {
   return UID_RE.test(String(value || "").trim());
 }
 
-// 出处只收酷安站内的链接（www / m / api 等子域都行）。
+// 「来源」只收酷安站内的链接（www / m / api 等子域都行）。
 // 用 URL 解析而不是正则匹配字符串，避免 coolapk.com.evil.tld 这类假通过。
 export function normalizeCoolapkUrl(raw) {
   const v = String(raw || "").trim();
@@ -581,6 +591,41 @@ export function normalizeCoolapkUrl(raw) {
   const host = u.hostname.toLowerCase();
   if (host !== "coolapk.com" && !host.endsWith(".coolapk.com")) return "";
   return u.href;
+}
+
+/**
+ * 源码仓库只认 `https://github.com/<owner>/<repo>`（契约 §0）：
+ * 协议必须 https、主机必须正好是 github.com、路径正好两段。
+ *
+ * 同样用 URL 解析，别用字符串正则：`https://github.com.evil.tld/a/b`、
+ * `https://evil.tld/github.com/a/b` 这两种都要在主机这一层被挡掉。
+ * 末尾的 `/` 与 `.git` 是粘贴时最常见的两种多余尾巴，统一去掉；
+ * owner/repo 的大小写照原样留着（GitHub 自己不区分）。
+ */
+const REPO_OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+const REPO_NAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
+
+export function normalizeRepoUrl(raw) {
+  const v = String(raw || "").trim();
+  if (!v) return "";
+  let u;
+  try {
+    u = new URL(v);
+  } catch {
+    return "";
+  }
+  if (u.protocol !== "https:") return "";
+  if (u.hostname.toLowerCase() !== "github.com") return "";
+  // query / hash 不是仓库地址的一部分；带了就说明粘错了（比如 /tree/main）
+  if (u.search || u.hash) return "";
+  const parts = u.pathname.split("/").filter(Boolean);
+  if (parts.length !== 2) return "";
+  const owner = parts[0];
+  // .git 是可选的传输尾巴，不算仓库名的一部分
+  const repo = parts[1].replace(/\.git$/i, "");
+  if (!REPO_OWNER_RE.test(owner)) return "";
+  if (!REPO_NAME_RE.test(repo)) return "";
+  return `https://github.com/${owner}/${repo}`;
 }
 
 export const USER_STATUS = {
@@ -1081,6 +1126,10 @@ export function normalizeIndex(json) {
         (best, v) => (best && Number(best.versionCode) >= Number(v.versionCode) ? best : v),
         null
       );
+      // 仓库相关的这几项是后加的模块级字段：索引可能还没跟上（老数据 / 灰度期），
+      // 所以一律「读不到就当没有」，不猜成 true —— 缺字段时列表不显示 chip、详情不显示证据。
+      const repoTag = latest && typeof latest.repoTag === "string" ? latest.repoTag.trim() : "";
+      const checkedAt = Number(m.repoCheckedAt);
       return {
         id: String(m.id || ""),
         name: String(m.name || m.id || ""),
@@ -1089,6 +1138,16 @@ export function normalizeIndex(json) {
         verified: Boolean(m.verified),
         versions,
         latest,
+        // 模块级的「来源」同样容错：老索引里可能没有这一格，缺了就当空串（预填按空处理）。
+        source: typeof m.source === "string" ? m.source.trim() : "",
+        repoUrl: typeof m.repoUrl === "string" ? m.repoUrl.trim() : "",
+        repoVerified: m.repoVerified === true,
+        repoCheckedAt: Number.isFinite(checkedAt) ? checkedAt : 0,
+        repoLicense: typeof m.repoLicense === "string" ? m.repoLicense.trim() : "",
+        // 契约 §1：repoCoversLatest 是派生字段（最新 versionCode 的那一版带 repoTag）。
+        // 索引给了布尔值就用它；没给就按同一条定义现场算，免得把老数据误判成「最新版未覆盖」。
+        repoCoversLatest:
+          typeof m.repoCoversLatest === "boolean" ? m.repoCoversLatest : Boolean(repoTag),
       };
     }),
   };

@@ -734,6 +734,10 @@ textarea:focus {
 .field.is-bad .field__err {
   display: block;
 }
+/* 二选一那条错误不属于任何一格（两个格子都空才成立），所以它自己带一个显式的开关类 */
+.field__err.is-on {
+  display: block;
+}
 .field.is-pre input {
   background: linear-gradient(0deg, var(--amber-wash), var(--amber-wash)), var(--void-2);
 }
@@ -1625,6 +1629,43 @@ textarea:focus {
 .mod__rep:hover {
   color: var(--ink);
   border-color: var(--ink-2);
+}
+/* 源码证据块（契约 §4 第 5 条）：折叠着，不给它第二条视觉主轴 —— 只有要核的人才会点开 */
+.mod__repo {
+  margin-top: 10px;
+  font: 400 11.5px/1.7 var(--mono);
+  color: var(--ink-3);
+}
+.mod__repo-sum {
+  cursor: pointer;
+  color: var(--ink-2);
+  width: fit-content;
+}
+.mod__repo-row {
+  display: flex;
+  gap: 10px;
+  padding: 2px 0;
+  overflow-wrap: anywhere;
+}
+.mod__repo-k {
+  flex: 0 0 84px;
+  color: var(--ink-3);
+}
+.mod__repo-v,
+.mod__repo-a {
+  color: var(--ink-2);
+}
+.mod__repo-a {
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+}
+.mod__repo-a:hover {
+  color: var(--amber);
+  border-color: var(--amber-line);
+}
+.mod__repo-none {
+  margin: 6px 0 0;
+  color: var(--ink-3);
 }
 mark {
   background: var(--amber-wash);
@@ -3842,7 +3883,7 @@ mark {
 }
 
 /* 上传页：宽屏分成左右两条流 —— 左条「传什么」（01 选包 + 02 填元数据），
-   右条「谁传的、怎么交」（03 出处与身份 + 04 确认与上传）。
+   右条「谁传的、怎么交」（03 来源与源码仓库 + 04 确认与上传）。
    不用 2×2 栅格是因为四张面板高矮差得悬殊：栅格按行对齐，01 只有三百来像素，
    会被右边七百多像素的 02 拉出一大块空洞；两条独立的竖流各自往下排，谁也不等谁，
    页面总高反而更矮，中间也不会横着一道白。 */

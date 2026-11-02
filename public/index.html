@@ -149,7 +149,7 @@
               </h1>
               <p class="hero__lede" id="hero-lede">
                 大量国内自制模块只存在于酷安帖子里的网盘链接，几个月后就成死链，主流索引也搜不到。
-                这里就是给这些模块开的上传入口：把 zip 传上来、写清出处，服务端把它存成长期可用的下载地址，
+                这里就是给这些模块开的上传入口：把 zip 传上来、写清来源，服务端把它存成长期可用的下载地址，
                 自动检查通过后进入公开索引，所有人就能在管理器里<span class="hl">搜到并一键安装</span>。
               </p>
             </div>
@@ -305,25 +305,37 @@
           </div>
 
           <div class="form__col">
-          <!-- 03 出处（署名与身份那一半搬去了 #/identity：它是前置步骤，不是这张表单的一部分） -->
+          <!-- 03 来源与源码仓库（署名与身份那一半搬去了 #/identity：它是前置步骤，不是这张表单的一部分） -->
           <section class="panel rise" aria-labelledby="p3t">
             <div class="panel__hd">
               <span class="panel__no">03</span>
-              <h2 id="p3t">出处</h2>
+              <h2 id="p3t">来源</h2>
               <span class="panel__tag">traceability</span>
             </div>
             <p class="panel__note">
-              这一项是<b style="color: var(--amber)">必须填的</b>：出处说明这个包从哪来，出事时要能顺着它找回人。
-              出处<b>每一枚一份</b>（在 02 那一屏跟着当前这一枚改）。
+              「来源」有两种：<b>酷安帖子</b>与<b>源码仓库</b>，<b style="color: var(--amber)">至少填一项，也可以都填</b>。
+              酷安帖子说明这个包从哪来，出事时要能顺着它找回人；源码仓库让管理器和复核的人能对着源码查这个包。
+              两项都是<b>每一枚一份</b>（在 02 那一屏跟着当前这一枚改）。
             </p>
             <div class="field">
-              <div class="field__lab"><label for="f-source">模块出处（酷安帖子链接）<span class="req">*</span></label></div>
-              <input class="mono" type="text" id="f-source" data-k="source" placeholder="https://www.coolapk.com/feed/65432100" autocomplete="off" spellcheck="false" required />
+              <div class="field__lab"><label for="f-source">酷安帖子链接</label></div>
+              <input class="mono" type="text" id="f-source" data-k="source" placeholder="https://www.coolapk.com/feed/65432100" autocomplete="off" spellcheck="false" />
               <p class="field__help">
                 贴这个模块的<b>酷安帖子链接</b>。没有的话可以顺手发一个帖子存档，也顺便宣传一下。
               </p>
-              <p class="field__err" data-err="source">请填写酷安站内链接</p>
+              <p class="field__err" data-err="source">必须是酷安站内链接</p>
             </div>
+            <div class="field">
+              <div class="field__lab"><label for="f-repo">源码仓库（GitHub）</label></div>
+              <input class="mono" type="text" id="f-repo" data-k="repoUrl" placeholder="https://github.com/owner/repo" autocomplete="off" spellcheck="false" />
+              <p class="field__help">
+                公开的 GitHub 仓库地址，形如 <b>https://github.com/owner/repo</b>（正好两段，不带 /tree 之类的尾巴）。
+                填了之后机器人会对着仓库里的 Release 或 checksums.txt 核对包体，核对通过就在已收录列表里挂上源码标记。
+              </p>
+              <p class="field__err" data-err="repoUrl">必须是 https://github.com/&lt;owner&gt;/&lt;repo&gt; 形式</p>
+              <p class="field__help" id="repo-hint" hidden></p>
+            </div>
+            <p class="field__err" id="src-err">请至少填写「来源」或「源码仓库」之一</p>
           </section>
 
           <!-- 04 确认与上传 -->
@@ -616,8 +628,8 @@
             出事时点开 <code>coolapk.com/u/&lt;UID&gt;</code> 就知道是谁，社区也能对具体账号做处理。
           </p>
           <p>
-            出处同理，只收<b>酷安站内链接</b>：模块必须能回溯到某个帖子或某个作者主页，
-            网盘直链、匿名转存链接一律不算出处。
+            「来源」同理，只收<b>酷安站内链接</b>：模块必须能回溯到某个帖子或某个作者主页，
+            网盘直链、匿名转存链接一律不算来源。源码仓库则只收 GitHub 上公开的那一个，两者至少填一项。
           </p>
           <div class="callout">
             <b>署名昵称和 UID 是两个字段。</b>昵称给人看（会公开显示在索引里），UID 给审核和追责用。
@@ -733,7 +745,7 @@
             </p>
             <ul class="ticks ticks--flat">
               <li><span class="tick__txt">我提交的模块<b>不含恶意代码</b>：不窃取凭据、不静默回传、不破坏系统与数据。</span></li>
-              <li><span class="tick__txt">我是所提交模块的<b>作者或已获授权</b>，标注的出处真实可查。</span></li>
+              <li><span class="tick__txt">我是所提交模块的<b>作者或已获授权</b>，标注的来源真实可查。</span></li>
               <li><span class="tick__txt">我提交的压缩包<b>不含个人隐私、账号信息与密钥</b>。</span></li>
             </ul>
             <label class="tick tick--pledge" for="ck-pledge">
@@ -773,7 +785,7 @@
         <div class="hero rise">
           <h1 id="h-records">上传<span class="hi">记录</span></h1>
           <p class="hero__lede" id="records-lede">
-            这个账号投过的模块都在这儿。点某一枚的「上传更新版」会回到上传页，把 ID / 名称 / 作者 / 出处填好、
+            这个账号投过的模块都在这儿。点某一枚的「上传更新版」会回到上传页，把 ID / 名称 / 作者 / 来源填好、
             版本号预填成当前 +1 —— 你只需要选新包。
           </p>
         </div>

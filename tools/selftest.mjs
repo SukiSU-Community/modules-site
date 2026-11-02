@@ -364,8 +364,52 @@ async function main() {
   }
   check("非 MMRL 结构报 BackendError", bad instanceof BackendError, String(bad && bad.name));
 
-  console.log("\n[8] 酷安 UID 与出处规则");
-  const { isCoolapkUid, normalizeCoolapkUrl, lookupCoolapkUser, USER_STATUS, fetchServiceLimits } =
+  /* 仓库字段是 §1 后加的、**可缺省**：历史索引一个都没有，读取端不许因为「少了一格」就炸，
+     也不许把缺失猜成 true —— chip 与证据块全靠这几个布尔值，猜贵一次就等于替作者背书一次。 */
+  const withRepo = normalizeIndex({
+    name: "repo 索引",
+    modules: [
+      {
+        id: "repo-mod",
+        name: "带仓库的模块",
+        author: "a",
+        repoUrl: "  https://github.com/owner/repo  ",
+        repoVerified: true,
+        repoCheckedAt: 1760000000000,
+        repoLicense: " Apache-2.0 ",
+        versions: [{ version: "v2", versionCode: 2, zipUrl: "https://dl/a.zip", repoTag: "v2.0.0" }],
+      },
+      { id: "old-entry", name: "老条目", versions: [] },
+      {
+        id: "repo-untagged",
+        name: "最新版没命中",
+        repoUrl: "https://github.com/o/r",
+        repoVerified: true,
+        versions: [{ version: "v3", versionCode: 3, zipUrl: "https://dl/c.zip" }],
+      },
+      {
+        id: "repo-derived",
+        name: "最新版带 tag",
+        repoUrl: "https://github.com/o/r2",
+        versions: [{ version: "v4", versionCode: 4, zipUrl: "https://dl/d.zip", repoTag: "v4.0.0" }],
+      },
+    ],
+  });
+  const [rm, oldEntry, untaggedRepo, derivedRepo] = withRepo.modules;
+  check(
+    "仓库字段原样读出并 trim",
+    rm.repoUrl === "https://github.com/owner/repo" && rm.repoLicense === "Apache-2.0",
+    `${rm.repoUrl} / ${rm.repoLicense}`
+  );
+  check("repoVerified 缺失时是 false，不是 undefined", oldEntry.repoVerified === false);
+  check("repoUrl / repoCheckedAt / repoLicense 缺字段时回落空值", oldEntry.repoUrl === "" && oldEntry.repoCheckedAt === 0 && oldEntry.repoLicense === "");
+  check("repoCheckedAt 读成数字", rm.repoCheckedAt === 1760000000000, String(rm.repoCheckedAt));
+  check("最新版没有 repoTag → repoCoversLatest 为 false", untaggedRepo.repoCoversLatest === false);
+  check("repoCoversLatest 缺省时由最新版 repoTag 推导", derivedRepo.repoCoversLatest === true);
+  check("版本级的 repoTag 原样留着（证据块要用）", derivedRepo.latest.repoTag === "v4.0.0");
+
+  console.log("\n[8] 酷安 UID 与来源规则");
+  const { isCoolapkUid, normalizeCoolapkUrl, normalizeRepoUrl, lookupCoolapkUser, USER_STATUS, fetchServiceLimits } =
     await import("../public/scripts/api.js");
   check("99999999 是合法 UID", isCoolapkUid("99999999") === true);
   check("带空格也认", isCoolapkUid("  99999999 ") === true);
@@ -383,8 +427,26 @@ async function main() {
   check("假域名拒绝", normalizeCoolapkUrl("https://coolapk.com.evil.tld/u/1") === "");
   check("路径里藏域名拒绝", normalizeCoolapkUrl("https://evil.tld/https://www.coolapk.com/u/1") === "");
   check("javascript 协议拒绝", normalizeCoolapkUrl("javascript:alert(1)//coolapk.com") === "");
-  check("网盘链接不算出处", normalizeCoolapkUrl("https://pan.baidu.com/s/abc") === "");
+  check("网盘链接不算来源", normalizeCoolapkUrl("https://pan.baidu.com/s/abc") === "");
   check("空输入返回空", normalizeCoolapkUrl("   ") === "");
+
+  // 仓库地址是「机器人将来照着发版」的锚，所以比来源那格紧：https only、正好两段、不补协议。
+  // 好的三个形状：标准、末尾斜杠、末尾 .git（后两个只是顺手吃掉，不算另一种地址）。
+  check("仓库：标准地址原样", normalizeRepoUrl("https://github.com/a/b") === "https://github.com/a/b");
+  check("仓库：末尾斜杠吃掉", normalizeRepoUrl("https://github.com/a/b/") === "https://github.com/a/b");
+  check("仓库：.git 后缀吃掉", normalizeRepoUrl("https://github.com/a/b.git") === "https://github.com/a/b");
+  check("仓库：保留 owner/repo 大小写", normalizeRepoUrl("https://github.com/Foo/Bar") === "https://github.com/Foo/Bar");
+  check("仓库：http 拒绝", normalizeRepoUrl("http://github.com/a/b") === "");
+  check("仓库：半截地址不补协议", normalizeRepoUrl("github.com/a/b") === "");
+  check("仓库：只有 owner 一段拒绝", normalizeRepoUrl("https://github.com/a") === "");
+  check("仓库：三段路径拒绝", normalizeRepoUrl("https://github.com/a/b/tree/main") === "");
+  check(
+    "仓库：query / hash 拒绝",
+    normalizeRepoUrl("https://github.com/a/b?tab=readme") === "" && normalizeRepoUrl("https://github.com/a/b#readme") === ""
+  );
+  check("仓库：假域名拒绝", normalizeRepoUrl("https://github.com.evil.tld/a/b") === "");
+  check("仓库：www 子域不认（主机必须正好 github.com）", normalizeRepoUrl("https://www.github.com/a/b") === "");
+  check("仓库：空输入返回空", normalizeRepoUrl("   ") === "");
 
   // 「后端未接线时走 off」这条**测不出行为**了：IS_UID_VERIFY_ON 是 config.js 加载时算好的
   // 派生值，而 API_BASE 现在填的是真地址 —— 测试进程里改 CONFIG 不会让它重算，硬调一次就是
@@ -1553,11 +1615,11 @@ async function main() {
       (submitBody.match(/form\.append\("zip"/g) || []).length === 1,
     `顶层 part=${sentFields.join(",")} manifest位置=${submitBody.indexOf('form.append("manifest"')} 第一个zip=${submitBody.indexOf('form.append("zip"')}`
   );
-  // manifest 里那八项是 §17.3 的原文形状，也是 §16 那条闸的判据输入；多一项少一项都算两边形状不一。
+  // manifest 里那九项是 §17.3 的原文形状 + §1 的 repoUrl，也是 §16 那条闸的判据输入；多一项少一项都算两边形状不一。
   check(
-    "manifest 的形状逐字对着 §17.3：version='batch-v1' + modules[] 里 id/sha256/name/version/versionCode/author/description/source 八项，共享字段不在里面",
+    "manifest 的形状逐字对着 §17.3 + §1：version='batch-v1' + modules[] 里 id/sha256/name/version/versionCode/author/description/source/repoUrl 九项，共享字段不在里面",
     /version: "batch-v1"/.test(manifestBody) &&
-      ["id:", "sha256:", "name:", "version:", "versionCode:", "author:", "description:", "source:"].every((k) =>
+      ["id:", "sha256:", "name:", "version:", "versionCode:", "author:", "description:", "source:", "repoUrl:"].every((k) =>
         manifestBody.includes(k)
       ) &&
       !/nonce|pledge|turnstile|coolapkUid|uploader/.test(manifestBody),
@@ -1572,6 +1634,118 @@ async function main() {
     "提交仍然保持 CORS 简单请求：submitContribution 里一个 setRequestHeader 都不许加，发出去的是 FormData 本体",
     submitAt !== -1 && submitBody.length > 200 && !/setRequestHeader/.test(submitBody) && /xhr\.send\(form\)/.test(submitBody),
     `submitContribution 起点=${submitAt} 体长=${submitBody.length}`
+  );
+
+  /* =================== 来源 / 源码仓库（§4 那张清单的网页侧）
+     这组只钉四件事，但每一件坏掉都在页面上看不出来：
+     ① 两格至少一项 —— 都空才报一次，而且是「还没填」不是「填错了」；
+     ② 来源不再是必填键 —— 留在必填数组里就会变成「填了仓库也拦」，二选一当场作废；
+     ③ chip 三态互斥、证据块在没有仓库时只说一句老实话（不编造空白行）；
+     ④ 提交清单里真的带上了 repoUrl，且预填只填空格、不覆盖用户已经写下的字。
+     一律按函数体切片钉：同一句话在别处出现不该算这条通过。 */
+  const gapsBody = appSrc.slice(
+    appSrc.indexOf("function cardGaps("),
+    appSrc.indexOf("\n}", appSrc.indexOf("function cardGaps("))
+  );
+  check(
+    "cardGaps：「来源」与「源码仓库」二选一，都空才报一次",
+    gapsBody.includes('if (!v.source && !v.repoUrl) gaps.push("来源或源码仓库");') &&
+      gapsBody.includes('if (v.source && !normalizeCoolapkUrl(v.source)) gaps.push("来源不是酷安站内链接");') &&
+      gapsBody.includes('if (v.repoUrl && !normalizeRepoUrl(v.repoUrl)) gaps.push("源码仓库地址形状不对");'),
+    gapsBody.slice(0, 80)
+  );
+  const requiredLine = appSrc.slice(
+    appSrc.indexOf("const CARD_REQUIRED_KEYS"),
+    appSrc.indexOf("\n", appSrc.indexOf("const CARD_REQUIRED_KEYS"))
+  );
+  check(
+    "「来源」从必填数组里移出（否则填了仓库也照样拦）",
+    requiredLine.includes('"versionCode"') && !requiredLine.includes("source"),
+    requiredLine
+  );
+  const gateItemsBody = appSrc.slice(
+    appSrc.indexOf("function gateItems()"),
+    appSrc.indexOf("\n}", appSrc.indexOf("function gateItems()"))
+  );
+  check(
+    "闸门里那条二选一的文案与契约原文一致，且形状错的两句话都在",
+    gateItemsBody.includes("请至少填写「来源」或「源码仓库」之一") &&
+      gateItemsBody.includes("每一枚都填了「来源」或「源码仓库」至少一项") &&
+      gateItemsBody.includes("源码仓库必须是 https://github.com/<owner>/<repo> 形式"),
+    gateItemsBody.slice(0, 80)
+  );
+  const payloadBody = appSrc.slice(
+    appSrc.indexOf("function batchPayload("),
+    appSrc.indexOf("\n}", appSrc.indexOf("function batchPayload("))
+  );
+  check(
+    "提交清单里带 repoUrl（source 可空），两格都先过一遍归一化",
+    payloadBody.includes("repoUrl: normalizeRepoUrl(v.repoUrl) || v.repoUrl") &&
+      payloadBody.includes("source: normalizeCoolapkUrl(v.source) || v.source"),
+    payloadBody.slice(0, 80)
+  );
+  const chipBody = appSrc.slice(
+    appSrc.indexOf("function repoChip("),
+    appSrc.indexOf("\n}", appSrc.indexOf("function repoChip("))
+  );
+  check(
+    "列表 chip 单状态：无仓库不画；失效 / 未覆盖 / 开源或公开源码三选一",
+    chipBody.includes("if (!m.repoUrl) return null;") &&
+      chipBody.includes("源码校验失效") &&
+      chipBody.includes("最新版未覆盖") &&
+      chipBody.includes('m.repoLicense ? "✓ 开源" : "✓ 公开源码"'),
+    chipBody.slice(0, 80)
+  );
+  const evidenceBody = appSrc.slice(
+    appSrc.indexOf("function repoEvidence("),
+    appSrc.indexOf("\n}", appSrc.indexOf("function repoEvidence("))
+  );
+  check(
+    "证据块：无仓库只说「作者未提供公开源码」，有仓库才画 tag / digest / 时间 / 复验",
+    evidenceBody.includes('"源码证据"') &&
+      evidenceBody.includes('"作者未提供公开源码"') &&
+      evidenceBody.includes("hex.slice(0, 12)") &&
+      evidenceBody.includes("checksums 分支") &&
+      evidenceBody.includes("命中 Release") &&
+      evidenceBody.includes("最近校验") &&
+      evidenceBody.includes("复验状态"),
+    evidenceBody.slice(0, 80)
+  );
+  const inheritBody = appSrc.slice(
+    appSrc.indexOf("function inheritOrigin("),
+    appSrc.indexOf("\n}", appSrc.indexOf("function inheritOrigin("))
+  );
+  check(
+    "预填继承只填空格（不覆盖用户输入），并把「留空将沿用」挂出来",
+    inheritBody.includes('for (const key of ["source", "repoUrl"])') &&
+      inheritBody.includes("if (!fromIndex || values[key]) continue;") &&
+      appSrc.includes("该模块已绑定源码仓库，留空将沿用") &&
+      appSrc.includes('$("#repo-hint")'),
+    inheritBody.slice(0, 80)
+  );
+  const paintBundle = appSrc.slice(
+    appSrc.indexOf("function paintFieldErrors("),
+    appSrc.indexOf("\n}", appSrc.indexOf("function paintFieldErrors("))
+  );
+  check(
+    "二选一的红字挂在 #src-err 上（它不属于任何 .field，所以走 is-on）",
+    paintBundle.includes('for (const key of ["source", "repoUrl"])') &&
+      paintBundle.includes('$("#src-err")') &&
+      paintBundle.includes("is-on"),
+    paintBundle.slice(0, 80)
+  );
+  const appHtml = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../public/index.html"), "utf8");
+  const sourceInput = /<input[^>]*id="f-source"[^>]*>/.exec(appHtml)?.[0] || "";
+  const repoInput = /<input[^>]*id="f-repo"[^>]*>/.exec(appHtml)?.[0] || "";
+  check(
+    "03 面板：来源那格不再 required，仓库那格与它同一套 data-k，两条错误提示各就各位",
+    sourceInput !== "" &&
+      !/required/.test(sourceInput) &&
+      /data-k="source"/.test(sourceInput) &&
+      /data-k="repoUrl"/.test(repoInput) &&
+      appHtml.includes('id="src-err"') &&
+      appHtml.includes('id="repo-hint"'),
+    `source=${sourceInput.slice(0, 60)} repo=${repoInput.slice(0, 60)}`
   );
 
   // 「本次要投 N 枚」这句话与队列读数是两份判据的话迟早会漂 —— 所以钉死它们同源。
@@ -2020,7 +2194,7 @@ async function main() {
       staleRegister.length === 0,
       `还在用旧词的行=${staleRegister.map((l) => l.trim().slice(0, 90)).join(" | ") || "无"}`
     );
-    check("后端自己校验出处主机名", /coolapk\.com\.evil\.tld|endsWith\(["']\.coolapk\.com["']\)/.test(worker));
+    check("后端自己校验来源主机名", /coolapk\.com\.evil\.tld|endsWith\(["']\.coolapk\.com["']\)/.test(worker));
     // ⑤-a：包内 module.prop 与表单的一致性只能在提交阶段判（索引的键取自表单，安装器读的是包内文件）。
     // 前端故意不重复这条规则，所以这里必须钉住「后端真的在判」，否则两边就都没人了。
     check(

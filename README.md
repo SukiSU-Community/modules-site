@@ -156,14 +156,43 @@ proofString  = `${proofPrefix}-${nonce}`
 name/author/description 不在口令绑定范围，id 必与 module.prop 一致（包里缺 id 直接拒），
 versionCode 只在 module.prop 声明了它时才被绑。
 
-### 出处现在只收酷安站内链接
+### 「来源」只收酷安站内链接，「源码仓库」只认 GitHub 形状
 
-`normalizeCoolapkUrl()`（`api.js:179`）用 `URL` 解析而不是字符串正则：必须 `http(s)` 协议、
+面板 03 的两格**至少填一项**：都空时报「请至少填写「来源」或「源码仓库」之一」，批量上传时每一枚
+都按同一条规则判。两格的分工是「包从哪来」与「源码在哪」。
+
+`normalizeCoolapkUrl()`（`api.js:581`）用 `URL` 解析而不是字符串正则：必须 `http(s)` 协议、
 主机是 `coolapk.com` 或其子域，`coolapk.com.evil.tld`、`https://evil.tld/https://www.coolapk.com`、
 `javascript:` 都会被拒。用户只粘 `www.coolapk.com/feed/123` 时会自动补上 `https://`。
 **服务端已经按同一条规则复核过了**（`contrib/worker` 的 `coolapkSourceUrl()`，与 `normalizeCoolapkUrl()`
 逐条对齐：协议白名单、`URL` 解析后比主机名、拒 `coolapk.com.evil.tld` 与路径藏域名、漏协议补 `https://`）。
+
+`normalizeRepoUrl()`（`api.js:608`）比它更紧：只认 `https://github.com/<owner>/<repo>` 这一个形状 ——
+https 且**不替人补协议**、主机必须正好是 `github.com`、路径正好两段（`/tree/main`、`?tab=readme` 一律拒），
+只会顺手吃掉末尾的 `/` 与 `.git`。仓库地址要写进索引、将来由机器人照着它发版，所以半截地址在
+来源那边可以宽容，在这边必须让用户自己补全。服务端同样会复核（`contrib/worker` 的 `normalizeRepoUrl()`
+与 `REPO_URL_REJECT`），而且**只有模块归属人能设置或修改**这一格（`repo_locked`）：不是归属人就留空，
+留空会沿用索引里作者登记的那个地址。
+
 前端校验只是省一次上传，真正拦人的是服务端 —— 直接打接口的人不受前端约束。
+
+### 索引里的仓库证据：chip 与「源码证据」
+
+模块填了 `repoUrl` 之后，索引里会多出几项**可缺省**的字段（历史条目一个都没有，读取端一律容错）：
+模块级 `repoUrl` / `repoVerified` / `repoCheckedAt` / `repoLicense` / `repoCoversLatest`，
+版本级 `repoTag` / `repoDigest`。`repoUrl` 为空时列表**不显示任何仓库标记**，就当作「没提供公开源码」。
+
+有仓库时 chip 只有一种状态（绿勾 / 灰字不会同时出现）：
+
+| 索引里的样子 | 列表上显示 |
+|---|---|
+| `repoVerified: true` 且最新版本有 `repoTag` | `✓ 开源`（有 `repoLicense`）或 `✓ 公开源码`（没写许可证） |
+| `repoVerified: true` 但最新版本没命中 | 灰「最新版未覆盖」—— 源码在，只是还没对这版出证据 |
+| `repoVerified: false` 或缺失 | 灰「源码校验失效」—— 记过仓库，但这次没核对上 |
+
+点开列表项里的「源码证据」能看到这些原始读数：仓库链接、LICENSE（只在 `repoLicense` 有值时显示）、
+命中的是 `Release · <repoTag>` 还是仓库根 `checksums.txt`、包体 digest 的前 12 位、
+最近一次校验时间与复验状态。一个字段都没有时不编造，只写「作者未提供公开源码」。
 
 ### 索引与公示的镜像端点（已实现，`GET /index.json`、`GET /dispositions.json`）
 
@@ -189,7 +218,7 @@ versionCode 只在 module.prop 声明了它时才被绑。
 |---|---|
 | 选 zip → 自动解析预填（可改） | `zipread.js` + `moduleprop.js` + `app.js:intake()/applyProp()` |
 | 填完 ID 与版本号自动查重、实时显示 | `app.js:runCheck()`（防抖 420ms），结果显示在 02 面板下方 |
-| 出处 / 署名必填 + 明确说明为什么要填 | 面板 03「出处与身份」：出处限酷安站内链接、署名与酷安 UID 双字段；说明页 D 节解释为什么必须是 UID |
+| 来源 / 源码仓库二选一 + 署名必填 + 明确说明为什么要填 | 面板 03「来源与源码仓库」：来源限酷安站内链接、源码仓库限 GitHub 公开仓库（两格至少填一项）；署名与酷安 UID 双字段；说明页 D 节解释为什么必须是 UID |
 | 酷安 UID 核实（含端点未接入时的降级） | `api.js:lookupCoolapkUser()` + `app.js:runUidCheck()`，四种状态 verified / not_found / unavailable / off，通过后自动填昵称并显示头像 |
 | 投稿口令绑「模块 ID + 整包 sha256」 | `proof.js`（与 Worker `src/proof.ts` 同一套算法的第二份）+ `app.js:intake()` 算整包哈希、`renderProof()` 现算显示串；载荷只发 `sha256` / `pledge` / `nonce`，派生串不发 —— 见第 2 节 |
 | 承诺分两层：账号级三条 + 本次级两条 | 身份页 `#ck-pledge`（90 天验一次，随 `/session/issue` 的 `pledge` 版本存档）；提交弹窗 `#layer-confirm` 只留一枚 `#ck-confirm` 确认「公开存储 / 机审判据」两条，勾上才解锁「上传」 |
@@ -223,7 +252,10 @@ deflate 与 stored 两种压缩、UTF-8 中文内容、`description` 里再出�
 尾部注释导致 EOCD 要往回扫、`module.prop` 被套进子文件夹（要判为不可投并给出提示）、
 以及非 zip 输入。另外还覆盖 MMRL 索引归一化（`versions` 乱序取最大 versionCode、缺字段回落、
 非 MMRL 结构报错）和酷安规则（UID 位数/非数字、假域名 `coolapk.com.evil.tld`、
-路径里藏域名、`javascript:` 协议、网盘链接不算出处、后端未接线时核实走 `off` 而不是抛错），
+路径里藏域名、`javascript:` 协议、网盘链接不算来源、后端未接线时核实走 `off` 而不是抛错），
+源码仓库形状（http、只有一段、`/tree/main`、带 query、假域名 `github.com.evil.tld`、末尾 `/` 与 `.git`
+的容忍边界），以及索引里新字段的容错读法（缺 `repoVerified`/`repoCheckedAt`/`repoLicense` 不炸、
+`repoCoversLatest` 缺省时由最新版有没有 `repoTag` 推导），
 以及处置公示（带时区的 `at` 解析、选择器取法、未知 schema/kind/reason 一条都不丢、
 公示地址按 INDEX_URL 同目录推导且保留 query、`by` 指针只有永久链接才给链接）。
 跨仓库那几组还会直接 import 索引仓库的 `scripts/dispositions.mjs` 与 `scripts/revoke.mjs`，
