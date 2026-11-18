@@ -2487,11 +2487,27 @@ mark {
   max-width: 560px;
 }
 .ck__cover {
+  position: relative;
+  overflow: hidden;
   padding: 14px;
   background:
     radial-gradient(120% 140% at 85% 10%, rgba(35, 199, 106, 0.2), transparent 60%),
     linear-gradient(165deg, #131a22 0%, #1d2634 52%, #0d1116 100%);
   color: #fff;
+}
+/* 酷安封面图垫在渐变下面：压到 38% 不抢字，取不到就自然落回渐变。 */
+.ck__bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.38;
+  pointer-events: none;
+}
+.ck__cover > :not(.ck__bg) {
+  position: relative;
+  z-index: 1;
 }
 .ck__row {
   display: flex;

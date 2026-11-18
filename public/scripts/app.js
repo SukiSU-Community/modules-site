@@ -5329,6 +5329,19 @@ function coolapkHeadCard(subject, identity) {
   const cover = node("div", "ck__cover");
   const row = node("div", "ck__row");
   const idn = identity && typeof identity === "object" ? identity : null;
+  // 酷安主页那张封面图：快照里本来就有（identity.cover），之前只用了渐变底。
+  // 用 <img> 而不是 CSS background —— 图床对带 Referer 的请求发 WAF 页，只有图片标签能压 referrer。
+  const coverUrl = idn && idn.cover ? secureAvatarUrl(String(idn.cover)) : "";
+  if (coverUrl) {
+    const bg = document.createElement("img");
+    bg.className = "ck__bg";
+    bg.src = coverUrl;
+    bg.alt = "";
+    bg.referrerPolicy = "no-referrer";
+    bg.loading = "lazy";
+    bg.addEventListener("error", () => bg.remove());
+    cover.append(bg);
+  }
   const avatar = idn && idn.userBigAvatar ? String(idn.userBigAvatar) : "";
   const av = avatar && safeUrl(avatar)
     ? (() => {
