@@ -4654,6 +4654,7 @@ html.kb-open .dock {
 
 .pc__body .ck__foot {
   margin-top: auto;
+  padding-top: 14px;
 }
 .pc__body .ck__bio-v {
   display: -webkit-box;
@@ -4671,6 +4672,13 @@ html.kb-open .dock {
 .pc__body .ck__pills,
 .pc__body .ck__bio {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
+}
+.pc__body .ck__bio {
+  color: #f4f6fa;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
+}
+.pc__body .ck__bio-k {
+  color: rgba(255, 255, 255, 0.74);
 }
 .pc__names {
   min-width: 0;
@@ -4712,7 +4720,7 @@ html.kb-open .dock {
   gap: 6px 8px;
   padding: 9px 12px 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(6, 9, 13, 0.5);
+  background: rgba(6, 9, 13, 0.25);
 }
 .pc__dock .pc__meta {
   grid-column: 1;
