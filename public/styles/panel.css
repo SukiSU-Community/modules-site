@@ -4604,7 +4604,7 @@ html.kb-open .dock {
   aspect-ratio: 1 / 1;
   padding: 0;
   border: 1px solid var(--line-2);
-  border-radius: var(--r);
+  border-radius: 12px;
   background: #0d1116;
   overflow: hidden;
   isolation: isolate;
@@ -4667,6 +4667,10 @@ html.kb-open .dock {
   gap: 10px;
   align-items: center;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
+}
+.pc__body .pc__lv,
+.pc__body .pc__badge {
+  text-shadow: none;
 }
 .pc__body .ck__stats,
 .pc__body .ck__pills,
