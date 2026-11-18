@@ -711,16 +711,17 @@
                 <span class="auto" id="uploader-tag">按 UID 自动取</span>
               </div>
               <input type="text" id="f-uploader" data-k="uploader" placeholder="没取到昵称，自己写一个" autocomplete="nickname" />
-              <span class="ro" id="nick-ro" hidden><b id="nick-ro-v"></b><i>改名要换 UID</i></span>
               <p class="field__help" id="uploader-help"></p>
               <p class="field__err" data-err="uploader">这一项没取到昵称，请自己填一个署名</p>
             </div>
             <div class="status" id="uid-check" hidden aria-live="polite">
-              <img class="uid__avatar" id="uid-avatar" alt="" hidden />
-              <svg class="uid__mark" viewBox="0 0 24 24" aria-hidden="true">
-                <circle class="uid__mark-ring" cx="12" cy="12" r="9" />
-                <path class="uid__mark-tick" d="M7.4 12.5 10.5 15.4 16.7 9" />
-              </svg>
+              <span class="uid__face">
+                <img class="uid__avatar" id="uid-avatar" alt="" hidden decoding="async" referrerpolicy="no-referrer" />
+                <svg class="uid__mark" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle class="uid__mark-ring" cx="12" cy="12" r="9" />
+                  <path class="uid__mark-tick" d="M7.4 12.5 10.5 15.4 16.7 9" />
+                </svg>
+              </span>
               <span class="chip" id="uid-chip">…</span>
               <div class="status__body">
                 <div class="status__t" id="uid-t"></div>

@@ -2447,8 +2447,16 @@ function showUid(tone, chip, title, desc, avatar) {
     img.classList.remove("is-verified");
     img.removeAttribute("src");
   }
-  $("#uid-t").textContent = title;
+  // 昵称是这一档的身份主体：有昵称就把标题换成昵称（UID 留在同一行的说明里），
+  // 各档位的原名仍作为没有昵称时的兜底。
+  const nick =
+    tone === "ok" && state.uidInfo && state.uidInfo.nickname ? String(state.uidInfo.nickname).trim() : "";
+  $("#uid-t").textContent = nick || title;
   $("#uid-d").textContent = desc;
+  // 档位切换要看得见换了一档：remove → 强制 reflow → add，动画才会在每次切换时重放。
+  box.classList.remove("is-swap");
+  void box.offsetWidth;
+  box.classList.add("is-swap");
 }
 
 // 昵称不是要填的字段，是按 UID 反查回来的结果，所以整行默认藏起来：取到了才出现、只读显示，
@@ -2468,8 +2476,6 @@ function syncUploaderField() {
   if (!el) return;
   const field = el.closest(".field");
   const row = $("#nick-field");
-  const roRow = $("#nick-ro");
-  const roVal = $("#nick-ro-v");
   const tag = $("#uploader-tag");
   const help = $("#uploader-help");
   // 只认「输入框里这串 UID」反查回来的昵称 —— verified 的结果可能属于上一串数字。
@@ -2486,20 +2492,17 @@ function syncUploaderField() {
     el.value = nickname; // 以反查结果为准
     el.dataset.auto = "1";
     el.readOnly = true;
-    field.classList.add("is-pre", "is-ro");
-    if (row) row.hidden = false;
+    field.classList.add("is-pre");
+    // 昵称已经进了绿色核实卡（showUid 拿 state.uidInfo.nickname 当标题），这一整行收起来：
+    // 同一个名字在一屏出现两次，读者只会猜哪个才是署名。
+    if (row) row.hidden = true;
     if (tag) tag.textContent = "已经从酷安取到";
-    // 取到昵称后这一格收成一行只读值（CSS 的 .field.is-ro），不再占一个输入框的高度；
-    // 「锁定不能改」那句压成行尾的一句短注，别让它再单独占一行。
-    if (roVal) roVal.textContent = nickname;
-    if (roRow) roRow.hidden = false;
     if (help) help.textContent = "";
     return;
   }
 
   el.readOnly = false;
-  field.classList.remove("is-pre", "is-ro");
-  if (roRow) roRow.hidden = true;
+  field.classList.remove("is-pre");
   // 只要现在没有反查到的昵称，上一个 UID 带出来的那份就必须消失 —— 放在藏行之前，
   // 因为「正在查」的时候也能提交（核实没接 / 酷安抖动都不该拦人），清空晚一步就漏进索引。手填的不动。
   if (el.dataset.auto === "1") {
@@ -3706,7 +3709,7 @@ const runUidCheck = debounce(async () => {
       "ok",
       meta.label,
       meta.title,
-      `UID ${uid}${state.session.nickname ? ` · ${state.session.nickname}` : ""}。90 天内免改签名。`,
+      `UID ${uid}。90 天内免改签名。`,
       state.session.avatar || ""
     );
     syncUploaderField();
@@ -3731,7 +3734,7 @@ const runUidCheck = debounce(async () => {
   const meta = USER_STATUS[result.status] || USER_STATUS.unavailable;
   const desc =
     result.status === "verified"
-      ? `UID ${result.uid}${result.nickname ? ` · ${result.nickname}` : ""}。${meta.hint}`
+      ? `UID ${result.uid}。${meta.hint}`
       : meta.hint;
   showUid(
     meta.tone === "ok" ? "ok" : meta.tone === "bad" ? "bad" : meta.tone === "warn" ? "warn" : "muted",

@@ -693,41 +693,6 @@ h2 {
   margin-bottom: auto;
 }
 
-/* 昵称取到之后不必再当一个输入框：一行「标签 · 值 · 改名要换 UID」就够了，
-   省下的高度让给下面那张核实卡（那才是这一段真正要读的东西）。
-   取不到昵称时不带 is-ro，仍是原来那个可填的普通字段。 */
-.field.is-ro {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 13px;
-}
-.field.is-ro .field__lab {
-  margin: 0;
-}
-.field.is-ro > input,
-.field.is-ro > .field__help,
-.field.is-ro > .field__err,
-.field.is-ro .auto {
-  display: none;
-}
-.field.is-ro .ro {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 10px;
-  font-size: 15px;
-  color: var(--ink);
-}
-.field.is-ro .ro b {
-  font-weight: 600;
-}
-.field.is-ro .ro i {
-  font-style: normal;
-  font-size: 12.5px;
-  color: var(--ink-3);
-}
-
 input[type="text"],
 input[type="number"],
 input[type="url"],
@@ -853,7 +818,8 @@ textarea:focus {
 }
 .btn--ghost {
   background: transparent;
-  border-color: var(--line-2);
+  /* 浅色主题下 --line-2 与纸底只差一点点，按钮看起来像没有边。掺一点 ink 让它站住。 */
+  border-color: color-mix(in srgb, var(--ink) 24%, var(--line-2));
   color: var(--ink-2);
 }
 .btn--ghost:hover {
@@ -1188,6 +1154,20 @@ textarea:focus {
   border-color: var(--amber-line);
   background: linear-gradient(90deg, var(--amber-wash), transparent 60%);
 }
+/* 档位切换（正在核实 → 已核实 / 未通过）不是换一行字：整卡淡入一次，视线才跟得上。 */
+@keyframes statusSwap {
+  from {
+    opacity: 0.35;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.status.is-swap {
+  animation: statusSwap 0.28s var(--ease);
+}
 .status__body {
   flex: 1;
   min-width: 0;
@@ -1200,6 +1180,23 @@ textarea:focus {
   border: 1px solid var(--line-2);
   background: var(--void-2);
   object-fit: cover;
+}
+/* 头像与右下角的勾徽章是同一个整体：只有「已核实」这一档才出现，
+   其余档位没有可认的脸，占着位置反而像加载失败。 */
+.uid__face {
+  display: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+}
+.status.is-verified .uid__face {
+  display: block;
+}
+.uid__face .uid__avatar {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 .status__t {
   font-weight: 700;
@@ -1238,13 +1235,17 @@ textarea:focus {
   font-size: 12.5px;
   color: var(--ink-3);
 }
-.status.is-verified .uid__avatar {
-  width: 28px;
-  height: 28px;
-}
-.status.is-verified .uid__mark {
-  width: 17px;
-  height: 17px;
+.status.is-verified .uid__face .uid__mark {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 14px;
+  height: 14px;
+  padding: 1px;
+  box-sizing: content-box;
+  border-radius: 50%;
+  background: var(--panel-2);
+  box-shadow: 0 0 0 1px var(--mint-line-soft);
 }
 .status.is-verified .chip {
   order: 9;
