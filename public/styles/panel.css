@@ -3875,7 +3875,11 @@ mark {
   html[data-view="moderation"],
   html[data-view="submit"],
   html[data-view="about"],
-  html[data-view="records"] {
+  html[data-view="records"],
+  /* 身份页原来漏在这一列外面：它一直吃默认的 940，表单又自己停在 880，
+     于是在 1440 的屏上内容左缘比别的页缩进 150px、1920 上缩进 250px。
+     版心跟其他页同一只变量，窄栏交给下面的两列去消化。 */
+  html[data-view="identity"] {
     --maxw: 1240px;
   }
 }
@@ -3887,9 +3891,27 @@ mark {
   html[data-view="moderation"],
   html[data-view="submit"],
   html[data-view="about"],
-  html[data-view="records"] {
+  html[data-view="records"],
+  html[data-view="identity"] {
     --maxw: 1440px;
   }
+}
+
+/* 身份页宽屏：版心放开之后单列 1204 会让 UID 那格输入框拉成一条 1200px 的长条，
+   所以把三张面板排成「01 | 02」并排、03 横跨两列 —— 与上传页同样的两条竖流思路，
+   01 只有一格输入，跟 02 的验证串同高，右侧不空。 */
+@media (min-width: 1240px) {
+  #idform {
+    max-width: none;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px 24px;
+    align-items: start;
+  }
+  #idform > .panel:nth-of-type(1) { grid-column: 1; grid-row: 1; }
+  #idform > .panel:nth-of-type(2) { grid-column: 2; grid-row: 1; }
+  #idform > .panel:nth-of-type(3) { grid-column: 1 / -1; }
+  /* 验证那一行跟着版心走，不再停在 880。 */
+  #view-identity .cta-inline { max-width: none; }
 }
 
 /* 长文的可读宽度：卡片铺满版心之后，正文块各自停在 76ch 附近。
