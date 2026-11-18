@@ -5188,9 +5188,11 @@ function msOf(v) {
   return n >= 1e12 ? n : n * 1000;
 }
 
-function agoText(ms) {
+function agoText(ms, baseMs) {
   if (ms === null) return "";
-  const diff = Date.now() - ms;
+  // 人卡里的相对时间要跟快照对齐：拿「现在」去减一份旧快照的时间，会把「快照时刚活跃」
+  // 写成「26 天前活跃」。基准可传，默认仍是当前时钟。
+  const diff = (baseMs || Date.now()) - ms;
   if (diff < 0) return "刚刚";
   const m = Math.floor(diff / 60000);
   if (m < 1) return "刚刚";
@@ -5202,9 +5204,9 @@ function agoText(ms) {
   return `${Math.floor(d / 365)} 年前`;
 }
 
-function daysSince(ms) {
+function daysSince(ms, baseMs) {
   if (ms === null) return null;
-  const d = Math.floor((Date.now() - ms) / 86400000) + 1;
+  const d = Math.floor(((baseMs || Date.now()) - ms) / 86400000) + 1;
   return d > 0 ? d : null;
 }
 
@@ -5364,10 +5366,13 @@ function coolapkHeadCard(subject, identity) {
 
   const loginMs = idn ? msOf(idn.logintime) : null;
   const regMs = idn ? msOf(idn.regdate) : null;
+  // 这一卡是快照，不是实时：相对量（多久没活跃、注册第几天）一律以快照时刻为基准，
+  // 否则今天打开会把两个月前的快照算成「今天还在活跃」。
+  const capMs = idn ? msOf(idn.capturedAt) : null;
   const pills = node("div", "ck__pills");
-  pills.append(node("span", "ck__pill", loginMs === null ? "活跃时间没采到" : `${agoText(loginMs)}活跃`));
-  const days = daysSince(regMs);
-  pills.append(node("span", "ck__pill", days === null ? "注册天数算不出（没采到 regdate）" : `酷安第 ${days} 天`));
+  pills.append(node("span", "ck__pill", loginMs === null ? "活跃时间没采到" : `快照时 ${agoText(loginMs, capMs)}活跃`));
+  const days = daysSince(regMs, capMs);
+  pills.append(node("span", "ck__pill", days === null ? "注册天数算不出（没采到 regdate）" : `快照时酷安第 ${days} 天`));
   if (idn && idn.verify_title) pills.append(node("span", "ck__pill ck__pill--v", String(idn.verify_title)));
   cover.append(pills);
   wrap.append(cover);
@@ -5379,9 +5384,10 @@ function coolapkHeadCard(subject, identity) {
 
   const foot = node("div", "ck__foot");
   foot.append(node("span", null, regMs === null ? "注册日期没采到" : `注册 ${fmtDate(regMs)}`));
-  foot.append(node("span", null, idn && idn.capturedAt ? `快照 ${fmtDate(msOf(idn.capturedAt))}` : "没有快照时刻"));
+  foot.append(node("span", null, idn && idn.capturedAt ? `快照抓取于 ${fmtDate(msOf(idn.capturedAt))}` : "没有快照抓取时间"));
   const u = `https://www.coolapk.com/u/${encodeURIComponent(subject.coolapkUid)}`;
-  const a = node("a", "ck__replay", "任何人可重放：coolapk.com/u/" + subject.coolapkUid);
+  const a = node("a", "ck__replay", "个人主页");
+  a.title = "在酷安打开 coolapk.com/u/" + subject.coolapkUid;
   a.href = u;
   a.target = "_blank";
   a.rel = "noopener noreferrer";
