@@ -691,15 +691,14 @@
               <span class="panel__tag">who</span>
             </div>
             <p class="panel__note">
-              只填 UID：昵称和头像由酷安那边带回来，你不用填，也改不了。
-              这里要求酷安 <b>Lv2 以上</b>（防止乱传），等级不够验证过不去。
+              要求上传者酷安 <b>Lv2 以上</b>（防止乱传）。
             </p>
             <div class="field">
               <div class="field__lab"><label for="f-uid">上传人酷安 UID<span class="req">*</span></label></div>
               <input class="mono" type="text" id="f-uid" data-k="coolapkUid" placeholder="4-12 位数字" inputmode="numeric" autocomplete="off" spellcheck="false" required />
               <p class="field__help">
                 打开酷安「我的」→ <b>点自己头像</b> → 右上角<b>三点</b> →
-                「查看我的资料」里的 <b>用户 UID</b> 就是。
+                「查看我的资料」里的 <b>用户 UID</b> 点击即可复制。
               </p>
               <p class="field__err" data-err="coolapkUid">UID 应是 4-12 位纯数字</p>
             </div>
@@ -735,6 +734,7 @@
               <h2 id="pid2t">把酷安签名临时改为这一串</h2>
               <span class="panel__tag">commit</span>
             </div>
+            <p class="panel__note">为了证明你填写的 UID 确实是你在用。</p>
             <div class="commit">
               <code class="mono commit__val" id="identity-commit" aria-live="polite">……</code>
               <div class="commit__acts">
