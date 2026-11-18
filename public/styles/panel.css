@@ -1477,6 +1477,15 @@ textarea:focus {
   font-size: 12.5px;
   color: var(--ink-3);
 }
+/* 身份验证弹窗的副标题就是这一屏的主句（上面那行 VERIFY IDENTITY 只是标签），
+   单独放大加粗；「上传前确认」那张弹窗的说明仍是小字，不跟着变。 */
+#layer-auth .warn__sub {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
 .warn__body {
   padding: 16px var(--gut);
 }
