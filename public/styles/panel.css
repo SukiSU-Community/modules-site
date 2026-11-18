@@ -2932,6 +2932,13 @@ mark {
     grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
     gap: 22px 40px;
   }
+  /* 规格铭牌贴住导语的末行，而不是跟标题的顶边平齐：
+     行高由左列决定，align-self:end 先把它压到行底，再让回导语那 14px 的下边距，
+     底边才正好落在文字线上，不跟着顶栏走。 */
+  .hero__grid > .spec {
+    align-self: end;
+    margin-bottom: 14px;
+  }
 }
 
 /* 触控档：可点目标补到 44×44（WCAG 2.5.5）。能加高的直接加高；
