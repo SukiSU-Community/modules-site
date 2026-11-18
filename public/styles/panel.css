@@ -8,17 +8,17 @@
 :root {
   /* —— 夜间：深空为体，琥珀为号，薄荷只用来报好消息 —— */
   color-scheme: dark;
-  --void: #07080b;
-  --void-2: #0a0c11;
-  --panel: #0e1117;
-  --panel-2: #12161e;
-  --panel-3: #171d27;
-  --line: #1d232e;
-  --line-2: #2b3442;
-  --line-hover: #3a4557;
-  --well: #05060a;
-  --btn-hover: #1f2734;
-  --ph: #4a5464;
+  --void: #0f1218;
+  --void-2: #131720;
+  --panel: #181d26;
+  --panel-2: #1e242f;
+  --panel-3: #262e3b;
+  --line: #2c3544;
+  --line-2: #3c475a;
+  --line-hover: #4e5b70;
+  --well: #0b0d12;
+  --btn-hover: #2e3847;
+  --ph: #5d697c;
 
   --ink: #e9ecf3;
   --ink-2: #98a3b5;
@@ -49,13 +49,13 @@
   --glow: rgba(255, 176, 32, 0.075);
   --grid: rgba(255, 255, 255, 0.026);
   --hatch: rgba(255, 255, 255, 0.014);
-  --bezel-bg: rgba(7, 8, 11, 0.82);
-  --dock-bg: rgba(14, 17, 23, 0.94);
-  --veil: rgba(4, 5, 7, 0.86);
-  --shadow: rgba(0, 0, 0, 0.95);
+  --bezel-bg: rgba(15, 18, 24, 0.84);
+  --dock-bg: rgba(24, 29, 38, 0.94);
+  --veil: rgba(6, 8, 12, 0.86);
+  --shadow: rgba(0, 0, 0, 0.9);
   --ring: rgba(255, 176, 32, 0.08);
-  --grain-o: 0.045;
-  --hazard-b: #0b0c10;
+  --grain-o: 0.04;
+  --hazard-b: #141820;
 
   /* —— 字 —— */
   --display: "Chakra Petch", "Trebuchet MS", sans-serif;
@@ -2373,7 +2373,7 @@ mark {
 }
 .pc__cover {
   padding: 12px;
-  background: linear-gradient(160deg, #10151c 0%, #1b2330 55%, #0d1116 100%);
+  background: linear-gradient(160deg, #1a212c 0%, #242e3c 55%, #181d26 100%);
   border-bottom: 1px solid var(--line);
 }
 .pc__idrow {
@@ -2389,14 +2389,14 @@ mark {
   flex: 0 0 38px;
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.86);
-  background: #202633;
+  background: #2b3340;
   color: #fff;
   font: 600 15px/1 var(--mono);
 }
 .pc__av--pic {
   display: block;
   object-fit: cover;
-  background: #202633;
+  background: #2b3340;
   padding: 0;
 }
 .pc__names {
@@ -4628,7 +4628,7 @@ html.kb-open .dock {
   padding: 0;
   border: 1px solid var(--line-2);
   border-radius: 12px;
-  background: #0d1116;
+  background: var(--panel);
   overflow: hidden;
   isolation: isolate;
 }

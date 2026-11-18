@@ -726,7 +726,7 @@ function applyTheme(mode, animate) {
   root.setAttribute("data-theme", mode);
   $("#theme-txt").textContent = mode === "light" ? "日间" : "夜间";
   $("#theme").setAttribute("aria-label", `当前为${mode === "light" ? "日间" : "夜间"}主题，点击切换`);
-  $("#theme-color").setAttribute("content", mode === "light" ? "#F5F3EE" : "#07080B");
+  $("#theme-color").setAttribute("content", mode === "light" ? "#F5F3EE" : "#0F1218");
 }
 
 function bindTheme() {
