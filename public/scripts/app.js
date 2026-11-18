@@ -2131,15 +2131,26 @@ function gateItems() {
 
   ];
   if (IS_UID_VERIFY_ON) {
-    const label =
-      state.uidStatus === "verified"
-        ? "酷安账号核实过了"
-        : uidBlocked()
-        ? "酷安账号没核实过"
-        // 「这条不拦你」只说自己这一条，不承诺整张清单放行 —— 核实没成时签名也不会有，
+    const verified = state.uidStatus === "verified";
+    const blocked = uidBlocked();
+    const uidVal = fieldValue("coolapkUid");
+    const label = verified
+      ? "酷安账号核实已通过"
+      : blocked
+      ? "该酷安账号未能核实：UID 不存在或格式不符"
+      : // 「该项不阻断提交」只说自己这一条，不承诺整张清单放行 —— 核实没成时签名也不会有，
         // 于是下一条才是真正按住按钮的那条。两句并排时必须各说各的范围，否则互相打脸。
-        : "酷安账号核实（这条不拦你；核实过了才生成签名）";
-    items.push({ ok: !uidBlocked(), text: label });
+        "酷安账号核实（该项不阻断提交；核实通过后才会生成签名）";
+    items.push({
+      // ok 仍只表示「拦不拦提交」，判据一个字没动。
+      ok: !blocked,
+      // 但绿勾只能表示「这一项通过了」。没核实也没被拦时它只是「不影响提交」，
+      // 画成 pass 就等于在清单第一屏亮一颗假绿灯 —— 这一档改用 note 的黄点。
+      note: !verified && !blocked,
+      // 连 UID 都还没填时这一步根本没开始：不占位，别让空表单上先冒出一颗点。
+      shown: Boolean(uidVal) || verified || blocked,
+      text: label,
+    });
   }
   // 三条上限全部来自后端自报（§17.6）：问到才拦，问不到就不假装拦 —— 前端猜一个数字当闸，
   // 就是这个站漂过「前端 8MB、后端 2MB」那一类的形状。
