@@ -1509,7 +1509,8 @@ textarea:focus {
   background: var(--panel);
   border-radius: 0 0 var(--r) var(--r);
 }
-.warn__ft .btn {
+/* 只有最后一个按钮贴右：两个都写 auto 时剩余空间被平分，「稍后验证」会被挤到中间。 */
+.warn__ft .btn:last-child {
   margin-left: auto;
 }
 
