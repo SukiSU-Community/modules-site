@@ -345,6 +345,8 @@ code {
 }
 .nav a {
   --nav-fg: var(--ink-2);
+  position: relative;
+  z-index: 0;
   flex: none;
   display: flex;
   align-items: baseline;
@@ -356,8 +358,19 @@ code {
   text-decoration: none;
   font-size: 13.5px;
   white-space: nowrap;
-  transition: color 0.16s var(--ease), border-color 0.16s var(--ease),
-    background 0.16s var(--ease);
+  transition: color 0.16s var(--ease);
+}
+/* 方框画在伪元素上，纵向内缩 4px：可点区域仍是整颗 44 高的胶囊，
+   但视觉上的框更贴字，顶栏不会显得一排胖按钮。 */
+.nav a::before {
+  content: "";
+  position: absolute;
+  inset: 4px 0;
+  z-index: -1;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  background: transparent;
+  transition: border-color 0.16s var(--ease), background 0.16s var(--ease);
 }
 .nav a i {
   font: 600 10px/1 var(--mono);
@@ -367,10 +380,17 @@ code {
 }
 .nav a:hover {
   color: var(--ink);
+  background: transparent;
+}
+.nav a:hover::before {
   background: var(--panel);
 }
 .nav a[aria-current="page"] {
   color: var(--amber);
+  border-color: transparent;
+  background: transparent;
+}
+.nav a[aria-current="page"]::before {
   border-color: var(--amber-line);
   background: var(--amber-wash);
 }
@@ -2286,6 +2306,9 @@ mark {
     gap: 0;
     padding: 9px 6px;
     font-size: 12.5px;
+  }
+  .nav a::before {
+    inset: 6px 0;
   }
   .theme {
     position: relative;
