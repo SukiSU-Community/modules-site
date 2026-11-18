@@ -199,7 +199,7 @@
                 <path d="M12 3 3 7.5v9L12 21l9-4.5v-9L12 3Z" />
                 <path d="M3 7.5 12 12l9-4.5M12 12v9" />
               </svg>
-              <span class="drop__t">把 zip 拖进来，或点这里选文件</span>
+              <span class="drop__t">拖入 zip 文件，或点击选择</span>
               <span class="drop__s" id="drop-hint">正在读取上限…</span>
               <input type="file" id="file" name="zip" accept=".zip,application/zip" multiple />
             </label>
@@ -239,7 +239,7 @@
                  读数与队列用的是同一份判据（activeCard），不是第二个状态；只有一枚时这一行不出现。 -->
             <div class="editing" id="editing" hidden></div>
             <p class="panel__note" id="meta-note">
-              中间这张就是当前在改的模块，左右点一下切换。信息一般从包里的
+              中间这一张为当前正在编辑的模块，左右点击切换。信息一般从包里的
               <code>module.prop</code> 自动读出来，你改的只影响这次提交，zip 本身不会变。
               每个都要填齐，漏一个就整批传不上去。
             </p>
@@ -343,7 +343,7 @@
               <div class="field__lab"><label for="f-source">酷安帖子链接</label></div>
               <input class="mono" type="text" id="f-source" data-k="source" placeholder="https://www.coolapk.com/feed/65432100" autocomplete="off" spellcheck="false" />
               <p class="field__help">
-                发这个模块的<b>酷安帖链接</b>。没有的话顺手发一个存档帖，也当宣传。
+                发这个模块的<b>酷安帖链接</b>。若无，可另发一条存档帖作为宣传。
               </p>
               <p class="field__err" data-err="source">请填酷安站内链接</p>
             </div>
@@ -372,8 +372,8 @@
             </p>
 
             <div class="callout" id="authbar" hidden>
-              <b>还没验证身份。</b>现在可以先填；点「上传前确认」时会请你验证一次，之后 90 天内都不用再验证。
-              <a href="#/identity">现在就去验证 →</a>
+              <b>尚未验证身份。</b>可先填写内容；点击「上传前确认」时需完成一次身份验证，此后 90 天内无需重复验证。
+              <a href="#/identity">前往验证 →</a>
             </div>
 
             <ul class="gate" id="gate" aria-label="提交前自检"></ul>
@@ -424,7 +424,7 @@
         <div class="hero rise">
           <h1 id="h-moderation">举报与<span class="hi">处置</span></h1>
           <p class="hero__lede">
-            模块跑的是系统最高权限，一个坏包能毁掉整台手机。所以这里不私下处理：每次下架和拒收都逐条公开，带上能核对的凭据，跟着 git 历史长期留档。
+            模块以 root 权限运行，一个坏包可以毁掉整台设备。所以这里不做私下处理：每次下架和拒收都逐条公开，带上可核对的凭据，随 git 历史长期留档。
             对做恶意模块、或拿别人作品改一改夹私货的，我们保留报案和<span class="hl">依法追究责任</span>的权利。
           </p>
         </div>
@@ -498,12 +498,12 @@
                 <p class="field__help" id="rp-proof-help"></p>
                 <p class="field__help">
                   打开酷安「我的 → 编辑资料 → 个性签名」，把上面那串贴进去保存，再回来提交。
-                  这串和<b>被举报的模块、包体校验值</b>绑定，换模块换版本都会变。
+                  这一串与<b>被举报的模块、包体校验值</b>绑定，更换模块或版本即会变化。
                   它证明这个账号是你的 —— 公示只认这个凭据，用别人的 UID 报不了。
                 </p>
                 <p class="field__help">
-                  <button type="button" class="btn btn--ghost btn--sm" id="rp-nonce-renew">换一串</button>
-                  提交成功后这串就作废；要再报别的模块，回来点「换一串」，重新填一次。
+                  <button type="button" class="btn btn--ghost btn--sm" id="rp-nonce-renew">更换一串</button>
+                  提交成功后这一串即作废；如需举报其他模块，返回点击「更换一串」重新填写。
                 </p>
               </div>
               <p class="field__err" id="rp-error" hidden></p>
@@ -581,7 +581,7 @@
               </p>
               <p>
                 每条下架记录上都有一个<strong>自动标记</strong>（<code>ci:audit@&lt;提交&gt;</code>）：
-                写明这条是哪一次检查判的，旁边那条命令谁都能重跑一遍。
+                写明这条是哪一次检查判定，旁边的命令任何人可重新执行核对。
                 <strong>这里没有人工审批</strong> —— 全是自动检查，想让结论翻过来，别找人，
                 把证据摆到那次检查看得见的地方。
               </p>
@@ -666,14 +666,6 @@
           <h3><span>E</span>怎么加到管理器里</h3>
           <p id="addsrc">模块库地址还没配好，配好后这里会给出一键添加的链接。</p>
 
-          <h3><span>F</span>这个站自己的情况</h3>
-          <p>纯静态页面，没有自己的服务器，所有请求直接发给服务端。现在的接线情况：</p>
-          <ul class="selfcheck" id="selfcheck"></ul>
-          <p style="margin-top:12px">
-            上传接口接了 <b style="color:var(--ink)">Cloudflare 人机校验</b>，并按 IP
-            限流；校验没配密钥时会跳过，限流没绑存储时也不生效。校验部件不占首屏，
-            第一次选包或打开「上传前确认」时才加载，没过校验就进不去确认。本站不会自己做验证码。
-          </p>
         </article>
       </section>
 
@@ -682,14 +674,14 @@
         <div class="hero rise">
           <h1 id="h-identity">先确认<span class="hi">是你</span></h1>
           <p class="hero__lede" id="identity-lede">
-            上传<b>没有人工复核</b>：过了这道验证和自动检查，包就直接进模块库、进公开仓库。
-            而模块是在别人手机上用<b>最高权限</b>跑的 —— 一个坏包能造成的损失没有上限，
-            所以<b>「谁传的」必须查得到</b>。填你的酷安 UID，把这一屏给出的<b>验证串</b>写进酷安签名，
-            我们读一次签名来核对，之后 <b>90 天内</b>再上传都不用再碰签名。
+            通过这道验证与自动检查后，包会直接进入模块库与公开仓库。
+            模块在他人设备上以 <b>root 权限</b>运行，一个坏包的影响没有上限，
+            因此<b>必须能查到上传者身份</b>。填写酷安 UID，并把这一页给出的<b>验证串</b>写入酷安签名，
+            系统读取一次签名即可核对；此后 <b>90 天内</b>再次上传无需重复验证。
           </p>
         </div>
 
-        <p class="field__help" style="margin:-4px 0 14px"><a href="#/submit">← 先回上传页填着</a>，想验证了再回来。</p>
+        <p class="field__help" style="margin:-4px 0 14px"><a href="#/submit">← 返回上传页</a>，稍后再验证。</p>
 
         <form class="idform rise" id="idform" novalidate>
           <section class="panel" aria-labelledby="pid1t">
@@ -740,26 +732,17 @@
           <section class="panel" aria-labelledby="pid2t">
             <div class="panel__hd">
               <span class="panel__no">02</span>
-              <h2 id="pid2t">把酷安签名临时改成这串</h2>
+              <h2 id="pid2t">把酷安签名临时改为这一串</h2>
               <span class="panel__tag">commit</span>
             </div>
-            <p class="panel__note">
-              这串是<b>这台浏览器</b>随机生成的：
-              填进签名的是它，核对时重算一遍，就知道签名的人手里有没有它。
-              签名谁都能看，但里面只有指纹、拿不到原值，抄走没用。
-            </p>
             <div class="commit">
               <code class="mono commit__val" id="identity-commit" aria-live="polite">……</code>
               <div class="commit__acts">
-                <button type="button" class="btn btn--ghost btn--sm" id="identity-copy">复制这串</button>
+                <button type="button" class="btn btn--ghost btn--sm" id="identity-copy">复制这一串</button>
               </div>
             </div>
             <p class="field__help" id="identity-commit-cap">
-              把这串写进酷安签名，验过之后随时能换回你原来的。
-            </p>
-            <p class="field__help">
-              酷安里打开「我 → 编辑资料 → 个性签名」，把这串粘进去保存。
-              这一步只是证明 UID 确实是你在用，验完随时能换回来。
+              打开酷安「我 → 编辑资料 → 个性签名」，把这一串粘贴保存；验证通过后换回原来的签名。
             </p>
           </section>
 
@@ -796,7 +779,7 @@
 
         <!-- 等级不足会把账号卡成死局：Worker 那边每发一次 /session/issue 都回 level_too_low，
              光重试永远过不去。所以这一屏认下这个码之后把该 uid 记进 localStorage，按钮锁住，
-             并在按钮旁边留一条手动出路（升完级点一下才解除 —— 不自动解除，否则就是每 30 秒
+             并在按钮旁边保留一条手动解除途径（升级后需手动点击解除 —— 不自动解除，否则每 30 秒
              白烧一次接口额度）。 -->
         <p class="callout callout--err" id="id-level-block" hidden>
           <b>去酷安把等级升到 Lv2 以上，再回来验证</b>
@@ -858,19 +841,19 @@
           </svg>
           <div>
             <div class="warn__ttl" id="auth-ttl">Verify Identity</div>
-            <p class="warn__sub">上传前要先确认这个酷安账号是你的。验证一次，90 天内再传都不用重复。</p>
+            <p class="warn__sub">上传前需确认该酷安账号归属。完成一次验证后，90 天内无需重复验证。</p>
           </div>
         </div>
         <div class="warn__body">
           <p class="warn__lead">! 这一步不是走形式</p>
           <ul class="ticks ticks--flat">
-            <li><span class="tick__txt">上传<b>没有人工复核</b>，过了自动检查就直接进模块库；模块在别人手机上是用<b>最高权限</b>跑的，所以「谁传的」必须查得到。</span></li>
-            <li><span class="tick__txt">验证只要一步：把这一屏给你的<b>验证串</b>写进酷安签名，我们读一次就认。</span></li>
-            <li><span class="tick__txt">验证通过后，右上角会显示你的<b>酷安头像</b>；点它能看上传记录，也能<b>退出该身份</b>。</span></li>
+            <li><span class="tick__txt">通过自动检查后包会直接进入模块库；模块在他人设备上以 <b>root 权限</b>运行，因此必须能查到上传者身份。</span></li>
+            <li><span class="tick__txt">验证只需一步：把本页给出的<b>验证串</b>写入酷安签名，系统读取一次即可确认。</span></li>
+            <li><span class="tick__txt">验证通过后，右上角会显示<b>酷安头像</b>；点击可查看上传记录或<b>退出该身份</b>。</span></li>
           </ul>
         </div>
         <div class="warn__ft">
-          <button type="button" class="btn btn--ghost" id="auth-later">先填着</button>
+          <button type="button" class="btn btn--ghost" id="auth-later">稍后验证</button>
           <button type="button" class="btn btn--go" id="auth-go">去验证身份</button>
         </div>
       </div>

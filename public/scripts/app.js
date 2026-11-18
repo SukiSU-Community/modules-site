@@ -720,7 +720,7 @@ function applyTheme(mode, animate) {
   }
   root.setAttribute("data-theme", mode);
   $("#theme-txt").textContent = mode === "light" ? "日间" : "夜间";
-  $("#theme").setAttribute("aria-label", `现在是${mode === "light" ? "日间" : "夜间"}，点一下换过来`);
+  $("#theme").setAttribute("aria-label", `当前为${mode === "light" ? "日间" : "夜间"}主题，点击切换`);
   $("#theme-color").setAttribute("content", mode === "light" ? "#F5F3EE" : "#07080B");
 }
 
@@ -1127,6 +1127,19 @@ function paintAuthorHint(card) {
 function bindFile() {
   const drop = $("#drop");
   const input = $("#file");
+  // 点上传区先认人：未验证身份时先弹验证层，不让浏览器的文件选择框抢走这一步。
+  // 捕获阶段拦，label 的默认激活（打开选择框）才不会先发生。
+  const gateFilePick = (e) => {
+    if (state.auth === "in") return;
+    e.preventDefault();
+    e.stopPropagation();
+    openAuthPrompt();
+  };
+  drop.addEventListener("click", gateFilePick, true);
+  input.addEventListener("click", gateFilePick, true);
+  // 触屏上没有拖放这回事：文案照实说，别让人在手机上找一个做不到的手势。
+  const dropT = drop.querySelector(".drop__t");
+  if (dropT && window.matchMedia("(hover: none)").matches) dropT.textContent = "点击选择 zip 文件";
   // 多选：change 给的是整个 FileList。这里当场把 input 的值清掉 —— 不清的话同一个包
   // 第二次选不中（files 没变化就不触发 change），而拖拽那条路本来就没有值可清。
   input.addEventListener("change", () => {
@@ -1991,10 +2004,10 @@ function uidBlocked() {
    说明文字一律先说「还差什么」再说已有什么 —— 底栏那句「全部就绪」也由这些句子代写，
    签名还没出现在屏幕上时它不许说就绪（见 refreshGate 里那段 shown）。 */
 const NONCE_WHY = {
-  off: "服务器还没接酷安核实，签名生成不了 —— 上传暂时没开放",
-  self_reported: "服务器收到了 UID 但没去核实，签名生成不了 —— 上传暂时没开放",
-  unavailable: "这次没核实成，签名还没出来 —— 把 UID 重敲一遍会再查",
-  checking: "正在核实 UID —— 过了还要有模块 ID 和包的校验值，才算得出这一串",
+  off: "服务器尚未接入酷安核实，无法生成签名 —— 上传暂未开放",
+  self_reported: "服务器已收到 UID 但未做核实，无法生成签名 —— 上传暂未开放",
+  unavailable: "本次核实未成功，签名尚未生成 —— 重新输入 UID 会再查一次",
+  checking: "正在核实 UID —— 核实通过后仍需模块 ID 与包校验值才能生成签名",
 };
 
 function gateItems() {
@@ -2055,83 +2068,67 @@ function gateItems() {
 
   // 下面每一格说的都是**这一整套**，不是「当前这一枚」—— 因为提交是整套一次。
   // 所以每一格都要点不出「是哪一枚」（枚数一多，「还差一步」不说差在哪一枚就等于没说）。
+  // 清单只保留会直接阻断提交的条目：能合并的合并，通过态不占位（作者主页两格只在填错时才出现）。
+  // 每一项说的都是「这一整套」—— 提交是整批一次，逐枚报错会让人看不清差在哪一枚。
   const items = [
-    // 解析链的失败必须自己说话。这一格存在的理由写在 scheduleIntake 的注释里：
-    // 链一旦 reject 过，之后每一次选包都会被静默跳过 —— 没有这一行，用户的界面就是「点了没反应」。
     ...(state.intakeError
       ? [
           {
             ok: false,
-            text:
-              `刚才那批包没收下：${state.intakeError}。` +
-              "把包再拖一次就行；反复出现就把这句话原样发给站点 —— 是浏览器没解开，不是你的包有问题。",
+            text: `刚才那批包没有读入：${state.intakeError}。请重新选择一次；反复出现请把这句话原样反馈给站点。`,
           },
         ]
       : []),
     {
-      ok: targets.length > 0 && incomplete.length === 0,
-      text: incomplete.length
-        ? `这一批里有 ${incomplete.length} 个没填完：${namesOf(incomplete)} —— 模块 ID、名称、版本名、版本代号都要填，来源或源码至少一个，校验值也得算出来`
-        : targets.length
-        ? `这一批 ${targets.length} 个都选好了包、根目录都有 module.prop、信息也填齐了`
-        : "还没选包：可以只传一个，也可以一批一起传，先把包拖进来",
-    },
-    {
-      ok: metaBad.length === 0 && targets.length > 0,
-      text: metaBad.length
-        ? `版本代号要整数，四个必填都要有：${namesOf(metaBad)}`
-        : "每一个的模块 ID、名称、版本名、版本代号都齐（代号是整数）",
-    },
-    {
-      ok: noOrigin.length === 0 && targets.length > 0,
-      text: noOrigin.length
-        ? `来源或源码至少填一个：${namesOf(noOrigin)}`
-        : targets.length
-        ? "每一个都填了来源或源码"
-        : "选好包之后，来源和源码至少填一项（两个都填也行：填了源码才能自动跟新版）",
-    },
-    {
-      ok: badSource.length === 0 && badRepo.length === 0 && targets.length > 0,
+      ok: targets.length > 0 && incomplete.length === 0 && metaBad.length === 0,
       text:
-        badSource.length || badRepo.length
+        targets.length === 0
+          ? "尚未选择安装包：可以上传一个，也可以整批上传"
+          : incomplete.length || metaBad.length
+          ? `这一批有 ${incomplete.length || metaBad.length} 个模块信息未填完：${namesOf(incomplete.length ? incomplete : metaBad)} —— 模块 ID、名称、版本名、版本代号均为必填，版本代号取整数`
+          : `这一批 ${targets.length} 个包已选好，模块信息也已填齐`,
+    },
+    {
+      ok: noOrigin.length === 0 && badSource.length === 0 && badRepo.length === 0 && targets.length > 0,
+      text:
+        noOrigin.length || badSource.length || badRepo.length
           ? [
-              badSource.length ? `来源得是酷安站内链接：${namesOf(badSource)}` : "",
-              badRepo.length
-                ? `源码得写成 https://github.com/<owner>/<repo>：${namesOf(badRepo)}`
-                : "",
+              noOrigin.length ? `来源或源码至少填一项：${namesOf(noOrigin)}` : "",
+              badSource.length ? `来源需为酷安站内链接：${namesOf(badSource)}` : "",
+              badRepo.length ? `源码需写成 https://github.com/<owner>/<repo>：${namesOf(badRepo)}` : "",
             ]
               .filter(Boolean)
               .join("；")
           : targets.length
-          ? "每一个的来源都是酷安链接、源码地址格式也对"
-          : "来源要填酷安站内链接，源码要写成 https://github.com/<owner>/<repo>",
+          ? "来源与源码链接格式正确"
+          : "来源填酷安站内链接，源码填 https://github.com/<owner>/<repo>，两者至少一项",
     },
-    {
-      // 两格都选填：**空着也通过**（这是与「来源或仓库」那一格的根本区别，别照着抄成必填）。
-      // 填了才校验，且校验的是「个人主页」而不是「帖子/仓库」—— 这一格存在的意义就是指向人。
-      ok: badAuthorCoolapk.length === 0 && badAuthorGithub.length === 0,
-      text:
-        badAuthorCoolapk.length || badAuthorGithub.length
-          ? [
+    ...(badAuthorCoolapk.length || badAuthorGithub.length
+      ? [
+          {
+            ok: false,
+            text: [
               badAuthorCoolapk.length
-                ? `作者酷安主页要写成 https://www.coolapk.com/u/<4-12 位数字>，帖子链接不算：${namesOf(badAuthorCoolapk)}`
+                ? `作者酷安主页需写成 https://www.coolapk.com/u/<4-12 位数字>：${namesOf(badAuthorCoolapk)}`
                 : "",
               badAuthorGithub.length
-                ? `作者 GitHub 主页要写成 https://github.com/<用户名>，仓库地址不算：${namesOf(badAuthorGithub)}`
+                ? `作者 GitHub 主页需写成 https://github.com/<用户名>：${namesOf(badAuthorGithub)}`
                 : "",
             ]
               .filter(Boolean)
-              .join("；")
-          : "作者主页两格可以不填；填了就得是个人主页（酷安 /u/<UID> 或 github.com/<用户名>）",
-    },
+              .join("；"),
+          },
+        ]
+      : []),
     {
-      ok: !missingShared.includes("uploader"),
-      text: "上传人昵称已经从酷安拿到了（一次上传一个署名，这一批都用它）",
+      ok: !missingShared.includes("uploader") && !missingShared.includes("coolapkUid") && !badUid,
+      text: badUid
+        ? "酷安 UID 格式不对：应为 4-12 位数字"
+        : !missingShared.includes("uploader") && !missingShared.includes("coolapkUid")
+        ? "上传人称谓与酷安 UID 已就绪"
+        : "填写上传人昵称与酷安 UID（整批共用一份）",
     },
-    {
-      ok: !missingShared.includes("coolapkUid") && !badUid,
-      text: "酷安 UID 填了，是 4-12 位数字（一次上传填一次，不用每个都填）",
-    },
+
   ];
   if (IS_UID_VERIFY_ON) {
     const label =
@@ -2187,32 +2184,32 @@ function gateItems() {
     let nonceText;
     if (viaSession) {
       nonceText = state.cards.length > 1
-        ? `这一批 ${targets.length} 个走长效会话（90 天内免改签名）—— 这次不用改签名，也不用填任何一串`
-        : "走长效会话（90 天内免改签名）—— 这次不用改签名，也不用填任何一串";
+        ? `这一批 ${targets.length} 个使用长效会话（90 天内免改签名）—— 本次无需修改签名，也无需填写验证串`
+        : "使用长效会话（90 天内免改签名）—— 本次无需修改签名，也无需填写验证串";
     } else if (!state.nonce) {
       nonceText =
         NONCE_WHY[state.uidStatus] ||
-        "签名还没出来 —— UID 核实通过、填上模块 ID、选好包，这一串才会出现";
+        "签名尚未生成：需 UID 核实通过并选好安装包，签名才会出现";
     } else if (recorded.length && !targets.length) {
-      nonceText = "这一批没有要传的了：都被「有人传过」那一档摘出去了，没有签名可生成，也不用填任何东西。";
+      nonceText = "这一批没有待上传的包：均已被「已有他人上传」一档剔除，无需生成签名，也无需填写内容。";
     } else if (!proofId && card && !isRecorded(card)) {
-      nonceText = "签名还差：模块 ID —— 校验段有了，但还要模块 ID 和包的校验值才算得出";
+      nonceText = "签名尚缺模块 ID：校验段已就绪，仍需模块 ID 与包校验值";
     } else if (incomplete.length) {
       // 两句各说一个来源缺哪一样：没选包是「还没得选」，选了包是「正在算 / 没算出来」。
       // 都不写「正在算」的肯定语气 —— 算失败时那句话就成假话了。
       const noZip = incomplete.filter((c) => !c.zip);
       const noSha = incomplete.filter((c) => c.zip && !c.zipSha);
       nonceText = noZip.length
-        ? "签名还差：还没选包 —— 签名绑的是这批的字节，先选包才出得来"
+        ? "签名尚缺安装包：签名绑定本批包的字节，选包后才会生成"
         : noSha.length
-        ? `签名还差：校验值还在算 —— 算完会自己出现；一直不出就给${namesOf(noSha)}换个包`
-        : `签名还差：${namesOf(incomplete)} 的信息没填完 —— 签名按整批算，少一个都不成`;
+        ? `签名尚缺校验值：计算中，完成后自动出现；长时间未出现请为 ${namesOf(noSha)} 更换安装包`
+        : `签名尚缺 ${namesOf(incomplete)} 的模块信息：签名按整批计算，缺一项即无法生成`;
     } else if (dupId) {
       // 三个来源都在，但这一套的形状本身算不出串：两枚模块 ID 相同 ⇒ canonicalProofSet 抛。
       // 这一句必须存在，否则下面那句「共用一串签名」就成了屏幕上的一句假话。
       nonceText =
-        "签名还差：队列里有两个 ID 相同 —— ID 重复时这一串算不出来" +
-        "（服务端也会整单退回），移掉其中一个或改个 ID";
+        "签名尚缺：队列中有两个相同模块 ID —— ID 重复时无法生成签名" +
+        "（服务端也会整单退回），请移除其中一个或修改 ID";
     } else {
       nonceText = state.cards.length > 1
         ? `这一批 ${targets.length} 个共用一串签名（填进酷安签名，只改这一次）`
@@ -2245,11 +2242,10 @@ function gateItems() {
       text: turnstileOk()
         ? "校验过了"
         : turnstileStarted
-        ? "人机校验还没过 —— 04 区那块要转出「成功」才给令牌；没加载出来就点它重试"
-        : "人机校验还没开始 —— 选好包会自动加载，也可以点一下 04 区先加载",
+        ? "人机校验未通过：04 区组件显示「成功」后才会发放令牌；未能加载时点击该组件重试"
+        : "人机校验尚未开始：选好包后自动加载，也可点击 04 区组件手动加载",
     });
   }
-  items.push({ ok: IS_API_CONFIGURED, text: "服务器已经接上" });
   if (recorded.length) {
     // 早期重复拦截：这几枚已经被摘出这一套 —— 不进 manifest、不进签名那一串、也不提交。
     // 判据是后端 /check 给的那一档，前端没有另判一份「这个包合不合规」。
@@ -2315,6 +2311,10 @@ function refreshGate() {
   const items = gateItems();
   list.textContent = "";
   for (const item of items) {
+    // shown === false 的是「这一步还没到」的状态行（签名要等先选包、人机要等组件加载）。
+    // 初始状态下把它们一并列出来，清单就变成一串「还没开始」，看的人得先读五行才知道自己要做三件事。
+    // 只影响画哪几行：ready 仍按整份 items 算，按钮的亮灭一个字没动。
+    if (item.shown === false) continue;
     // 三档而不是两档：note 那一格不拦提交（它的 ok 为真），但画成 ✓ 就成了「这一项通过了」，
     // 而它讲的是「有一枚被摘出去了」。
     const cls = item.note ? "note" : item.ok ? "pass" : "";
@@ -2643,7 +2643,7 @@ function paintProofs(set, text, bad) {
         await navigator.clipboard.writeText(text);
         copy.textContent = "复制好了";
       } catch {
-        copy.textContent = "浏览器不让复制，自己选中吧";
+        copy.textContent = "自动复制不可用，请手动选中";
       }
       setTimeout(() => (copy.textContent = "复制"), 1500);
     });
@@ -4902,7 +4902,7 @@ function paintProof(target) {
           await navigator.clipboard.writeText(text);
           copy.textContent = "复制好了";
         } catch {
-          copy.textContent = "浏览器不让复制，自己选中吧";
+          copy.textContent = "自动复制不可用，请手动选中";
         }
         setTimeout(() => (copy.textContent = "复制"), 1500);
       });
@@ -5141,7 +5141,7 @@ function renderIncLegend() {
     ["下架 / 拒收", "下架只挡这一段内容（按模块 ID、ID+版本代号或包的校验值命中）；拒收会挡住这个人以后传的任何包。"],
     ["命中条件", "同一条里的多个条件是「且」的关系，不是「或」——写了 ID 又写 versionCode，就只命中那一个版本。"],
     ["证据（by）", "新版是一个自动标记：`ci:audit@<提交>`，写的是这条处置被哪一次自动检查定下，旁边那条复核命令谁都能重跑。它不是链接 —— 章里不带仓库地址，硬拼一个能点的地址，等于替它编一个不知道的去向。main 上还有换代前留下的老记录，那一类的 by 是一条能点开的评论，照旧给链接。两种都认，只认新的那种会把已经发生过的处置说成「没有证据」。形状不对的指针原样显示成文本。这一页显示的就是公示原文，判定在模块库侧完成，前端不另判一份。"],
-    ["复核（verify）", "有这一项时任何人都能自己跑一遍确认这条处置成立，而不是只能相信页面上写的。"],
+    ["复核（verify）", "有这一项时任何人可自行执行以确认该处置成立，无需仅凭页面表述采信。"],
     ["时间", "带时区的那一刻，不是「大概哪天」。"],
   ];
   for (const [k, v] of rows) {
@@ -5971,14 +5971,17 @@ function renderAbout() {
       ok: canInflateRaw(),
     },
   ];
+  // 说明页已不再提供这一节，容器可能不在：在就照常填，不在就跳过，不让整页崩在这里。
   const list = $("#selfcheck");
-  list.textContent = "";
-  for (const { k, v, ok } of checks) {
-    const li = node("li");
-    li.append(node("span", "nm", k));
-    li.append(node("span", "val", v));
-    li.append(node("span", ok ? "chip chip--ok" : "chip chip--warn", ok ? "OK" : "待填"));
-    list.append(li);
+  if (list) {
+    list.textContent = "";
+    for (const { k, v, ok } of checks) {
+      const li = node("li");
+      li.append(node("span", "nm", k));
+      li.append(node("span", "val", v));
+      li.append(node("span", ok ? "chip chip--ok" : "chip chip--warn", ok ? "OK" : "待填"));
+      list.append(li);
+    }
   }
 
   const add = $("#addsrc");
