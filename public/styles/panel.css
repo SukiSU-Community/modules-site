@@ -4616,7 +4616,7 @@ html.kb-open .dock {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.42;
+  opacity: 0.82;
   pointer-events: none;
 }
 /* 暗层：保证任何封面图上白字都读得清；压在最底与图之上、正文之下。 */
@@ -4626,7 +4626,7 @@ html.kb-open .dock {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: linear-gradient(180deg, rgba(7, 8, 11, 0.2) 0%, rgba(7, 8, 11, 0.55) 45%, rgba(7, 8, 11, 0.92) 100%);
+  background: linear-gradient(180deg, rgba(7, 8, 11, 0.26) 0%, rgba(7, 8, 11, 0.14) 38%, rgba(7, 8, 11, 0.62) 76%, rgba(7, 8, 11, 0.9) 100%);
 }
 .pc__body {
   position: relative;
@@ -4651,6 +4651,12 @@ html.kb-open .dock {
   border-top: 1px solid rgba(255, 255, 255, 0.16);
   background: transparent;
 }
+.pc__body .ck__bio {
+  background: rgba(8, 11, 15, 0.34);
+}
+.pc__body .ck__foot {
+  background: rgba(8, 11, 15, 0.38);
+}
 .pc__body .ck__foot {
   margin-top: auto;
 }
@@ -4664,6 +4670,12 @@ html.kb-open .dock {
   display: flex;
   gap: 10px;
   align-items: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
+}
+.pc__body .ck__stats,
+.pc__body .ck__pills,
+.pc__body .ck__bio {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
 }
 .pc__names {
   min-width: 0;
@@ -4705,7 +4717,7 @@ html.kb-open .dock {
   gap: 6px 8px;
   padding: 9px 12px 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(6, 9, 13, 0.74);
+  background: rgba(6, 9, 13, 0.9);
 }
 .pc__dock .pc__meta {
   grid-column: 1;
