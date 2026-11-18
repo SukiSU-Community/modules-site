@@ -6106,3 +6106,53 @@ function loadTurnstile() {
 }
 
 init();
+
+/* ---------------------------------------------------------- 软键盘让位（P5）
+   iOS Safari 在键盘弹出时不动 window.innerHeight，只缩 visualViewport ——
+   fixed 的 #dock 于是停在键盘底下，刚聚焦的那一格也常被压住。
+   这里把键盘高度写进 --kb、给 html 挂 .kb-open（CSS 负责把 dock 抬起来），
+   再把正在编辑的那一格滚到键盘上方、给 dock 留出位置。
+   Android Chrome 走了 interactive-widget=resizes-content，innerHeight 自己会缩，
+   window.innerHeight - vv.height 恒为 0，这一段自动不动作。 */
+(function keyboardGuard() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const root = document.documentElement;
+  const isField = (el) => !!el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+
+  function measure() {
+    // 相差 80px 以下当地址栏收放，不算键盘 —— 否则滑动时 dock 会跟着抖。
+    const gap = Math.round(window.innerHeight - vv.height);
+    const open = gap > 80;
+    root.classList.toggle("kb-open", open);
+    root.style.setProperty("--kb", open ? gap + "px" : "0px");
+    return open;
+  }
+
+  function reveal() {
+    if (!root.classList.contains("kb-open")) return;
+    const el = document.activeElement;
+    if (!isField(el)) return;
+    const dock = document.getElementById("dock");
+    const dockH =
+      dock && getComputedStyle(dock).display !== "none" ? dock.offsetHeight + 10 : 0;
+    const edge = vv.offsetTop;
+    const limit = vv.offsetTop + vv.height - dockH - 12;
+    const r = el.getBoundingClientRect();
+    let dy = 0;
+    if (r.bottom > limit) dy = r.bottom - limit;
+    if (r.top - dy < edge + 12) dy = r.top - edge - 12;
+    if (Math.abs(dy) > 1) window.scrollBy({ top: dy, behavior: "smooth" });
+  }
+
+  vv.addEventListener("resize", () => {
+    // iOS 的 visualViewport 分两拍上报，键盘还在动画里 —— 量完等一会儿再滚。
+    measure();
+    setTimeout(reveal, 90);
+  });
+  vv.addEventListener("scroll", reveal, { passive: true });
+  document.addEventListener("focusin", (e) => {
+    if (isField(e.target)) setTimeout(reveal, 280);
+  });
+  window.addEventListener("orientationchange", () => setTimeout(measure, 260));
+})();

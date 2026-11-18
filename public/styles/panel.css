@@ -4035,3 +4035,178 @@ mark {
     grid-column: 1 / -1;
   }
 }
+
+/* ==========================================================================
+   多端补档（2026-11-18 审查后补）
+   此前缺的三块视口：横屏矮屏、1100–1239 中间档、平板竖屏（dock 只挂在 760
+   那条宽度线上）。另补两处密度：窄手机短字段并排、宽屏列表多列。
+   本节写在文件末尾，靠书写顺序覆盖前面同权重的规则；新增档位请回头同步
+   2768 那块的断点地图。
+   ========================================================================== */
+
+/* 横屏矮屏（≤480 高）：顶栏与 dock 各收一档，dock 只留主行动那一行。
+   360 高时 67 + 65 = 132 会吃掉 37% 屏高，首屏正文被 dock 压住 62px —— 这里
+   把它们收到约 55 + 44，hero 的标题与导语同步收，第一屏重新读得完整。 */
+@media (max-height: 480px) and (orientation: landscape) {
+  .bezel__in {
+    padding: 6px var(--gut) 5px;
+  }
+  .hero {
+    padding-bottom: 14px;
+    margin-bottom: 16px;
+  }
+  .hero__grid {
+    gap: 14px;
+  }
+  h1 {
+    font-size: clamp(26px, 5vw, 34px);
+    margin: 0 0 6px;
+  }
+  .hero__lede {
+    font-size: 13px;
+    line-height: 1.65;
+    margin-bottom: 10px;
+  }
+  .dock {
+    padding: 6px var(--gut) calc(6px + env(safe-area-inset-bottom));
+  }
+  /* 横屏的高度预算只够一行：进度说明让位给主行动那句 */
+  #dock-s {
+    display: none;
+  }
+  html[data-view="submit"] main {
+    padding-bottom: 76px;
+  }
+}
+
+/* 1100–1239：中间档。双列与 1240 版心原来挂在同一个断点上，于是 1180（iPad Pro
+   横屏、13 寸半屏）落进最差的一档：版心 940、表单单列、页面 2790px，比 1280 的
+   双列长四成。这里把版心放到 1120 并提前开双列，两条竖流仍旧各自往下排。 */
+@media (min-width: 1100px) and (max-width: 1239px) {
+  html[data-view="submit"] {
+    --maxw: 1120px;
+  }
+  #form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0 24px;
+    align-items: start;
+  }
+}
+
+/* 平板竖屏：dock 原本只挂 max-width:760 —— 760 有、768 没有，8px 之差换掉一整套
+   交互，iPad 竖屏要一路滚到页尾才按得到提交。改成挂触控：coarse 且 761–1180 也给
+   dock，并把行内主按钮让位，与手机档同一套分工。 */
+@media (pointer: coarse) and (min-width: 761px) and (max-width: 1180px) {
+  html[data-view="submit"] .cta-inline {
+    display: none !important;
+  }
+  html[data-view="submit"] main {
+    padding-bottom: 108px;
+  }
+  .dock {
+    display: flex;
+  }
+}
+
+/* 宽屏列表多列：.mods 本来就是 grid，只是没给列数，1204 宽的单行只用了左边一半，
+   五条就 1668px。两列从 1240 起，1700 起三列。 */
+@media (min-width: 1240px) {
+  #mods {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    align-items: start;
+  }
+}
+@media (min-width: 1700px) {
+  #mods {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* 窄手机短字段并排：620 以下 .grid2 整格收成单列，「版本字符串 / 版本号」两个
+   两三位数的框各占一行 313px。380 起把这两格放回并排，其余整行字段不动
+   （.span2 仍跨满两列）。 */
+@media (min-width: 380px) and (max-width: 620px) {
+  #form .grid2 {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  #form .grid2 > .span2 {
+    grid-column: 1 / -1;
+  }
+}
+
+/* 触控补档：上传人那颗胶囊只有 36 高。.nav a 的宽度取舍见 2791 那条注释
+   （390 顶栏排一行是硬约束），这里不动宽度。 */
+@media (pointer: coarse), (max-width: 760px) {
+  .who__btn {
+    min-height: 44px;
+  }
+  /* 列表里的「下载 zip」只有 71×28：它是按钮不是行内链接，补到 44 高。 */
+  .mod__dl {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  /* 输入框在触控档只有 42 高，差 2px 到 2.5.5 的下限。file 那颗是隐形铺层，跳过。 */
+  .field input:not([type="file"]),
+  .field textarea,
+  .field select {
+    min-height: 44px;
+  }
+}
+
+/* 移动端地址栏收放时 100vh 会跳一帧：支持 dvh 就用 dvh。 */
+@supports (height: 100dvh) {
+  body {
+    min-height: 100dvh;
+  }
+}
+
+/* 上传页双列等高（P2，2026-11-18 补）：原来左列 [01 02] 1409 高、右列 [03 04]
+   1005 高，尾端空出 400 像素。不对称的根子是 01 —— 它只有 330 高，却是全宽的
+   「选包舞台」，被塞进左列后那 330 里有两百多只是替右边的 02 陪跑。
+   让 01 跨满两列、02 与「03 04 这条竖流」并排：左右各 1039 / 1005，差 34。
+   .form__col 用 display:contents 拆掉，四张面板回到 #form 的栅格上自己排队；
+   窄屏不命中这段，仍是原来的单列顺序。 */
+@media (min-width: 1100px) {
+  #form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0 24px;
+    align-items: start;
+  }
+  #form > .form__col:nth-child(1) {
+    display: contents;
+  }
+  #form > .form__col:nth-child(1) > .panel:nth-child(1) {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  #form > .form__col:nth-child(1) > .panel:nth-child(2) {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  #form > .form__col:nth-child(2) {
+    grid-column: 2;
+    grid-row: 2;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+}
+
+/* 软键盘让位（P5，2026-11-18 补）：iOS 上 fixed 的 #dock 会被键盘压在底下。
+   app.js 把键盘高度写进 --kb 并给 html 挂 .kb-open，这里把 dock 抬到键盘上方；
+   --kb 是 0 时 translateY(0)，桌面与没有键盘的场景丝毫没有变化。 */
+.dock {
+  transition: transform 0.18s ease-out;
+}
+html.kb-open .dock {
+  transform: translateY(calc(-1 * var(--kb, 0px)));
+}
+@media (prefers-reduced-motion: reduce) {
+  .dock {
+    transition: none;
+  }
+}
