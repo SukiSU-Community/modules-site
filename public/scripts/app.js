@@ -2468,6 +2468,8 @@ function syncUploaderField() {
   if (!el) return;
   const field = el.closest(".field");
   const row = $("#nick-field");
+  const roRow = $("#nick-ro");
+  const roVal = $("#nick-ro-v");
   const tag = $("#uploader-tag");
   const help = $("#uploader-help");
   // 只认「输入框里这串 UID」反查回来的昵称 —— verified 的结果可能属于上一串数字。
@@ -2484,15 +2486,20 @@ function syncUploaderField() {
     el.value = nickname; // 以反查结果为准
     el.dataset.auto = "1";
     el.readOnly = true;
-    field.classList.add("is-pre");
+    field.classList.add("is-pre", "is-ro");
     if (row) row.hidden = false;
     if (tag) tag.textContent = "已经从酷安取到";
-    if (help) help.textContent = "昵称是从酷安按 UID 拿的，锁定不能改 —— 想换署名只能换 UID。";
+    // 取到昵称后这一格收成一行只读值（CSS 的 .field.is-ro），不再占一个输入框的高度；
+    // 「锁定不能改」那句压成行尾的一句短注，别让它再单独占一行。
+    if (roVal) roVal.textContent = nickname;
+    if (roRow) roRow.hidden = false;
+    if (help) help.textContent = "";
     return;
   }
 
   el.readOnly = false;
-  field.classList.remove("is-pre");
+  field.classList.remove("is-pre", "is-ro");
+  if (roRow) roRow.hidden = true;
   // 只要现在没有反查到的昵称，上一个 UID 带出来的那份就必须消失 —— 放在藏行之前，
   // 因为「正在查」的时候也能提交（核实没接 / 酷安抖动都不该拦人），清空晚一步就漏进索引。手填的不动。
   if (el.dataset.auto === "1") {
@@ -3699,7 +3706,7 @@ const runUidCheck = debounce(async () => {
       "ok",
       meta.label,
       meta.title,
-      `UID ${uid}${state.session.nickname ? ` · ${state.session.nickname}` : ""}。90 天内的长效会话，这次不用改签名。`,
+      `UID ${uid}${state.session.nickname ? ` · ${state.session.nickname}` : ""}。90 天内免改签名。`,
       state.session.avatar || ""
     );
     syncUploaderField();

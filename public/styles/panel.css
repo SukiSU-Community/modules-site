@@ -679,6 +679,55 @@ h2 {
   font-weight: 600;
 }
 
+/* 02 与 01 在宽屏上被网格拉成等高，但它自己只有「一串 + 一句说明」：
+   内容少的那一头会空出上百像素。把这两块在剩余空间里上下居中，空白分摊到两头，
+   比全堆在卡底看着更像一页。单列时没有多余高度，auto 边距是 0，等于没改。 */
+#idform > .panel:nth-of-type(2) {
+  display: flex;
+  flex-direction: column;
+}
+#idform > .panel:nth-of-type(2) .commit {
+  margin-top: auto;
+}
+#idform > .panel:nth-of-type(2) #identity-commit-cap {
+  margin-bottom: auto;
+}
+
+/* 昵称取到之后不必再当一个输入框：一行「标签 · 值 · 改名要换 UID」就够了，
+   省下的高度让给下面那张核实卡（那才是这一段真正要读的东西）。
+   取不到昵称时不带 is-ro，仍是原来那个可填的普通字段。 */
+.field.is-ro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 13px;
+}
+.field.is-ro .field__lab {
+  margin: 0;
+}
+.field.is-ro > input,
+.field.is-ro > .field__help,
+.field.is-ro > .field__err,
+.field.is-ro .auto {
+  display: none;
+}
+.field.is-ro .ro {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 15px;
+  color: var(--ink);
+}
+.field.is-ro .ro b {
+  font-weight: 600;
+}
+.field.is-ro .ro i {
+  font-style: normal;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
 input[type="text"],
 input[type="number"],
 input[type="url"],
@@ -1162,6 +1211,44 @@ textarea:focus {
   font-size: 13px;
   line-height: 1.6;
   color: var(--ink-2);
+}
+.status__d:empty {
+  display: none;
+}
+
+/* 已核实这一档要说清的只有「谁、核过了」两件事，两三行解释反而把重点冲淡：
+   压成一条 —— 头像 28、勾 17、标题与 UID 同行，VERIFIED 推到最右押尾。
+   其余档位（查不到 / 暂时不可用 / 未核实）仍要多行讲原因，保持原样。 */
+.status.is-verified {
+  align-items: center;
+  gap: 9px;
+  padding: 9px 13px;
+}
+.status.is-verified .status__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.status.is-verified .status__t {
+  margin: 0;
+  font-size: 13.5px;
+}
+.status.is-verified .status__d {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.status.is-verified .uid__avatar {
+  width: 28px;
+  height: 28px;
+}
+.status.is-verified .uid__mark {
+  width: 17px;
+  height: 17px;
+}
+.status.is-verified .chip {
+  order: 9;
+  margin-left: auto;
 }
 
 /* 勾选项 */

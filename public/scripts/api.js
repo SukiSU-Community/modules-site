@@ -751,7 +751,7 @@ export const USER_STATUS = {
     tone: "ok",
     label: "verified",
     title: "酷安用户已核实",
-    hint: "已确认这个 UID 对应一个真实的酷安账号，昵称会随署名一起进索引。",
+    hint: "",
   },
   not_found: {
     tone: "bad",
