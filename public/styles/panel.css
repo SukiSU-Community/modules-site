@@ -4433,6 +4433,10 @@ html.kb-open .dock {
   margin-left: auto;
   flex: 0 0 auto;
 }
+/* 人卡整段只画一次，放在处置列表之前；没快照时整格不占位。 */
+.pc-detail__head:empty {
+  display: none;
+}
 
 /* —— 2. 人墙：卡片再小一档 —— */
 .pc__wall-grid {

@@ -5629,8 +5629,6 @@ async function loadRefs(item, card, holder) {
       const m = card.querySelector(".ec__layer--machine");
       if (f) f.replaceWith(factsLayer(item, res.data));
       if (m) m.replaceWith(machineLayer(item, res.data));
-      const head = card.querySelector(".ck");
-      if (!head) card.querySelector(".ec__title").after(coolapkHeadCard(item.subject, res.data.pending && res.data.pending.record ? res.data.pending.record.identity : null));
       holder.append(sealBlock(ref, res.data, url));
     } else {
       const box = node("div", "es es--miss");
@@ -5695,7 +5693,29 @@ function renderPersonDetail(person, q) {
   hd.append(close);
   host.append(hd);
   if (!person.items.some((i) => i.subject && i.subject.coolapkUid === person.uid)) return;
+  // 人卡是「这个人」的一份，不属于任何一个模块：整段只画一次，放在处置列表前面。
+  const headSlot = node("div", "pc-detail__head");
+  host.append(headSlot);
+  paintPersonHead(headSlot, person);
   for (const it of [...person.items].sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0))) host.append(dispositionCard(it, q));
+}
+
+/** 从这人第一条带证据的处置里取快照，画一次主页头卡；没有快照就整格留空（:empty 不占位）。 */
+async function paintPersonHead(slot, person) {
+  const item = person.items.find((i) => (i.evidence || []).some((r) => r && r.file));
+  if (!item) return;
+  const ref = item.evidence.find((r) => r && r.file);
+  let res;
+  try {
+    res = await fetchEvidence(ref.file);
+  } catch (e) {
+    return;
+  }
+  if (!res || !res.ok) return;
+  const idn = res.data && res.data.pending && res.data.pending.record ? res.data.pending.record.identity : null;
+  if (!idn) return;
+  if (state.incOpenUid !== person.uid) return;
+  slot.append(coolapkHeadCard(item.subject, idn));
 }
 
 /* ------------------------------------------------------- 下架队列那一格
