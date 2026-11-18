@@ -132,6 +132,9 @@ const state = {
   // 人卡头像缓存：uid → 真头像 URL（""=拉过但没有）。证据文件是外部资源，
   // 同一份不重复拉；重绘、搜索、切 tab 都先读这里。
   incAvatar: {},
+  // 同一份证据里的完整身份快照：uid → identity|null（null=拉过但没有）。人墙卡按它画全部字段，
+  // 与头像共用一次请求，拿到后整墙重画一次。
+  incIdentity: {},
   attempted: false,
   uploading: false,
   // 上一次发出去的那一整套载荷：重试要重发**同一套**，不是当前视图里的那几枚
@@ -5260,61 +5263,114 @@ function avatarNode(person) {
 }
 
 async function hydrateAvatars(people) {
+  let changed = false;
   for (const p of people) {
-    if (p.uid in state.incAvatar) continue;
+    if (p.uid in state.incIdentity) continue;
     const withFile = p.items.find((i) => (i.evidence || []).some((r) => r && r.file));
-    if (!withFile) continue;
+    if (!withFile) {
+      state.incIdentity[p.uid] = null;
+      changed = true;
+      continue;
+    }
     const ref = (withFile.evidence || []).find((r) => r && r.file);
     state.incAvatar[p.uid] = "";
     const res = await fetchEvidence(ref.file);
     const idn = res.ok && res.data && res.data.pending && res.data.pending.record ? res.data.pending.record.identity : null;
-    const url = idn && idn.userBigAvatar ? secureAvatarUrl(String(idn.userBigAvatar)) : "";
-    state.incAvatar[p.uid] = url || "";
-    if (!url) continue;
-    const initial = p.username ? Array.from(p.username)[0] : "?";
-    const card = [...document.querySelectorAll(".pc")].find((c) => c.dataset.uid === p.uid);
-    const host = card ? card.querySelector(".pc__av") : null;
-    if (host && host.tagName !== "IMG") host.replaceWith(avatarImg(url, initial));
+    state.incIdentity[p.uid] = idn || null;
+    state.incAvatar[p.uid] = idn && idn.userBigAvatar ? secureAvatarUrl(String(idn.userBigAvatar)) : "";
+    changed = true;
   }
+  return changed;
 }
 
 function personCard(person, q) {
   const card = node("article", "pc");
   card.dataset.uid = person.uid;
+  // 这张卡就是酷安主页卡：封面方图铺满，头像、昵称、等级、数据、签名、快照时刻与个人主页链接全在卡上。
+  // 身份快照还没拉到时先画空壳（“…”），hydrateAvatars 回来后整墙重画一次。
+  const known = person.uid in state.incIdentity;
+  const idn = known ? state.incIdentity[person.uid] : null;
 
-  const cover = node("div", "pc__cover");
+  const coverUrl = idn && idn.cover ? secureAvatarUrl(String(idn.cover)) : "";
+  if (coverUrl) {
+    const bg = document.createElement("img");
+    bg.className = "pc__bg";
+    bg.src = coverUrl;
+    bg.alt = "";
+    bg.referrerPolicy = "no-referrer";
+    bg.loading = "lazy";
+    bg.addEventListener("error", () => bg.remove());
+    card.append(bg);
+  }
+
+  const body = node("div", "pc__body");
   const idrow = node("div", "pc__idrow");
-  const av = avatarNode(person);
-  idrow.append(av);
+  idrow.append(avatarNode(person));
   const names = node("div", "pc__names");
   const nm = node("div", "pc__nm");
-  highlight(nm, person.username || `UID ${person.uid}`, q);
+  highlight(nm, (idn && (idn.displayUsername || idn.username)) || person.username || `UID ${person.uid}`, q);
+  if (idn && idn.level !== undefined && idn.level !== null) nm.append(node("span", "pc__lv", `Lv.${idn.level}`));
   names.append(nm);
   const uidLine = node("div", "pc__uid");
   highlight(uidLine, `coolapk.com/u/${person.uid}`, q);
   names.append(uidLine);
   idrow.append(names);
-  const badge = node("span", "pc__badge", person.items.some((i) => i.kind === "deny") ? "已拉黑" : "已处置");
-  idrow.append(badge);
-  cover.append(idrow);
-  card.append(cover);
+  idrow.append(node("span", "pc__badge", person.items.some((i) => i.kind === "deny") ? "已拉黑" : "已处置"));
+  body.append(idrow);
 
+  const stats = node("div", "ck__stats");
+  for (const [label, key] of [["获赞", "be_like_num"], ["关注", "follow"], ["粉丝", "fans"]]) {
+    const s = node("span", "ck__stat");
+    const v = idn && idn[key] !== undefined && idn[key] !== null ? String(idn[key]) : known ? "没采到" : "…";
+    s.append(node("b", null, v));
+    s.append(node("i", null, label));
+    stats.append(s);
+  }
+  body.append(stats);
+
+  const loginMs = idn ? msOf(idn.logintime) : null;
+  const regMs = idn ? msOf(idn.regdate) : null;
+  const capMs = idn ? msOf(idn.capturedAt) : null;
+  const pills = node("div", "ck__pills");
+  pills.append(node("span", "ck__pill", !known ? "…" : loginMs === null ? "活跃时间没采到" : `快照时 ${agoText(loginMs, capMs)}活跃`));
+  const days = daysSince(regMs, capMs);
+  pills.append(node("span", "ck__pill", !known ? "…" : days === null ? "注册天数算不出（没采到 regdate）" : `快照时酷安第 ${days} 天`));
+  if (idn && idn.verify_title) pills.append(node("span", "ck__pill ck__pill--v", String(idn.verify_title)));
+  body.append(pills);
+
+  const bio = node("div", "ck__bio");
+  bio.append(node("span", "ck__bio-k", "签名"));
+  bio.append(node("span", "ck__bio-v", !known ? "…" : idn && idn.bio ? String(idn.bio) : "没有采到签名（这条处置早于身份快照存档）"));
+  body.append(bio);
+
+  const foot = node("div", "ck__foot");
+  foot.append(node("span", null, !known ? "注册日期…" : regMs === null ? "注册日期没采到" : `注册 ${fmtDate(regMs)}`));
+  foot.append(node("span", null, !known ? "快照…" : idn && idn.capturedAt ? `快照抓取于 ${fmtDate(msOf(idn.capturedAt))}` : "没有快照抓取时间"));
+  const a = node("a", "ck__replay", "酷安个人主页");
+  a.title = "在酷安打开 coolapk.com/u/" + person.uid;
+  a.href = `https://www.coolapk.com/u/${encodeURIComponent(person.uid)}`;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  foot.append(a);
+  body.append(foot);
+  card.append(body);
+
+  const dock = node("div", "pc__dock");
   const meta = node("div", "pc__meta");
   meta.append(node("span", "pc__n", `${person.items.length} 条处置`));
   meta.append(node("span", null, person.lastAtMs === null ? "最近处置时间没写" : `最近 ${fmtDate(person.lastAtMs)}`));
   const kinds = [...new Set(person.items.map((i) => i.kind || ""))].filter(Boolean);
   for (const k of kinds) meta.append(node("span", "pc__kind", KIND_LABELS[k] || k));
-  card.append(meta);
-
-  const reasons = [...new Set(person.items.map((i) => REASON_LABELS[i.reason] || i.reason || "没写理由分类"))];
-  const rs = node("div", "pc__reasons");
-  for (const r of reasons) rs.append(node("span", "pc__reason", r));
-  card.append(rs);
-
+  dock.append(meta);
   const btn = node("button", "btn btn--ghost btn--sm pc__open", state.incOpenUid === person.uid ? "收起" : "展开处置");
   btn.type = "button";
   btn.addEventListener("click", () => togglePerson(person, q));
-  card.append(btn);
+  dock.append(btn);
+  const reasons = [...new Set(person.items.map((i) => REASON_LABELS[i.reason] || i.reason || "没写理由分类"))];
+  const rs = node("div", "pc__reasons");
+  for (const r of reasons) rs.append(node("span", "pc__reason", r));
+  dock.append(rs);
+  card.append(dock);
   return card;
 }
 
@@ -5399,7 +5455,7 @@ function coolapkHeadCard(subject, identity) {
   foot.append(node("span", null, regMs === null ? "注册日期没采到" : `注册 ${fmtDate(regMs)}`));
   foot.append(node("span", null, idn && idn.capturedAt ? `快照抓取于 ${fmtDate(msOf(idn.capturedAt))}` : "没有快照抓取时间"));
   const u = `https://www.coolapk.com/u/${encodeURIComponent(subject.coolapkUid)}`;
-  const a = node("a", "ck__replay", "个人主页");
+  const a = node("a", "ck__replay", "酷安个人主页");
   a.title = "在酷安打开 coolapk.com/u/" + subject.coolapkUid;
   a.href = u;
   a.target = "_blank";
@@ -5686,7 +5742,10 @@ function renderPeopleWall(items, q) {
       detail.textContent = "";
     }
   }
-  hydrateAvatars(people);
+  // 快照拉回来后重画一次人墙，让头像、等级、数据、封面都落到卡上；缓存命中后不会再重画。
+  hydrateAvatars(people).then((changed) => {
+    if (changed) renderPeopleWall(items, q);
+  });
   return { people: people.length, unkeyed };
 }
 
@@ -5706,29 +5765,7 @@ function renderPersonDetail(person, q) {
   hd.append(close);
   host.append(hd);
   if (!person.items.some((i) => i.subject && i.subject.coolapkUid === person.uid)) return;
-  // 人卡是「这个人」的一份，不属于任何一个模块：整段只画一次，放在处置列表前面。
-  const headSlot = node("div", "pc-detail__head");
-  host.append(headSlot);
-  paintPersonHead(headSlot, person);
   for (const it of [...person.items].sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0))) host.append(dispositionCard(it, q));
-}
-
-/** 从这人第一条带证据的处置里取快照，画一次主页头卡；没有快照就整格留空（:empty 不占位）。 */
-async function paintPersonHead(slot, person) {
-  const item = person.items.find((i) => (i.evidence || []).some((r) => r && r.file));
-  if (!item) return;
-  const ref = item.evidence.find((r) => r && r.file);
-  let res;
-  try {
-    res = await fetchEvidence(ref.file);
-  } catch (e) {
-    return;
-  }
-  if (!res || !res.ok) return;
-  const idn = res.data && res.data.pending && res.data.pending.record ? res.data.pending.record.identity : null;
-  if (!idn) return;
-  if (state.incOpenUid !== person.uid) return;
-  slot.append(coolapkHeadCard(item.subject, idn));
 }
 
 /* ------------------------------------------------------- 下架队列那一格

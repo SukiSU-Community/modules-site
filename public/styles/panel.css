@@ -4449,11 +4449,6 @@ html.kb-open .dock {
   margin-left: auto;
   flex: 0 0 auto;
 }
-/* 人卡整段只画一次，放在处置列表之前；没快照时整格不占位。 */
-.pc-detail__head:empty {
-  display: none;
-}
-
 /* —— 2. 人墙：卡片再小一档 —— */
 .pc__wall-grid {
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -4601,4 +4596,142 @@ html.kb-open .dock {
     margin-top: 2px;
   }
 }
+/* —— 8. 人墙卡：按酷安封面做 1:1 的方形主页卡（封面铺满、信息压在暗层上） —— */
+.pc {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: #0d1116;
+  overflow: hidden;
+  isolation: isolate;
+}
+.pc__bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.42;
+  pointer-events: none;
+}
+/* 暗层：保证任何封面图上白字都读得清；压在最底与图之上、正文之下。 */
+.pc::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(7, 8, 11, 0.2) 0%, rgba(7, 8, 11, 0.55) 45%, rgba(7, 8, 11, 0.92) 100%);
+}
+.pc__body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+  padding: 12px 12px 6px;
+  overflow: hidden;
+}
+.pc__body .ck__stats {
+  margin-top: 0;
+}
+.pc__body .ck__pills {
+  margin-top: 2px;
+}
+.pc__body .ck__bio,
+.pc__body .ck__foot {
+  padding: 8px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+}
+.pc__body .ck__foot {
+  margin-top: auto;
+}
+.pc__body .ck__bio-v {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pc__idrow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.pc__names {
+  min-width: 0;
+  flex: 1;
+}
+.pc__nm {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.pc__lv {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #23c76a;
+  color: #04160b;
+  font: 600 10.5px/1.8 var(--mono);
+}
+.pc__uid {
+  color: rgba(233, 236, 243, 0.62);
+  font: 500 11px/1.6 var(--mono);
+  overflow-wrap: anywhere;
+}
+.pc__body .pc__av {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+}
+.pc__dock {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 9px 12px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(6, 9, 13, 0.74);
+}
+.pc__dock .pc__meta {
+  grid-column: 1;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.56);
+}
+.pc__dock .pc__open {
+  grid-column: 2;
+  grid-row: 1;
+  margin: 0;
+}
+.pc__dock .pc__reasons {
+  grid-column: 1 / -1;
+  padding: 0;
+}
+.pc__dock .pc__reason {
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.pc__dock .pc__kind {
+  color: rgba(255, 255, 255, 0.7);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+.pc__dock .pc__open {
+  margin: 0 0 0 auto;
+}
+
 
