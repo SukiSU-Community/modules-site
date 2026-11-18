@@ -1837,8 +1837,11 @@ mark {
    说明区
    ========================================================================== */
 
+/* 卡片本体铺满版心：四个 tab 的内容左边界因此落在同一条竖线上。
+   真正该收窄的是「一行读多少字」，所以正文块各自限行宽（见文末 .doc > * 那一组），
+   标题与卡片边框仍然贴着版心。 */
 .doc {
-  max-width: 72ch;
+  max-width: none;
 }
 .doc h3 {
   margin: 26px 0 8px;
@@ -2268,6 +2271,12 @@ mark {
   background: #202633;
   color: #fff;
   font: 600 15px/1 var(--mono);
+}
+.pc__av--pic {
+  display: block;
+  object-fit: cover;
+  background: #202633;
+  padding: 0;
 }
 .pc__names {
   min-width: 0;
@@ -3857,13 +3866,16 @@ mark {
    专心放数据。
    ========================================================================== */
 
-/* 版心按屏分档：只有数据密集的几屏放宽。量宽写在 html 上的同名变量覆盖，
-   顶栏、main、页脚铭牌三处读的都是同一个 --maxw，改一处即全站一致。
-   说明页是长文，行宽本来就该停在 940 附近，不参与。 */
+/* 版心按屏分档：量宽写在 html 上的同名变量覆盖，顶栏、main、页脚铭牌三处
+   读的都是同一个 --maxw，改一处即全站一致。
+   四屏一律同宽 —— 在标签页之间来回切时，内容左边界不该横跳一百多像素；
+   长文的可读性交给正文各自的行宽上限，而不是靠把整张卡片缩窄。 */
 @media (min-width: 1240px) {
   html[data-view="index"],
   html[data-view="moderation"],
-  html[data-view="submit"] {
+  html[data-view="submit"],
+  html[data-view="about"],
+  html[data-view="records"] {
     --maxw: 1240px;
   }
 }
@@ -3873,8 +3885,22 @@ mark {
 @media (min-width: 1600px) {
   html[data-view="index"],
   html[data-view="moderation"],
-  html[data-view="submit"] {
+  html[data-view="submit"],
+  html[data-view="about"],
+  html[data-view="records"] {
     --maxw: 1440px;
+  }
+}
+
+/* 长文的可读宽度：卡片铺满版心之后，正文块各自停在 76ch 附近。
+   这里只挑「成段的字」限宽 —— 标题、卡片边框、表格状的小块照旧贴边。 */
+@media (min-width: 1240px) {
+  .doc > p,
+  .doc > .pains,
+  .doc > .flow,
+  .doc > .callout,
+  .doc > .selfcheck {
+    max-width: 76ch;
   }
 }
 
@@ -4210,3 +4236,219 @@ html.kb-open .dock {
     transition: none;
   }
 }
+
+/* ==========================================================================
+   身份提示条（未验证时挂在上传表单顶部）
+   ========================================================================== */
+
+#authbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 0 0 14px;
+  line-height: 1.75;
+}
+#authbar[hidden] {
+  display: none;
+}
+#authbar a {
+  color: var(--amber);
+  text-decoration: none;
+  border-bottom: 1px solid var(--amber-line);
+  white-space: nowrap;
+}
+#authbar a:hover {
+  border-bottom-color: var(--amber);
+}
+
+/* ==========================================================================
+   处置公示 · 版式重构（2026-11-18）
+   只动版面，不动信息结构：
+   · 详情区不再是「灰底大盒里套白卡」—— 改成一条吸顶工具条 + 卡片流；
+   · 处置卡标题拆两层：模块/UID + 分类徽标一行，命中条件（长串）自己一行小字；
+   · 桌面把 01 横跨、02 与 03 并排，证据框宽了自动并排，长页砍掉近一半；
+   · 人墙卡片最小宽收到 240，窄栏里也能铺两列。
+   ========================================================================== */
+
+/* —— 1. 详情区：工具条 + 卡片流 —— */
+.pc-detail {
+  gap: 16px;
+  margin: 0 0 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.pc-detail__hd {
+  position: sticky;
+  top: 76px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.pc-detail__t {
+  font: 600 14px/1.5 var(--mono);
+  letter-spacing: -0.01em;
+}
+.pc-detail__n {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.pc-detail__hd .btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+/* —— 2. 人墙：卡片再小一档 —— */
+.pc__wall-grid {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+.pc__cover {
+  padding: 11px 12px 12px;
+}
+
+/* —— 3. 处置卡：左边一条处置色，标题两层 —— */
+.ec {
+  gap: 12px;
+  padding: 14px 16px 16px;
+  border-left: 3px solid var(--amber);
+}
+.ec--deny {
+  border-left-color: var(--red);
+}
+.ec__title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 12px;
+  align-items: center;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--line-2);
+}
+.ec__title-t {
+  font: 600 15px/1.4 var(--mono);
+  letter-spacing: -0.01em;
+}
+.ec__title-k {
+  margin-left: 0;
+  justify-self: end;
+  padding: 2px 9px;
+  border: 1px solid var(--amber-line);
+  border-radius: 999px;
+  background: var(--amber-wash);
+  color: var(--amber);
+  font: 600 11px/1.7 var(--mono);
+  white-space: nowrap;
+}
+.ec--deny .ec__title-k {
+  border-color: var(--red-line);
+  background: var(--red-wash);
+  color: var(--red);
+}
+.ec__title-s {
+  grid-column: 1 / -1;
+  font: 500 11px/1.65 var(--mono);
+  color: var(--ink-3);
+  word-break: break-all;
+}
+
+/* —— 4. 层标题：编号做成实心小方块，标题拉开字距 —— */
+.ec__layer {
+  padding: 12px 14px;
+  border-radius: 4px;
+}
+.ec__hd {
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+}
+.ec__num {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: var(--ink);
+  color: var(--bg);
+  font: 700 10px/1 var(--mono);
+  letter-spacing: 0;
+}
+.ec__t {
+  font: 700 11.5px/1.7 var(--mono);
+  letter-spacing: 0.08em;
+}
+.ec__note {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+/* —— 5. 证据框：宽了就并排 —— */
+.ec__seals {
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+
+/* —— 6. 桌面：01 横跨（七八格一排），02 与 03 并排 —— */
+@media (min-width: 1000px) {
+  /* 01 事实在左、02 判据在右；03 印章与证据框横跨整行。 */
+  .ec {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    align-items: start;
+  }
+  .ec__title,
+  .ec__layer--seal,
+  .ec__seals,
+  .ck {
+    grid-column: 1 / -1;
+  }
+  .ec__layer--facts {
+    grid-column: 1;
+  }
+  .ec__layer--machine {
+    grid-column: 2;
+  }
+  /* 六格印章横排：说明那一格会折行，其余各占一格。 */
+  .ec__layer--seal .ec__kv--1 {
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 8px 20px;
+  }
+}
+
+/* —— 6b. 命中条目：规则号与等级一行，文件:行号自己一行（只在桌面窄列用） —— */
+/* 原来三样挤在一行（S3011 high system/bin/curl.sh:42），窄列里把路径断成两截，
+   读起来像三个字段粘在一起。手机是单列整行，放得下，保持一行。 */
+@media (min-width: 1000px) {
+  .ec__finds li {
+    display: grid;
+    grid-template-columns: auto auto;
+    justify-content: start;
+    gap: 2px 8px;
+  }
+  .ec__finds .ec__floc {
+    grid-column: 1 / -1;
+    margin-left: 0;
+  }
+}
+
+/* —— 7. 手机：工具条贴顶栏，卡片收边，标题竖排 —— */
+@media (max-width: 760px) {
+  .pc-detail__hd {
+    top: 68px;
+  }
+  .ec {
+    padding: 12px 12px 14px;
+  }
+  .ec__title {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ec__title-k {
+    justify-self: start;
+    margin-top: 2px;
+  }
+}
+

@@ -129,6 +129,9 @@ const state = {
   ledgerTried: false,
   incQuery: "",
   incOpenUid: "",
+  // 人卡头像缓存：uid → 真头像 URL（""=拉过但没有）。证据文件是外部资源，
+  // 同一份不重复拉；重绘、搜索、切 tab 都先读这里。
+  incAvatar: {},
   attempted: false,
   uploading: false,
   // 上一次发出去的那一整套载荷：重试要重发**同一套**，不是当前视图里的那几枚
@@ -383,7 +386,7 @@ function applyView(card) {
       el.closest(".field").classList.remove("is-pre");
     }
   }
-  $("#meta-src").textContent = card && card.zip && card.zip.prop ? "来自 module.prop" : "手动填写";
+  $("#meta-src").textContent = card && card.zip && card.zip.prop ? "从包信息里读的" : "自己填的";
   termSnapshot = card && card.term ? card.term : [];
   // 切卡时这两句提示跟着这一枚的 ID 走：上一枚的仓库绑定 / 作者主页不能挂到下一枚头上
   paintRepoHint(card);
@@ -492,9 +495,9 @@ function setCheck(card, status, key, why) {
 // 身份验证与上传记录不进导航 —— 它们是「验证」这条线的两站，入口在顶栏那个人身上。
 const VIEWS = {
   submit: { el: "#view-submit", label: "上传" },
-  identity: { el: "#view-identity", label: "身份验证" },
-  records: { el: "#view-records", label: "上传记录" },
-  index: { el: "#view-index", label: "已收录" },
+  identity: { el: "#view-identity", label: "验证身份" },
+  records: { el: "#view-records", label: "我的上传" },
+  index: { el: "#view-index", label: "模块库" },
   moderation: { el: "#view-moderation", label: "举报与处置" },
   about: { el: "#view-about", label: "说明" },
 };
@@ -502,7 +505,9 @@ const VIEWS = {
 // 这两屏必须「已经验证过」才给看：上传要带签名与承诺，记录读的是本人的清单。
 // 判据只认 state.auth（由 refreshSession 问过后端才定），**不认** localStorage 里有没有串 ——
 // 有串不等于后端还认它，而「让一张过期令牌把表单铺出来」正是这次要修掉的那件事。
-const GATED_VIEWS = ["submit", "records"];
+// 上传页不再预检身份：先让人把表单看见、填起来，点「上传前确认」时才提示验证（openAuthPrompt）。
+// 只有「上传记录」这一屏必须认人 —— 它整页都是某个 UID 的私有数据。
+const GATED_VIEWS = ["records"];
 
 // 举报与处置是同一屏的两半：tab 写在查询串里，永远显式（连默认的那一半也写），
 // 这样刷新、收藏、贴给别人，落点都唯一。旧的两条地址只是入口，进来后会被 replaceState 收敛。
@@ -572,7 +577,7 @@ function renderRoute() {
       history.replaceState(null, "", "#/submit");
     }
   } else if (GATED_VIEWS.includes(name)) {
-    // 没有有效会话：这两屏一律先送去身份页，地址也一起改掉（replace，不留后退链）。
+    // 没有有效会话：这一屏先送去身份页，地址也一起改掉（replace，不留后退链）。
     name = "identity";
     history.replaceState(null, "", "#/identity");
   }
@@ -591,8 +596,9 @@ function renderRoute() {
     if (isNow) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   });
-  // 底栏只在「真能上传」的那一屏出现：加载态与未验证的人看见它只会点进一个空表单。
-  $("#dock").hidden = name !== "submit" || state.auth !== "in";
+  // 底栏只在「能填表」的那一屏出现：未验证也显示 —— 表单已经摆在眼前，底栏是它的提交入口；
+  // 只有还在问会话的加载态不显示（那时表单本身是藏着的）。
+  $("#dock").hidden = name !== "submit" || state.auth === "pending";
   paintAuth();
   paintWho();
   // 状态表里有「实测状态」这种会随时间变的内容，进 about 时重画一次，别让人看到过期值
@@ -714,7 +720,7 @@ function applyTheme(mode, animate) {
   }
   root.setAttribute("data-theme", mode);
   $("#theme-txt").textContent = mode === "light" ? "日间" : "夜间";
-  $("#theme").setAttribute("aria-label", `当前为${mode === "light" ? "日间" : "夜间"}模式，点击切换`);
+  $("#theme").setAttribute("aria-label", `现在是${mode === "light" ? "日间" : "夜间"}，点一下换过来`);
   $("#theme-color").setAttribute("content", mode === "light" ? "#F5F3EE" : "#07080B");
 }
 
@@ -764,7 +770,7 @@ function clearQueue() {
   $("#file").value = "";
   $("#term").hidden = true;
   $("#check").hidden = true;
-  $("#meta-src").textContent = "手动填写";
+  $("#meta-src").textContent = "自己填的";
   for (const key of PREFILL_KEYS) {
     const el = fieldEls[key];
     if (el.dataset.auto === "1") {
@@ -813,7 +819,7 @@ function scheduleIntake(files) {
 }
 
 function intakeFailed(e) {
-  state.intakeError = String((e && (e.message || e)) || '未知失败').slice(0, 180);
+  state.intakeError = String((e && (e.message || e)) || '没成功，原因不明').slice(0, 180);
   refreshGate();
 }
 
@@ -883,7 +889,7 @@ async function intake(file) {
   if (!/\.zip$/i.test(file.name)) {
     rejectCard(card, [
       out[0],
-      ["miss", "这不像 zip 文件（扩展名不是 .zip）。管理器只认 zip，请先确认下载完整。"],
+      ["miss", "这不像 zip 包。管理器只认 zip 包，确认下是不是没下完。"],
     ]);
     return;
   }
@@ -892,8 +898,8 @@ async function intake(file) {
   if (limit !== null && file.size > limit) {
     rejectCard(card, [
       out[0],
-      ["miss", `超过单枚上限：${fmtBytes(file.size)} > ${fmtBytes(limit)}（这个数是后端自报的）`],
-      ["warn", "服务端会直接拒绝。如果确实是正常模块，压缩包里多半混进了无关的大文件。"],
+      ["miss", `超过单个上限：${fmtBytes(file.size)}，最多 ${fmtBytes(limit)}`],
+      ["warn", "这样的包会被直接退。正常模块不该这么大，多半混进了没用的文件。"],
     ]);
     return;
   }
@@ -904,7 +910,7 @@ async function intake(file) {
   } catch {
     rejectCard(card, [
       out[0],
-      ["miss", "文件读不出来，可能已经不在原来的位置了。重新选一次。"],
+      ["miss", "文件读不出来，可能被移走了。重新选一次。"],
     ]);
     return;
   }
@@ -924,15 +930,15 @@ async function intake(file) {
     return;
   }
   const inspect = inspectEntries(entries);
-  out.push([null, `中央目录 ${entries.length} 个条目`]);
+  out.push([null, `包里 ${entries.length} 个文件`]);
 
   if (!inspect.ok) {
-    const lines = [out[0], ["miss", "根目录没有 module.prop —— 服务端会直接拒绝这个包"]];
+    const lines = [out[0], ["miss", "根目录没有 module.prop，这样的包会被直接退"]];
     if (inspect.nestedPaths.length) {
-      lines.push(["warn", `只在子目录里找到了：${inspect.nestedPaths.slice(0, 3).join(" 、")}`]);
-      lines.push(["warn", "重新打包：进到那层文件夹里选中全部文件再压缩，别把外层文件夹一起压进去。"]);
+      lines.push(["warn", `只在子文件夹里找到：${inspect.nestedPaths.slice(0, 3).join("、")}`]);
+      lines.push(["warn", "重新打包：进到那个文件夹里，选中里面的文件再压缩，别把外层文件夹一起压。"]);
     } else {
-      lines.push(["warn", "这个包里没有任何 module.prop，它多半不是一个模块。"]);
+      lines.push(["warn", "包里没有 module.prop，这多半不是个模块。"]);
     }
     rejectCard(card, lines);
     return;
@@ -970,10 +976,10 @@ async function intake(file) {
     }
   );
 
-  out.push(["found", "module.prop @ root  校验通过"]);
+  out.push(["found", "根目录的 module.prop 没问题"]);
 
   if (!canInflateRaw()) {
-    out.push(["warn", "这个浏览器不支持前端解压，元数据请手填（表单照常可用）"]);
+    out.push(["warn", "这个浏览器不能解压，信息自己填一下，表单照样能用"]);
     paintTerm(card, out);
     refreshGate();
     invalidateCheck(card);
@@ -999,15 +1005,15 @@ async function intake(file) {
     paintAuthorHint(card);
     out.push([
       "found",
-      `已读出 ${Object.keys(prop).length} 个字段，预填 ${filled} 项` +
-        (kept ? `，保留你手填的 ${kept} 项` : ""),
+      `从包里读到 ${Object.keys(prop).length} 个字段，填好了 ${filled} 项` +
+        (kept ? `，留着你手填的 ${kept} 项` : ""),
     ]);
     for (const key of ["id", "name", "version", "versionCode"]) {
       if (prop[key]) out.push([null, `${key} = ${prop[key]}`]);
     }
-    $("#meta-src").textContent = "来自 module.prop";
+    $("#meta-src").textContent = "从包信息里读的";
   } catch (err) {
-    out.push(["warn", (err && err.message) || "module.prop 解压失败，请手填元数据"]);
+    out.push(["warn", (err && err.message) || "module.prop 没解开，信息自己填"]);
   }
 
   paintTerm(card, out);
@@ -1096,7 +1102,7 @@ function paintRepoHint(card) {
   const m = card ? indexModuleFor(cardValues(card).id) : null;
   const bound = Boolean(m && m.repoUrl);
   hint.hidden = !bound;
-  hint.textContent = bound ? "该模块已绑定源码仓库，留空将沿用" : "";
+  hint.textContent = bound ? "这个已经有源码仓库了，留空就沿用" : "";
 }
 
 /**
@@ -1115,7 +1121,7 @@ function paintAuthorHint(card) {
     m && (normalizeCoolapkUserUrl(m.authorCoolapkUrl) || normalizeGithubUserUrl(m.authorGithubUrl))
   );
   hint.hidden = !bound;
-  hint.textContent = bound ? "该模块已登记作者主页，留空将沿用" : "";
+  hint.textContent = bound ? "作者主页已经填过了，留空就沿用" : "";
 }
 
 function bindFile() {
@@ -1161,22 +1167,22 @@ function bindFile() {
  * manifest 里就得是 N 条、签名得是这 N 条算出来的那一串。
  */
 function statusOf(card) {
-  if (state.uploading && submitTargets().includes(card)) return { tone: "idle", text: "随这套提交中" };
-  if (card.ack) return { tone: "ok", text: "后端已回执" };
+  if (state.uploading && submitTargets().includes(card)) return { tone: "idle", text: "这批会传" };
+  if (card.ack) return { tone: "ok", text: "已经收下" };
   const status = checkOf(card);
-  if (status === "recorded") return { tone: "muted", text: "已被上传过 · 摘出" };
+  if (status === "recorded") return { tone: "muted", text: "有人传过 · 已摘出" };
   // 版本更新与首投走同一套机器判据，过了就自动进索引 —— 所以它是「可上传」，不是「等审核」。
   // 但归属发不了的那一枚（update_eligible === false）不能跟着变绿：那一枚整单会被 403 拒掉，
   // 标成 ok 就是在教用户白抄一次签名。
   if (status === "version_update") {
-    if (ownershipOf(card) === "other") return { tone: "warn", text: "版本更新 · 不是你的" };
-    return { tone: "ok", text: "版本更新 · 可上传" };
+    if (ownershipOf(card) === "other") return { tone: "warn", text: "更新 · 不是你发的" };
+    return { tone: "ok", text: "更新 · 可以传" };
   }
-  if (status === "new") return { tone: "ok", text: "没收录 · 可上传" };
-  if (status === "unknown") return { tone: "warn", text: "查重未确认" };
-  if (card.checkRun) return { tone: "idle", text: "查重中" };
-  if (card.checkWhy) return { tone: "warn", text: "查重没成" };
-  return { tone: "muted", text: "待查重" };
+  if (status === "new") return { tone: "ok", text: "没上架 · 可以传" };
+  if (status === "unknown") return { tone: "warn", text: "待确认" };
+  if (card.checkRun) return { tone: "idle", text: "正在查" };
+  if (card.checkWhy) return { tone: "warn", text: "查不了" };
+  return { tone: "muted", text: "待查" };
 }
 
 /**
@@ -1188,40 +1194,40 @@ function cardGaps(card) {
   const v = cardValues(card);
   const gaps = [];
   for (const key of CARD_REQUIRED_KEYS) if (!v[key]) gaps.push(FIELD_NAMES[key]);
-  if (v.versionCode && !/^\d+$/.test(v.versionCode)) gaps.push("版本号不是整数");
+  if (v.versionCode && !/^\d+$/.test(v.versionCode)) gaps.push("版本代号要填整数");
   // 「来源」与「源码仓库」至少一项（契约 §1）。两者都空才报一次，别写成两行「来源没填」「仓库没填」——
   // 二选一的规则里，单格为空本身不是错。
-  if (!v.source && !v.repoUrl) gaps.push("来源或源码仓库");
-  if (v.source && !normalizeCoolapkUrl(v.source)) gaps.push("来源不是酷安站内链接");
-  if (v.repoUrl && !normalizeRepoUrl(v.repoUrl)) gaps.push("源码仓库地址形状不对");
+  if (!v.source && !v.repoUrl) gaps.push("来源或源码");
+  if (v.source && !normalizeCoolapkUrl(v.source)) gaps.push("来源得是酷安链接");
+  if (v.repoUrl && !normalizeRepoUrl(v.repoUrl)) gaps.push("源码地址格式不对");
   // 作者主页两格都选填（契约 §6 第 1 条）：空着合法，填了就必须是个人主页的形状。
   // 与来源/仓库同一档 —— 形状不对在闸门清单里点名到枚，别等到服务端 400 才发现。
-  if (v.authorCoolapkUrl && !normalizeCoolapkUserUrl(v.authorCoolapkUrl)) gaps.push("作者酷安主页不是个人主页");
-  if (v.authorGithubUrl && !normalizeGithubUserUrl(v.authorGithubUrl)) gaps.push("作者 GitHub 主页不是个人主页");
+  if (v.authorCoolapkUrl && !normalizeCoolapkUserUrl(v.authorCoolapkUrl)) gaps.push("酷安主页得是个人主页");
+  if (v.authorGithubUrl && !normalizeGithubUserUrl(v.authorGithubUrl)) gaps.push("GitHub 主页得是个人主页");
   // 版本更新这一档的版本号必须**大于**已收录那一版：后端按同一套判据拦，前端先拦一道，
   // 理由是签名一次性 —— 抄完再被拒，那一串就白烧了。等号也算不行（同版重发没有意义）。
   const base = card.fromMine ? Number(card.fromMine.versionCode) || 0 : 0;
   if (base && /^\d+$/.test(v.versionCode) && Number(v.versionCode) <= base) {
-    gaps.push(`版本号要大于已收录的 ${base}`);
+    gaps.push(`版本代号要比线上的 ${base} 大`);
   }
   // 包体这一格分三种说法：没选包（预填卡就是这样）、选了但没解析成、解析成了但哈希还没算完。
   // 混成一句「包体没解析成功」会让从「我的模块」来的卡看起来像坏包，而它只是还没选包。
   if (!card.zipSha) {
     if (!card.file && !card.zip) gaps.push("还没选包");
-    else gaps.push(card.zip ? "整包哈希还没算完" : "包体没解析成功");
+    else gaps.push(card.zip ? "校验值还在算" : "包没读开");
   }
   const limit = state.limits.maxBytes;
-  if (limit !== null && card.file && card.file.size > limit) gaps.push(`超出单枚上限 ${fmtBytes(card.file.size)}`);
+  if (limit !== null && card.file && card.file.size > limit) gaps.push(`超过单个上限（${fmtBytes(card.file.size)}）`);
   return gaps;
 }
 
 const FIELD_NAMES = {
   id: "模块 ID",
   name: "名称",
-  version: "版本字符串",
-  versionCode: "版本号",
+  version: "版本名",
+  versionCode: "版本代号",
   source: "来源",
-  repoUrl: "源码仓库",
+  repoUrl: "源码",
 };
 
 /** 图标墙上那一枚 zip 的图形：24×24 的压缩包轮廓，全部由内联 SVG 画（不引图标库）。 */
@@ -1256,16 +1262,16 @@ function chipToneClass(tone) {
  * 整句仍然挂在 title 上（悬停可看、读屏也能读到）。判据还是 statusOf 那一份，不另立一套。
  */
 const SHORT_STATUS = {
-  "随这套提交中": "提交中",
-  "后端已回执": "已回执",
-  "已被上传过 · 摘出": "已上传",
-  "版本更新 · 可上传": "更新",
-  "版本更新 · 不是你的": "非本人",
-  "没收录 · 可上传": "可上传",
-  "查重未确认": "未确认",
-  "查重中": "查重中",
-  "查重没成": "查重没成",
-  "待查重": "待查重",
+  "这批会传": "上传中",
+  "已经收下": "已收下",
+  "有人传过 · 已摘出": "传过了",
+  "更新 · 可以传": "更新",
+  "更新 · 不是你发的": "非本人",
+  "没上架 · 可以传": "可传",
+  "待确认": "确认不了",
+  "正在查": "正在查",
+  "查不了": "查不了",
+  "待查": "待查",
 };
 
 function shortStatus(text) {
@@ -1286,11 +1292,11 @@ function zipCard(card) {
 
   const pick = node("button", "zipcard__pick");
   pick.type = "button";
-  pick.setAttribute("aria-label", `编辑 ${v.id || "这一枚"} 模块`);
+  pick.setAttribute("aria-label", `正在改 ${v.id || "这一个"}`);
   const ico = node("span", "zipcard__ico");
   ico.append(zipIconSvg());
   pick.append(ico);
-  pick.append(node("span", "zipcard__id", v.id || "（还没解析出模块 ID）"));
+  pick.append(node("span", "zipcard__id", v.id || "（还没读到模块 ID）"));
   const meta = [v.version ? `v${v.version}` : "", v.versionCode ? `code ${v.versionCode}` : ""].filter(Boolean).join(" · ");
   pick.append(node("span", "zipcard__meta", meta || "—"));
   // 从「我的模块」来的那一枚要写出「它是从哪一版往上走」：只写新填的 code 101 而不说当前是 100，
@@ -1299,7 +1305,7 @@ function zipCard(card) {
     const was = [card.fromMine.version ? `v${card.fromMine.version}` : "", card.fromMine.versionCode ? `versionCode ${card.fromMine.versionCode}` : ""]
       .filter(Boolean)
       .join(" / ");
-    pick.append(node("span", "zipcard__was", `当前已收录：${was || "（后端没给版本）"}`));
+    pick.append(node("span", "zipcard__was", `线上版本：${was || "（没读到）"}`));
   }
   // 状态标签排在格子里（跟在版本行下面）：墙角放不下「没收录 · 可上传」这么长的字，
   // 贴角会压住图标 —— 所以走正常流，短文案上台面，整句留给 title 与读屏。
@@ -1318,7 +1324,7 @@ function zipCard(card) {
 
   const rm = node("button", "zipcard__x", "×");
   rm.type = "button";
-  rm.setAttribute("aria-label", "移除这一枚");
+  rm.setAttribute("aria-label", "移除");
   rm.addEventListener("click", () => {
     commitView();
     dropCard(card);
@@ -1330,8 +1336,8 @@ function zipCard(card) {
   // 换包 = 换一整套：这一枚的整包哈希是集合签名的输入之一，旧串当场作废重算（见 swapRun）。
   const sw = node("button", "zipcard__swap", "↻");
   sw.type = "button";
-  sw.title = "给这一枚重选一个 zip";
-  sw.setAttribute("aria-label", "给这一枚重选一个 zip");
+  sw.title = "换一个 zip";
+  sw.setAttribute("aria-label", "换一个 zip");
   sw.addEventListener("click", () => requestSwap(card));
   box.append(sw);
   return box;
@@ -1435,11 +1441,11 @@ function renderEditing() {
   box.hidden = false;
   box.textContent = "";
   box.append(
-    node("span", null, `正在编辑第 ${at + 1} / ${state.cards.length} 枚：${v.id || (cur.file ? cur.file.name : "还没选包")}`),
+    node("span", null, `第 ${at + 1}/${state.cards.length} 个：${v.id || (cur.file ? cur.file.name : "还没选包")}`),
     " "
   );
   const nav = node("span", "editing__nav");
-  for (const [label, delta] of [["上一枚", -1], ["下一枚", 1]]) {
+  for (const [label, delta] of [["上一个", -1], ["下一个", 1]]) {
     const b = node("button", "btn btn--ghost btn--sm", label);
     b.type = "button";
     const target = state.cards[at + delta];
@@ -1471,9 +1477,9 @@ function paintQueueReadout() {
   const bar = $("#queue");
   const count = $("#queue-count");
   count.textContent = targets.length
-    ? `这一套 ${targets.length} 枚 · 一次提交`
-    : "这一套里没有要上传的枚";
-  if (recorded.length) count.textContent += ` · ${recorded.length} 枚已被上传过，摘出了`;
+    ? `这一批 ${targets.length} 个 · 一次提交`
+    : "这一批没有要传的";
+  if (recorded.length) count.textContent += ` · ${recorded.length} 个已经有人传过，摘出去了`;
   // 只有一枚、而且这一枚没被摘出去时，整条队列退化成一行：不写这套那两句边界话 ——
   // 那两句对只投一枚的人一个字都没多说。有摘出去的枚、或有被跳过的包时它才是信息。
   const quiet = state.cards.length <= 1 && !recorded.length && !state.skippedFiles.length;
@@ -1484,8 +1490,8 @@ function paintQueueReadout() {
     return;
   }
   const bits = [
-    "一次上传 = 一整套模块：签名只改一次（绑的是这一套的全集）、承诺只勾一次、POST 只发一次。增删任一枚、改任一枚的模块 ID、给任一枚重选包，都会让那一串变成另一串 —— 改完要重新抄进签名。",
-    "查重这道闸只看公开索引里的模块 ID：索引里不带酷安 UID，所以它只能说「这个 id 已被上传过」，**分不清是谁上传的**；已经上传但还没合进索引的那些今天查不到 —— 要拦那一档得后端加一档状态，这一轮没做。",
+    "一次上传就是一整批：签名只改一次、承诺只勾一次、只提交一次。增删一个、改 ID、换包都会让签名变成另一串，改完要重新填。",
+    "查重只看模块库里的 ID，而 ID 不带酷安账号，所以它只能说「这个 ID 有人传过」，分不清是谁。还在审核、没进库的也查不到。",
   ];
   if (state.skippedFiles.length) {
     bits.unshift(
@@ -1502,7 +1508,7 @@ function paintQueueReadout() {
       node(
         "span",
         "queue__dup",
-        ` 队列里有两枚模块 ID 都是 ${dupId}：同一套里同一个 ID 出现两次，服务端按 manifest 形状不对拒掉**整个这一次上传**（§16 的 normalizeDeclaredSet），不是只跳过那一枚 —— 把其中一枚移掉或改成别的 ID。`
+        ` 队列里有两个的 ID 都是 ${dupId}：同一批里 ID 重复会被整单退回，不是只跳过一个 —— 移掉其中一个或改成别的 ID。`
       )
     );
   }
@@ -1538,7 +1544,7 @@ function paintPeek(box, card) {
   }
   const v = cardValues(card);
   box.hidden = false;
-  if (parts[0]) parts[0].textContent = v.id || "（没 ID）";
+  if (parts[0]) parts[0].textContent = v.id || "（没填 ID）";
   if (parts[1]) parts[1].textContent = v.name || "—";
   if (parts[2]) parts[2].textContent = v.version ? `v${v.version}` : "";
 }
@@ -1562,7 +1568,7 @@ function renderStage() {
   for (const card of state.cards) {
     const dot = node("button", "stage__dot" + (card === cur ? " is-on" : ""));
     dot.type = "button";
-    dot.setAttribute("aria-label", `切到第 ${state.cards.indexOf(card) + 1} 枚`);
+    dot.setAttribute("aria-label", `切到第 ${state.cards.indexOf(card) + 1} 个`);
     dot.addEventListener("click", () => selectCard(card.key));
     dots.append(dot);
   }
@@ -1673,15 +1679,15 @@ function showCheck(tone, chip, title, desc) {
  */
 const CHECK_EXTRA = {
   recorded:
-    " 这一枚已经从本次上传里摘出去了：不进 manifest、不进签名那一串、也不提交。" +
-    "摘出去之后屏幕上那一串签名就按剩下的那几枚重算 —— 已经抄进签名的那串要重抄一次。" +
-    "它只看公开索引里的模块 ID：索引里不带酷安 UID，所以分不清「已被上传过」那一条是谁上传的；" +
-    "还在审核里、没合进索引的上传今天查不到。想留着看就由你留着，队列里点「移除」。" +
-    "自己的模块不用在这一页猜：验证过 UID 之后，「我的模块」那一格列着它们，点「上传更新版」就接着发。",
+    " 这个已经摘出去了：不进这一批、不进签名、也不提交。" +
+    "签名会按剩下的几个重算 —— 已经填进酷安的那串要再填一次。" +
+    "它只看模块库里的 ID，而 ID 不带酷安账号，分不清是谁传的；" +
+    "还在审核、没进库的也查不到。想留着就留着，队列里点「移除」。" +
+    "自己的模块不用猜：验证过 UID 后，上传记录里就有，点「上传更新版」接着发。",
   // 这句原来说「不会被自动合进索引」—— 那是假话（契约 §4.1 点名要改）。版本更新与首投走
   // 同一套机器判据，过了就自动进索引；页面从前教人「更新永远进不去」，而它其实进得去。
   version_update:
-    " 这不是重复，所以它留在这一套里照常要上传 —— 版本更新会按同一套机器判据审核，通过后自动进索引。",
+    " 这不算重复，照常会传 —— 更新走同一套自动检查，过了就进库。",
 };
 
 const checkTimers = new Map();
@@ -1796,7 +1802,7 @@ async function runCheckFor(card) {
   }
   card.checkRun = key;
   card.checkWhy = "";
-  if (isActive) showCheck("idle", "checking", "正在查重…", `检查 ${id} 是否已在公开索引里。`);
+  if (isActive) showCheck("idle", "checking", "正在查…", `看看 ${id} 有没有进过模块库。`);
   renderQueue();
   let status = null;
   let eligible = null;
@@ -1808,7 +1814,7 @@ async function runCheckFor(card) {
     eligible = out.updateEligible;
     gateReason = out.updateReason || "";
   } catch (err) {
-    why = err instanceof BackendError ? err.message : "查重请求失败，不影响你继续上传。";
+    why = err instanceof BackendError ? err.message : "没查成，不影响你继续传。";
   }
   // 这一枚在等回包期间被移除了就什么都不做；结论落卡，视图只在租约还在时跟着动。
   if (!state.cards.includes(card)) return;
@@ -1826,7 +1832,7 @@ async function runCheckFor(card) {
         meta.hint + (CHECK_EXTRA[status] || "") + gateNote(card)
       );
     } else {
-      showCheck("warn", "未确认", "现在查不了重", why);
+      showCheck("warn", "确认不了", "现在查不了", why);
     }
   }
   renderQueue();
@@ -1852,11 +1858,11 @@ function ownershipOf(card) {
 
 function gateNote(card) {
   if (ownershipOf(card) !== "other") return "";
-  const why = card.updateReason ? `（服务端原话：「${card.updateReason}」）` : "";
+  const why = card.updateReason ? `（服务端说：「${card.updateReason}」）` : "";
   return (
-    " 但这一版**发不了**：这个模块已被别人收录，按现在的归属规则不接受他人发版" +
+    " 但这一版发不了：这个已经被别人收进库了，只有原作者能发新版" +
     why +
-    "。整单提交会被 403 拒掉 —— 先确认「酷安 UID」填的是当初首发那个账号；不是你的模块就别试了。"
+    "。整批会被退回 —— 先确认酷安 UID 填的是当初首发那个账号；不是你的就别试了。"
   );
 }
 
@@ -1926,8 +1932,8 @@ function bindCheck() {
     "afterend",
     (() => {
       const p = node("p", "field__help");
-      p.append("想先确认有没有人上传过？", " ");
-      const a = node("a", null, "按当前 ID 搜已收录列表");
+      p.append("想先看看有没有人传过？", " ");
+      const a = node("a", null, "按这个 ID 搜模块库");
       a.href = "#";
       a.addEventListener("click", (e) => {
         e.preventDefault();
@@ -1985,10 +1991,10 @@ function uidBlocked() {
    说明文字一律先说「还差什么」再说已有什么 —— 底栏那句「全部就绪」也由这些句子代写，
    签名还没出现在屏幕上时它不许说就绪（见 refreshGate 里那段 shown）。 */
 const NONCE_WHY = {
-  off: "后端没配置酷安身份核实，签名生成不了 —— 上传通道未开放，这一步要站点来接",
-  self_reported: "后端收到了 UID 但没核实它，签名生成不了 —— 上传通道未开放，这一步要站点来接",
-  unavailable: "这次没核实成，签名还没生成 —— 把 UID 重敲一遍会再查；一直不通是后端没接上核实",
-  checking: "正在核实 UID —— 通过后随机段就位，这一串还要有模块 ID 和整包 sha256 才算得出",
+  off: "服务器还没接酷安核实，签名生成不了 —— 上传暂时没开放",
+  self_reported: "服务器收到了 UID 但没去核实，签名生成不了 —— 上传暂时没开放",
+  unavailable: "这次没核实成，签名还没出来 —— 把 UID 重敲一遍会再查",
+  checking: "正在核实 UID —— 过了还要有模块 ID 和包的校验值，才算得出这一串",
 };
 
 function gateItems() {
@@ -2057,48 +2063,48 @@ function gateItems() {
           {
             ok: false,
             text:
-              `刚才那一批包没被队列收下：${state.intakeError}。` +
-              "把那个包再拖一次就行；反复出现请把这一句原样发给站点（这是浏览器侧的解析失败，不是你的包被判了恶意）。",
+              `刚才那批包没收下：${state.intakeError}。` +
+              "把包再拖一次就行；反复出现就把这句话原样发给站点 —— 是浏览器没解开，不是你的包有问题。",
           },
         ]
       : []),
     {
       ok: targets.length > 0 && incomplete.length === 0,
       text: incomplete.length
-        ? `这一套里有 ${incomplete.length} 枚还没齐：${namesOf(incomplete)} —— 每枚的模块 ID / 名称 / 版本 / 版本号 都要填，「来源」或「源码仓库」至少一项，整包哈希也要算出来`
+        ? `这一批里有 ${incomplete.length} 个没填完：${namesOf(incomplete)} —— 模块 ID、名称、版本名、版本代号都要填，来源或源码至少一个，校验值也得算出来`
         : targets.length
-        ? `这一套 ${targets.length} 枚的 zip 都选了、根目录都含 module.prop、元数据都齐了`
-        : "还没选包：一次上传可以只传一枚，也可以一整套一起传，先把包拖进来",
+        ? `这一批 ${targets.length} 个都选好了包、根目录都有 module.prop、信息也填齐了`
+        : "还没选包：可以只传一个，也可以一批一起传，先把包拖进来",
     },
     {
       ok: metaBad.length === 0 && targets.length > 0,
       text: metaBad.length
-        ? `版本号要整数、四个必填都要有：${namesOf(metaBad)}`
-        : "每一枚的模块 ID / 名称 / 版本 / 版本号 齐全（版本号为整数）",
+        ? `版本代号要整数，四个必填都要有：${namesOf(metaBad)}`
+        : "每一个的模块 ID、名称、版本名、版本代号都齐（代号是整数）",
     },
     {
       ok: noOrigin.length === 0 && targets.length > 0,
       text: noOrigin.length
-        ? `请至少填写「来源」或「源码仓库」之一：${namesOf(noOrigin)}`
+        ? `来源或源码至少填一个：${namesOf(noOrigin)}`
         : targets.length
-        ? "每一枚都填了「来源」或「源码仓库」至少一项"
-        : "选好包之后，「来源」与「源码仓库」至少填一项（两项都填也可以：填了仓库才能自动跟随新版）",
+        ? "每一个都填了来源或源码"
+        : "选好包之后，来源和源码至少填一项（两个都填也行：填了源码才能自动跟新版）",
     },
     {
       ok: badSource.length === 0 && badRepo.length === 0 && targets.length > 0,
       text:
         badSource.length || badRepo.length
           ? [
-              badSource.length ? `来源必须是酷安站内链接：${namesOf(badSource)}` : "",
+              badSource.length ? `来源得是酷安站内链接：${namesOf(badSource)}` : "",
               badRepo.length
-                ? `源码仓库必须是 https://github.com/<owner>/<repo> 形式：${namesOf(badRepo)}`
+                ? `源码得写成 https://github.com/<owner>/<repo>：${namesOf(badRepo)}`
                 : "",
             ]
               .filter(Boolean)
               .join("；")
           : targets.length
-          ? "每一枚的「来源」都是酷安站内链接、「源码仓库」地址形状正确"
-          : "填了「来源」就要是酷安站内链接，填了「源码仓库」就要是 https://github.com/<owner>/<repo> 形式",
+          ? "每一个的来源都是酷安链接、源码地址格式也对"
+          : "来源要填酷安站内链接，源码要写成 https://github.com/<owner>/<repo>",
     },
     {
       // 两格都选填：**空着也通过**（这是与「来源或仓库」那一格的根本区别，别照着抄成必填）。
@@ -2108,34 +2114,34 @@ function gateItems() {
         badAuthorCoolapk.length || badAuthorGithub.length
           ? [
               badAuthorCoolapk.length
-                ? `作者酷安主页要写成 https://www.coolapk.com/u/<4-12 位数字>（帖子链接不算）：${namesOf(badAuthorCoolapk)}`
+                ? `作者酷安主页要写成 https://www.coolapk.com/u/<4-12 位数字>，帖子链接不算：${namesOf(badAuthorCoolapk)}`
                 : "",
               badAuthorGithub.length
-                ? `作者 GitHub 主页要写成 https://github.com/<用户名>（仓库地址不算）：${namesOf(badAuthorGithub)}`
+                ? `作者 GitHub 主页要写成 https://github.com/<用户名>，仓库地址不算：${namesOf(badAuthorGithub)}`
                 : "",
             ]
               .filter(Boolean)
               .join("；")
-          : "作者主页两格选填：留空不拦，填了就得是作者的个人主页（酷安 /u/<UID> 或 github.com/<用户名>）",
+          : "作者主页两格可以不填；填了就得是个人主页（酷安 /u/<UID> 或 github.com/<用户名>）",
     },
     {
       ok: !missingShared.includes("uploader"),
-      text: "上传人酷安昵称已取得（一次上传一份署名，这套里每一枚都用它）",
+      text: "上传人昵称已经从酷安拿到了（一次上传一个署名，这一批都用它）",
     },
     {
       ok: !missingShared.includes("coolapkUid") && !badUid,
-      text: "酷安 UID 已填，且是 4-12 位纯数字（一次上传一份，不用逐枚填）",
+      text: "酷安 UID 填了，是 4-12 位数字（一次上传填一次，不用每个都填）",
     },
   ];
   if (IS_UID_VERIFY_ON) {
     const label =
       state.uidStatus === "verified"
-        ? "酷安用户已核实"
+        ? "酷安账号核实过了"
         : uidBlocked()
-        ? "酷安用户核实没通过"
+        ? "酷安账号没核实过"
         // 「这条不拦你」只说自己这一条，不承诺整张清单放行 —— 核实没成时签名也不会有，
         // 于是下一条才是真正按住按钮的那条。两句并排时必须各说各的范围，否则互相打脸。
-        : "酷安用户核实（这一条不拦你；签名要核实通过才生成）";
+        : "酷安账号核实（这条不拦你；核实过了才生成签名）";
     items.push({ ok: !uidBlocked(), text: label });
   }
   // 三条上限全部来自后端自报（§17.6）：问到才拦，问不到就不假装拦 —— 前端猜一个数字当闸，
@@ -2143,25 +2149,25 @@ function gateItems() {
   if (overCount !== null) {
     items.push({
       ok: false,
-      text: `这一套有 ${targets.length} 枚，超过后端自报的单次枚数上限（${overCount} 枚）—— 拆成两次上传。`,
+      text: `这一批 ${targets.length} 个，超过一次能传的个数上限（${overCount} 个）—— 拆成两次传。`,
     });
   }
   if (overTotal !== null) {
     items.push({
       ok: false,
-      text: `这一套合计 ${fmtBytes(totalBytes(targets))}，超过后端自报的整套上限（${fmtBytes(overTotal)}）—— 把大的一枚拆到下一次上传去。`,
+      text: `这一批一共 ${fmtBytes(totalBytes(targets))}，超过整批上限（${fmtBytes(overTotal)}）—— 把大的那个挪到下一次。`,
     });
   }
   if (notMine.length) {
     // 措辞只说后端答了什么，不替它编原因：updateReason 是服务端原话，有就带上。
     // 「整单会被拒」这句是真的 —— 归属闸在「已算出 rows、准备开 PR」之前，任一枚不符就整单 403。
-    const why = notMine[0].updateReason ? `（服务端原话：「${notMine[0].updateReason}」）` : "";
+    const why = notMine[0].updateReason ? `（服务端说：「${notMine[0].updateReason}」）` : "";
     items.push({
       ok: false,
       text:
-        `${namesOf(notMine)} 的更新权不属于当前这个酷安 UID：已收录模块只接受原作者发更新，` +
-        `整单会被归属闸拒掉，一枚都发不出去${why}。` +
-        "先确认「酷安 UID」填的是当初首发那个账号；不是你的模块就只能走举报，别在这里重试 —— 重试只烧签名。",
+        `${namesOf(notMine)} 的更新权不归现在这个酷安账号：已上架的模块只有原作者能发新版，` +
+        `整批会被退回，一个都发不出去${why}。` +
+        "先确认酷安 UID 是当初首发那个账号；不是你的就走去举报，别在这重试 —— 重试只会白烧签名。",
     });
   }
   if (spent && !targets.length) {
@@ -2169,7 +2175,7 @@ function gateItems() {
     // 随机段在成功那一刻就换过了，所以这里说的不是「你不能再用这一串」，而是「这一套已经交了」。
     items.push({
       ok: false,
-      text: `${namesOf(acked)} 已经随这一次上传提交掉了（PR 已开）—— 同一套不能连发两次；要上传别的包就再选一批进来。`,
+      text: `${namesOf(acked)} 已经随这次上传交掉了（审核已提交）—— 同一批不能连发两次；要传别的包就再选一批进来。`,
     });
   } else {
     const card = activeCard();
@@ -2181,36 +2187,36 @@ function gateItems() {
     let nonceText;
     if (viaSession) {
       nonceText = state.cards.length > 1
-        ? `这一套 ${targets.length} 枚走长效会话（90 天内免改签名）—— 这一次不用改签名、也不用抄任何一串`
-        : "走长效会话（90 天内免改签名）—— 这一次不用改签名、也不用抄任何一串";
+        ? `这一批 ${targets.length} 个走长效会话（90 天内免改签名）—— 这次不用改签名，也不用填任何一串`
+        : "走长效会话（90 天内免改签名）—— 这次不用改签名，也不用填任何一串";
     } else if (!state.nonce) {
       nonceText =
         NONCE_WHY[state.uidStatus] ||
-        "签名串还没生成 —— UID 核实通过、填上模块 ID、包也选好了，这一串才出现";
+        "签名还没出来 —— UID 核实通过、填上模块 ID、选好包，这一串才会出现";
     } else if (recorded.length && !targets.length) {
-      nonceText = "这一套里没有要上传的枚了：都被「已被上传过」那一档摘出去了，所以没有签名可生成，签名里也不用抄任何东西。";
+      nonceText = "这一批没有要传的了：都被「有人传过」那一档摘出去了，没有签名可生成，也不用填任何东西。";
     } else if (!proofId && card && !isRecorded(card)) {
-      nonceText = "签名串还差：填上模块 ID —— 校验段已生成，但这一串要模块 ID 和整包哈希才算得出";
+      nonceText = "签名还差：模块 ID —— 校验段有了，但还要模块 ID 和包的校验值才算得出";
     } else if (incomplete.length) {
       // 两句各说一个来源缺哪一样：没选包是「还没得选」，选了包是「正在算 / 没算出来」。
       // 都不写「正在算」的肯定语气 —— 算失败时那句话就成假话了。
       const noZip = incomplete.filter((c) => !c.zip);
       const noSha = incomplete.filter((c) => c.zip && !c.zipSha);
       nonceText = noZip.length
-        ? "签名串还差：还没选包 —— 签名绑的是这套的字节，先把包选上，这一串才算得出来"
+        ? "签名还差：还没选包 —— 签名绑的是这批的字节，先选包才出得来"
         : noSha.length
-        ? `签名串还差：整包哈希还没算完 —— 校验段已生成，这一串要等它（稍等会自己出现；一直没出现就给${namesOf(noSha)}重选一次包）`
-        : `签名串还差：${namesOf(incomplete)} 的模块信息没齐 —— 签名是按整套算的，少任何一枚的信息就没有可抄的一串`;
+        ? `签名还差：校验值还在算 —— 算完会自己出现；一直不出就给${namesOf(noSha)}换个包`
+        : `签名还差：${namesOf(incomplete)} 的信息没填完 —— 签名按整批算，少一个都不成`;
     } else if (dupId) {
       // 三个来源都在，但这一套的形状本身算不出串：两枚模块 ID 相同 ⇒ canonicalProofSet 抛。
       // 这一句必须存在，否则下面那句「共用一串签名」就成了屏幕上的一句假话。
       nonceText =
-        "签名串还差：队列里有两枚的模块 ID 是同一个 —— 同一套里同一个 ID 出现两次时这一串算不出来" +
-        "（服务端也会按 manifest 形状不对拒掉整个这一次上传），把其中一枚移掉或改成别的 ID";
+        "签名还差：队列里有两个 ID 相同 —— ID 重复时这一串算不出来" +
+        "（服务端也会整单退回），移掉其中一个或改个 ID";
     } else {
       nonceText = state.cards.length > 1
-        ? `这一套 ${targets.length} 枚共用一串签名（填进酷安签名，只改这一次）`
-        : "签名串已生成（请填进酷安签名）";
+        ? `这一批 ${targets.length} 个共用一串签名（填进酷安签名，只改这一次）`
+        : "签名好了（填进酷安签名）";
     }
     // shown 说的是「屏幕上现在有没有一串可抄进签名」。v2 那一串的来源是「整套的 (id, 整包 sha256)」
     // 加这一枚随机段，所以当前这枚少 id 或少哈希时屏幕上根本没有可抄的东西 —— 那一格不许自称就绪。
@@ -2237,13 +2243,13 @@ function gateItems() {
       ok: turnstileOk(),
       shown: Boolean(turnstileStarted),
       text: turnstileOk()
-        ? "人机校验已完成"
+        ? "校验过了"
         : turnstileStarted
-        ? "人机校验还没完成 —— 04 区那个部件要等它转出「成功」才给令牌；没加载出来就点它重试"
-        : "人机校验还没开始 —— 选好包会自动加载，也可以点一下 04 区那块地方先加载",
+        ? "人机校验还没过 —— 04 区那块要转出「成功」才给令牌；没加载出来就点它重试"
+        : "人机校验还没开始 —— 选好包会自动加载，也可以点一下 04 区先加载",
     });
   }
-  items.push({ ok: IS_API_CONFIGURED, text: "后端 API_BASE 已配置" });
+  items.push({ ok: IS_API_CONFIGURED, text: "服务器已经接上" });
   if (recorded.length) {
     // 早期重复拦截：这几枚已经被摘出这一套 —— 不进 manifest、不进签名那一串、也不提交。
     // 判据是后端 /check 给的那一档，前端没有另判一份「这个包合不合规」。
@@ -2257,9 +2263,9 @@ function gateItems() {
     items.push({
       ok: true,
       note: true,
-      text: `${namesOf(recorded)}：这个 id 已被上传过，已从这一套里摘出去 —— 它不进 manifest，` +
-        `签名那一串按剩下的 ${targets.length} 枚算（所以摘之前抄进签名的那串要重抄一次）；` +
-        `这道闸分不清是谁上传的，也查不到还在待审的那一份。`,
+      text: `${namesOf(recorded)}：这个 ID 有人传过，已经摘出去了 —— 不进这一批，` +
+        `签名按剩下的 ${targets.length} 个算（摘之前填进签名的那串要再填一次）；` +
+        `它分不清是谁传的，也查不到还在审核的那一份。`,
     });
   }
   if (state.cards.length > 1) {
@@ -2270,8 +2276,8 @@ function gateItems() {
       ok: true,
       shown: n > 0,
       text: n
-        ? `队列里本次要上传 ${n} 枚 —— 一整套一次提交：签名改一次、只提交一次`
-        : "队列里没有要上传的枚：都被已收录那一档摘出去了，或者已经传完",
+        ? `队列里这次要传 ${n} 个 —— 一批一次提交：签名改一次、只提交一次`
+        : "队列里没有要传的了：都被「有人传过」摘出去了，或者已经传完",
     });
   }
   return items;
@@ -2323,9 +2329,16 @@ function refreshGate() {
   // 所以这里排在 firstBad 之后、成功语之前插一段「还差什么」，enable 条件一个字没动。
   const firstNotShown = firstBad ? null : items.find((i) => i.ok && i.shown === false);
   const blocking = firstBad || firstNotShown;
-  $("#dock-t").textContent = blocking ? blocking.text : "全部就绪，可以确认";
-  $("#dock-s").textContent = blocking ? "还差这一步" : "点「去确认」勾一下";
-  $("#gate-note").textContent = ready && !firstNotShown ? "上传前确认还没勾" : "先把上面几项填齐";
+  // 未验证的人也能填、也能点：点下去先出「验证身份」的提示层（openAuthPrompt），
+  // 所以底栏这两句不能再写「可以确认」，得如实说下一步是验证。
+  const needAuth = state.auth !== "in";
+  $("#dock-t").textContent = blocking
+    ? blocking.text
+    : needAuth
+      ? "填好了，确认时验证身份"
+      : "都填好了，可以确认";
+  $("#dock-s").textContent = blocking ? "还差一步" : needAuth ? "点「去确认」先验证身份" : "点「去确认」勾一下";
+  $("#gate-note").textContent = blocking || firstNotShown ? "先把上面填完" : needAuth ? "点确认后验证身份" : "还没勾确认";
   if (state.attempted) paintFieldErrors();
   // 身份页那颗「验证并继续」的亮灭与这一处同一口感：都是「还差什么」——
   // 所以挂在 refreshGate 尾巴上，凡是会改这些输入的地方都不必各自记得再叫一次。
@@ -2333,20 +2346,20 @@ function refreshGate() {
 }
 
 const FIELD_MSGS = {
-  versionCode: (v) => (v ? "必须是整数" : "请填写版本号（整数，来自 module.prop）"),
-  coolapkUid: (v) => (v ? "UID 应是 4-12 位纯数字，不带 https 和 /" : "请填写你的酷安 UID"),
+  versionCode: (v) => (v ? "必须填整数" : "填版本代号（整数，包里的 module.prop 里有）"),
+  coolapkUid: (v) => (v ? "4-12 位数字，别带链接" : "填你的酷安 UID"),
   // 「来源」与「源码仓库」二选一：空着不在这里报（那是下面 #src-err 那一行的事），
   // 这里只管「填了但形状不对」。
-  source: (v) => (v ? "必须是酷安站内链接，如 https://www.coolapk.com/feed/65432100" : ""),
-  repoUrl: (v) => (v ? "必须是 https://github.com/<owner>/<repo> 形式" : ""),
+  source: (v) => (v ? "得是酷安站内链接，比如 https://www.coolapk.com/feed/65432100" : ""),
+  repoUrl: (v) => (v ? "得写成 https://github.com/<owner>/<repo>" : ""),
   // 作者主页两格（契约 §6 第 1 条）：空着合法，所以文案只在「填了」时才有意义。
   // 说的是「个人主页」而不是「链接」—— 这两格最常见的错法就是把帖子或仓库地址粘进来。
-  authorCoolapkUrl: (v) => (v ? "必须是作者的个人主页，如 https://www.coolapk.com/u/123456" : ""),
-  authorGithubUrl: (v) => (v ? "必须是作者的个人主页，如 https://github.com/octocat" : ""),
-  uploader: (v) => (v ? "" : "这一项没取到昵称，请自己填一个署名"),
-  id: (v) => (v ? "" : "请填写模块 ID"),
-  name: (v) => (v ? "" : "请填写模块名称"),
-  version: (v) => (v ? "" : "请填写版本字符串"),
+  authorCoolapkUrl: (v) => (v ? "得是作者个人主页，比如 https://www.coolapk.com/u/123456" : ""),
+  authorGithubUrl: (v) => (v ? "得是作者个人主页，比如 https://github.com/octocat" : ""),
+  uploader: (v) => (v ? "" : "没取到昵称，自己填一个"),
+  id: (v) => (v ? "" : "填模块 ID"),
+  name: (v) => (v ? "" : "填模块名称"),
+  version: (v) => (v ? "" : "填版本名"),
 };
 
 /**
@@ -2433,10 +2446,10 @@ function showUid(tone, chip, title, desc, avatar) {
 // 关掉都不该把真人挡在上传之外，所以这时把同一行放开成可填，并写明是哪一种原因 ——
 // 能被任何人复核的锚点从来是 UID，不是这个随便能起的昵称。
 const UPLOADER_FALLBACK = {
-  not_found: "这个 UID 在酷安查不到，所以取不到昵称。改对 UID 会自动带出；急着提交也可以先自己填一个署名。",
-  unavailable: "这次没从酷安取到昵称（接口没响应或被风控）。先自己填一个 —— 出问题时按「你自己报的」处理。",
-  self_reported: "后端当前没有核实这个 UID，昵称取不到。先自己填一个 —— 它会按「你自己报的」处理。",
-  off: "后端还没接核实，昵称取不到。先自己填一个 —— 它会按「你自己报的」处理。",
+  not_found: "这个 UID 在酷安查不到，所以没取到昵称。改对了会自动带出来；急着传也可以自己填一个。",
+  unavailable: "这次没从酷安取到昵称（接口没响应或被风控）。先自己填一个 —— 出问题按「你自己报的」处理。",
+  self_reported: "服务器现在没核实这个 UID，昵称取不到。先自己填一个 —— 会按「你自己报的」处理。",
+  off: "服务器还没接核实，昵称取不到。先自己填一个 —— 会按「你自己报的」处理。",
 };
 
 function syncUploaderField() {
@@ -2462,8 +2475,8 @@ function syncUploaderField() {
     el.readOnly = true;
     field.classList.add("is-pre");
     if (row) row.hidden = false;
-    if (tag) tag.textContent = "已按 UID 取到";
-    if (help) help.textContent = "已从酷安取回这个 UID 对应的昵称并锁定 —— 想改署名，只能改 UID。";
+    if (tag) tag.textContent = "已经从酷安取到";
+    if (help) help.textContent = "昵称是从酷安按 UID 拿的，锁定不能改 —— 想换署名只能换 UID。";
     return;
   }
 
@@ -2481,11 +2494,11 @@ function syncUploaderField() {
     return;
   }
   if (row) row.hidden = false;
-  if (tag) tag.textContent = rechecking ? "正在按新 UID 重查" : "需要你填";
+  if (tag) tag.textContent = rechecking ? "正在重新查" : "你自己填";
   if (help)
     help.textContent = rechecking
-      ? "UID 改过了，上一个 UID 的昵称不能沿用 —— 等新结果回来。"
-      : UPLOADER_FALLBACK[state.uidStatus] || "这次没从酷安取到昵称，请自己填一个署名。";
+      ? "UID 换过了，上一个账号的昵称不能沿用 —— 等新结果回来。"
+      : UPLOADER_FALLBACK[state.uidStatus] || "这次没取到昵称，自己填一个。";
 }
 
 /**
@@ -2562,14 +2575,14 @@ async function renderProof() {
     // 这一套还没齐：不拿「齐了的那几枚」算一串出来 —— 那一串对不上将要提交的那一套，
     // 用户抄进签名就是白改一次签名，而且提交会撞 sha/集合对不上。
     text = "";
-    bad = `这套里还差 ${set.incomplete.length} 枚的模块 ID 或整包哈希（${namesOf(set.incomplete.map((t) => t.card))}）`;
+    bad = `这批还差 ${set.incomplete.length} 个的模块 ID 或校验值（${namesOf(set.incomplete.map((t) => t.card))}）`;
   } else {
     try {
       text = await buildProofStringV2(set.items, nonce);
     } catch (err) {
       // canonicalProofSet 那三条拒绝（空集 / 形状不对的 sha / 同 id 两次）都是客户端可控的输入，
       // 不是内部不可能状态：这里必须把它显示成一句人话，而不是让那一串停在旧值上。
-      bad = `这一套现在算不出签名：${(err && err.message) || "集合形状不对"}`;
+      bad = `这批现在算不出签名：${(err && err.message) || "形状不对"}`;
     }
   }
   // 来源在 await 期间动过都不许贴这一串：连打 id / 连着换包时先发的请求可能后到，
@@ -2623,29 +2636,29 @@ function paintProofs(set, text, bad) {
   if (text) {
     const code = node("code", "mono proof__txt", text);
     row.append(code);
-    const copy = node("button", "btn btn--ghost btn--sm proof__copy", "复制这一串");
+    const copy = node("button", "btn btn--ghost btn--sm proof__copy", "复制");
     copy.type = "button";
     copy.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(text);
-        copy.textContent = "已复制";
+        copy.textContent = "复制好了";
       } catch {
-        copy.textContent = "浏览器不让复制，请自己选中";
+        copy.textContent = "浏览器不让复制，自己选中吧";
       }
-      setTimeout(() => (copy.textContent = "复制这一串"), 1500);
+      setTimeout(() => (copy.textContent = "复制"), 1500);
     });
     row.append(copy);
   } else {
-    row.append(node("span", "proof__pending", bad || "这一套现在还算不出签名。"));
+    row.append(node("span", "proof__pending", bad || "这批现在还算不出签名。"));
   }
   list.append(row);
 
   // 签名绑的是这一套的全集 ⇒ 必须把这 N 枚点名出来，否则「这一串顶的是哪几枚」没人知道，
   // 而摘进/摘出一枚就会悄悄换掉屏幕上这一串。
   const roster = node("div", "proof__set");
-  roster.append(node("span", "proof__set-k", `这一串绑的是这套 ${set.targets.length} 枚`));
+  roster.append(node("span", "proof__set-k", `这一串绑这一批 ${set.targets.length} 个`));
   for (const t of set.targets) {
-    roster.append(node("span", "proof__m", t.id || (t.card.file ? t.card.file.name : "（没 ID）")));
+    roster.append(node("span", "proof__m", t.id || (t.card.file ? t.card.file.name : "（没填 ID）")));
   }
   const rec = state.cards.filter((c) => isRecorded(c));
   if (rec.length) roster.append(node("span", "proof__out", `不含：${namesOf(rec)}`));
@@ -2656,9 +2669,9 @@ function paintProofs(set, text, bad) {
   // 正是为了这个）。旧那份「一次大约放 3 条、改一次投一枚」的读数是 v1 的账，已经作废 ——
   // 留着它就是让界面在用户已经不需要改 N 次签名的时候继续骗他改 N 次。
   cap.textContent =
-    `这一串 ${text.length || 19} 个字符，覆盖本次这一整套（${set.targets.length} 枚），酷安签名上限实测 60 个字符 —— ` +
-    "只改一次签名、一次提交整套。它绑的是这套的全集：增删任一枚、改任一枚的模块 ID、给任一枚重选包，" +
-    "这一串就变成另一串，要重新抄进签名并保存；签名里还是旧的那串时，服务端会按「签名里没有本次签名」拒。";
+    `这一串 ${text.length || 19} 个字符，覆盖这一批（${set.targets.length} 个），酷安签名最多 60 个字符 —— ` +
+    "只改一次签名、一次提交整批。它绑的是这一批的全集：增删一个、改 ID、换包，" +
+    "这一串就变成另一串，要重新填并保存；签名里还是旧的，服务端会拒。";
   box.hidden = false;
 }
 
@@ -2848,6 +2861,9 @@ function paintAuth() {
   if (form) form.hidden = pending;
   const wait = $("#auth-wait");
   if (wait) wait.hidden = !pending;
+  // 身份提示条：验证过就不必再提；还在问会话的时候也不闪。
+  const bar = $("#authbar");
+  if (bar) bar.hidden = pending || state.auth === "in";
 }
 
 /** 会话条：只在真有会话、且它属于输入框里这串 UID 时出现。 */
@@ -2860,8 +2876,8 @@ function paintSession() {
     if (on) {
       const t = $("#session-t");
       const d = $("#session-d");
-      if (t) t.textContent = `已验证：${state.session.nickname || uid}`;
-      if (d) d.textContent = "90 天内再投稿不用改签名。换账号请点「退出」。";
+      if (t) t.textContent = `已登录：${state.session.nickname || uid}`;
+      if (d) d.textContent = "90 天内再传不用改签名。要换账号点「退出该身份」。";
     }
   }
   paintWho();
@@ -3030,7 +3046,7 @@ function paintMine() {
   }
   bar.hidden = false;
   const n = $("#mine-n");
-  if (n) n.textContent = mine.loading ? "正在读…" : mine.rows.length ? `${mine.rows.length} 枚已收录` : "";
+  if (n) n.textContent = mine.loading ? "正在读…" : mine.rows.length ? `${mine.rows.length} 个已上架` : "";
   const list = $("#mine-list");
   if (list) {
     list.textContent = "";
@@ -3039,10 +3055,10 @@ function paintMine() {
   const note = $("#mine-note");
   if (note) {
     if (mine.loading) note.textContent = "";
-    else if (mine.degraded) note.textContent = "这次没读到公开索引，清单可能不全 —— 不影响你继续上传。";
+    else if (mine.degraded) note.textContent = "这次没读到模块库，清单可能不全 —— 不影响你继续传。";
     else if (mine.rows.length)
       note.textContent =
-        "点「上传更新版」会把 ID / 名称 / 作者 / 来源填好、版本号预填成当前值 +1，接着让你选包。";
+        "点「上传更新版」会把信息填好、版本代号自动 +1，接着让你选包。";
     else note.textContent = "";
   }
 }
@@ -3056,23 +3072,23 @@ function mineRow(row) {
   li.append(head);
   const bits = [];
   bits.push(
-    row.version ? `当前收录 v${row.version}${row.versionCode ? `（code ${row.versionCode}）` : ""}` : "当前收录版本未知"
+    row.version ? `线上版本 v${row.version}${row.versionCode ? `（code ${row.versionCode}）` : ""}` : "当前收录版本未知"
   );
   // 历史版本与提交时间、PR 链接后端今天都还没回 —— 有就显示，没有就一个字都不编。
-  if (Array.isArray(row.versions) && row.versions.length) bits.push(`投过的版本 ${row.versions.join(" / ")}`);
-  if (row.submittedAt) bits.push(`最近提交 ${row.submittedAt}`);
+  if (Array.isArray(row.versions) && row.versions.length) bits.push(`传过的版本 ${row.versions.join(" / ")}`);
+  if (row.submittedAt) bits.push(`最近一次 ${row.submittedAt}`);
   li.append(node("span", "mine__meta", bits.join(" · ")));
   const pr = row.pr ? safeUrl(row.pr) : "";
   if (pr) {
-    const link = node("a", "mine__link", "看这次 PR");
+    const link = node("a", "mine__link", "看这次审核");
     link.href = pr;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     li.append(link);
   }
-  const go = node("button", "mine__go", "上传更新版");
+  const go = node("button", "mine__go", "传个新版");
   go.type = "button";
-  go.setAttribute("aria-label", `给 ${row.id} 上传更新版`);
+  go.setAttribute("aria-label", `给 ${row.id} 传个新版`);
   go.addEventListener("click", () => {
     // 复用上传页那条「为已收录模块挑新版」的路：ID / 名称 / 作者 / 来源预填、版本号 +1。
     prefillFromMine(row);
@@ -3417,12 +3433,12 @@ function renderIdentityGate() {
   const recheck = $("#id-level-recheck");
   if (recheck) recheck.hidden = !blocked;
   if (note) {
-    if (state.idBusy) note.textContent = "正在跟后端核对…";
+    if (state.idBusy) note.textContent = "正在核对…";
     else if (!uid) note.textContent = "先填你的酷安 UID";
-    else if (!isCoolapkUid(uid)) note.textContent = "UID 应是 4-12 位纯数字";
-    else if (blocked) note.textContent = "先去酷安升级，再回来点「我已升级，重新验证」";
-    else if (wait > 0) note.textContent = `请 ${wait} 秒后再试`;
-    else if (!pledge || !pledge.checked) note.textContent = "把下面那条承诺勾上";
+    else if (!isCoolapkUid(uid)) note.textContent = "4-12 位数字";
+    else if (blocked) note.textContent = "先去酷安升级，再点「我升好了，再验一次」";
+    else if (wait > 0) note.textContent = `${wait} 秒后再试`;
+    else if (!pledge || !pledge.checked) note.textContent = "把下面的承诺勾上";
     else note.textContent = "可以去验证了";
   }
   // 冷却中才留一条每秒的定时器，数到 0 自己停。
@@ -3512,7 +3528,7 @@ async function submitIdentity() {
     if (el && state.session.uid) el.value = state.session.uid;
     const nick = fieldEls.uploader;
     if (nick && state.session.nickname) nick.value = state.session.nickname;
-    showUid("ok", "已验证", state.session.nickname || state.session.uid, "这张凭据 90 天内有效，再投稿不用再改签名。");
+    showUid("ok", "已验证", state.session.nickname || state.session.uid, "这张凭据 90 天内有效，再传不用改签名。");
     syncUploaderField();
     renderProof();
     // 换了人就是换了清单：asked 清空让 loadMine 重问一次。
@@ -3534,7 +3550,7 @@ async function submitIdentity() {
       state.idError = "";
     } else {
       // backendFailure 已经把那句中文写好了（含服务端原话），这里原样显示，不改写。
-      state.idError = err && err.message ? err.message : "验证没有成功，稍后再试一次。";
+      state.idError = err && err.message ? err.message : "没验过，稍后再试一次。";
       // 任何失败都记数（断网 / 超时 / 被拒）：不记的话「再点一次」就能无限绕过冷却。
       countIdentityFailure(fp);
     }
@@ -3577,7 +3593,7 @@ async function copyIdentityCommit(btn) {
     }
   }
   if (btn) {
-    btn.textContent = ok ? "已复制" : "请按 Ctrl+C";
+    btn.textContent = ok ? "复制好了" : "请按 Ctrl+C";
     setTimeout(() => (btn.textContent = label), 1500);
   }
 }
@@ -3623,9 +3639,9 @@ function paintRecords() {
   const on = state.auth === "in" && Boolean(state.session && state.session.token);
   let text = "";
   if (!on) {
-    text = "这一页要先看过身份 —— 回身份页验证一次，这里就会列出你投过的每一枚。";
+    text = "先验一次身份 —— 回去验证完，这里会列出你传过的每一个。";
   } else if (!mine.loading && !mine.rows.length && !mine.degraded) {
-    text = "你还没投过模块。上传第一枚之后，这里会列出它的当前收录版本，也能直接接着发更新版。";
+    text = "你还没传过模块。传第一个之后，这里会列出线上版本，也能直接发新版。";
   }
   box.hidden = !text;
   box.textContent = text;
@@ -3672,7 +3688,7 @@ const runUidCheck = debounce(async () => {
       "ok",
       meta.label,
       meta.title,
-      `UID ${uid}${state.session.nickname ? ` · ${state.session.nickname}` : ""}。90 天内的长效会话，这一次不用改签名。`,
+      `UID ${uid}${state.session.nickname ? ` · ${state.session.nickname}` : ""}。90 天内的长效会话，这次不用改签名。`,
       state.session.avatar || ""
     );
     syncUploaderField();
@@ -3683,7 +3699,7 @@ const runUidCheck = debounce(async () => {
     return;
   }
   state.uidStatus = "checking";
-  showUid("idle", "checking", "正在核实酷安用户…", `查询 UID ${uid} 是否对应一个真实账号。`);
+  showUid("idle", "checking", "正在核实酷安账号…", `看看 ${uid} 是不是真实账号。`);
   refreshGate();
 
   const result = await lookupCoolapkUser(uid);
@@ -3716,6 +3732,32 @@ const runUidCheck = debounce(async () => {
 
 let lastFocus = null;
 
+/**
+ * 未验证的人点「上传前确认」：先出身份提示层，不直接弹确认层。
+ *
+ * 确认层里那几行（签名、承诺、逐枚清单）都建立在「以某个已验证身份提交」之上；
+ * 没验证的人看见它只会得到一屏看不懂的词，还以为站点坏了。
+ */
+function openAuthPrompt() {
+  const layer = $("#layer-auth");
+  if (!layer) return;
+  lastFocus = document.activeElement;
+  layer.hidden = false;
+  layer.classList.add("is-open");
+  document.body.style.overflow = "hidden";
+  const go = $("#auth-go");
+  if (go) go.focus();
+}
+
+function closeAuthPrompt() {
+  const layer = $("#layer-auth");
+  if (!layer) return;
+  layer.classList.remove("is-open");
+  layer.hidden = true;
+  document.body.style.overflow = "";
+  if (lastFocus && lastFocus.focus) lastFocus.focus();
+}
+
 function openConfirm() {
   const { zipOk } = collect();
   const targets = submitTargets();
@@ -3743,21 +3785,21 @@ function openConfirm() {
   const ack = $("#ck-confirm");
   $("#confirm-go").disabled = !(ack && ack.checked);
   $("#confirm-go").textContent =
-    targets.length > 1 ? `确认并上传这一整套（${targets.length} 枚）` : "确认并上传";
+    targets.length > 1 ? `确认并上传这一批（${targets.length} 个）` : "确认并上传";
 
   const sum = $("#warn-sum");
   sum.textContent = "";
   // 一次动作只有一个人、一个承诺、一枚签名 —— 这三样在整套之上，逐枚列就是把它们说成 N 份。
   const shared = [
-    ["上传人酷安昵称", fieldValue("uploader")],
+    ["上传人昵称", fieldValue("uploader")],
     ["酷安 UID", uidLine()],
     [
       "签名的校验段",
       sessionFor(fieldValue("coolapkUid"))
-        ? "（走长效会话，这一次不用改签名）"
+        ? "（走长效会话，这次不用改签名）"
         : state.nonce || "（还没生成）",
     ],
-    ["本次要提交", `${targets.length} 枚 · 合计 ${fmtBytes(totalBytes(targets))} · 一个 PR`],
+    ["这次要传", `${targets.length} 个 · 合计 ${fmtBytes(totalBytes(targets))} · 一次审核`],
   ];
   for (const [k, v] of shared) {
     const line = node("div", "warn__shared");
@@ -3770,17 +3812,17 @@ function openConfirm() {
     const v = cardValues(card);
     const block = node("div", "warn__mod");
     const head = node("div", "warn__mod-hd");
-    head.append(node("b", null, `第 ${i + 1} 枚 · ${v.id || "（没 ID）"}`));
+    head.append(node("b", null, `第 ${i + 1} 个 · ${v.id || "（没填 ID）"}`));
     head.append(node("span", null, `${v.name || "—"} · ${v.version || "—"} · code ${v.versionCode || "—"} · ${card.file ? fmtBytes(card.file.size) : "—"}`));
     block.append(head);
     block.append(
       node(
         "div",
         "warn__mod-sub",
-        `文件 ${card.file ? card.file.name : "—"} · 来源 ${v.source || "—"} · 仓库 ${v.repoUrl || "—"}`
+        `包 ${card.file ? card.file.name : "—"} · 来源 ${v.source || "—"} · 源码 ${v.repoUrl || "—"}`
       )
     );
-    block.append(node("div", "warn__mod-sub", `整包 sha256 ${card.zipSha ? `${card.zipSha.slice(0, 16)}…` : "还没算出来"}`));
+    block.append(node("div", "warn__mod-sub", `校验值 ${card.zipSha ? `${card.zipSha.slice(0, 16)}…` : "还没算出来"}`));
     sum.append(block);
   }
   // 签名是提交前最后一道能核对的东西：整套就这一串，列一次，别让人以为还要逐枚抄。
@@ -3790,10 +3832,10 @@ function openConfirm() {
   if (!viaSession) {
     const proofVal = node("b", null, "…");
     const proofLine = node("div", "warn__proof");
-    proofLine.append("这一整套共用的签名: ", proofVal);
+    proofLine.append("这一批共用的签名: ", proofVal);
     sum.append(proofLine);
     proofTextOf().then((t) => {
-      proofVal.textContent = t || "这一套还差来源（某一枚的模块 ID / 整包哈希 / 随机段），现在没有可抄的一串";
+      proofVal.textContent = t || "这批还差东西（某一个的模块 ID / 校验值 / 随机段），现在没有可填的一串";
     });
   }
   const rec = state.cards.filter((c) => isRecorded(c));
@@ -3802,8 +3844,8 @@ function openConfirm() {
       node(
         "p",
         "warn__queue",
-        `队列里另有 ${rec.length} 枚（${namesOf(rec)}）被「已被上传过」那一档摘出了：它们不进这一次提交，` +
-          "签名那串里也没有它们。要留着看就留着，要重新上传就先移除再重选包。"
+        `队列里另有 ${rec.length} 个（${namesOf(rec)}）被「有人传过」摘出去了：不进这次提交，` +
+          "签名里也没有它们。要留着就留着，要重传先移除再选包。"
       )
     );
   }
@@ -3847,7 +3889,47 @@ function closeConfirm() {
 }
 
 function bindConfirm() {
-  $$("[data-open-confirm]").forEach((btn) => btn.addEventListener("click", openConfirm));
+  // 没验证的人点「上传前确认」：先出身份提示层；验证过的照旧进确认层。
+  $$("[data-open-confirm]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      if (state.auth !== "in") return openAuthPrompt();
+      openConfirm();
+    })
+  );
+  const authGo = $("#auth-go");
+  if (authGo) {
+    authGo.addEventListener("click", () => {
+      closeAuthPrompt();
+      if (location.hash !== "#/identity") location.hash = "#/identity";
+    });
+  }
+  const authLater = $("#auth-later");
+  if (authLater) authLater.addEventListener("click", closeAuthPrompt);
+  const layerAuth = $("#layer-auth");
+  if (layerAuth) {
+    layerAuth.addEventListener("click", (e) => {
+      if (e.target === layerAuth) closeAuthPrompt();
+    });
+    layerAuth.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeAuthPrompt();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusable = $$("#layer-auth button:not([disabled])").filter((el) => el.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    });
+  }
   $("#confirm-back").addEventListener("click", closeConfirm);
   // 确认层只有一枚勾（#ck-confirm）：勾上就亮「确认并上传」，取消就灭。仍然用 $$ 取一遍而不是
   // 写死 id —— 万一将来有人再加一条，至少不会因为漏绑而让按钮在没勾时亮着。
@@ -3980,7 +4062,7 @@ async function uploadBatch() {
   state.batchResult = null;
   for (const card of state.cards) card.ack = null;
   renderQueue();
-  openRun("UPLOADING", `正在上传这一整套（${payload.modules.length} 枚）…`);
+  openRun("UPLOADING", `正在上传这一批（${payload.modules.length} 个）…`);
 
   try {
     const { pr, modules, session } = await submitContribution(payload, {
@@ -3994,7 +4076,7 @@ async function uploadBatch() {
     $("#run-fill").style.width = "100%";
     $("#run-pct").textContent = "100%";
     state.batchResult = { ok: true, pr, modules, at: Date.now() };
-    // 后端认下了这个人 ⇒ 顺手把长效会话收下：以后 90 天内再投稿不用改签名。
+    // 后端认下了这个人 ⇒ 顺手把长效会话收下：以后 90 天内再传不用改签名。
     // 应答里没有 `session`（后端还没上线这一档）就什么都不做 —— 页面照旧每次改签名。
     // 走令牌来的这一笔后端不重签（`session` 是 null），adoptSession 见到 null 就原样留着旧令牌。
     adoptSession({ session });
@@ -4042,7 +4124,7 @@ function failReason(err) {
     ? err.message
     : err && err.message
     ? err.message
-    : "未知的失败，服务端没给原因。";
+    : "没成功，服务端也没说原因。";
 }
 
 /** 后端回的机器可读码（api.js 从响应体的 code 取；不是 JSON 就没有）。 */
@@ -4060,10 +4142,10 @@ function errOwner(err) {
 }
 
 const OWNER_LABEL = {
-  you: { chip: "是你的包或字段的问题", cls: "chip--bad" },
-  us: { chip: "是我们这一侧的问题", cls: "chip--warn" },
-  both: { chip: "两边都要看一眼", cls: "chip--warn" },
-  unknown: { chip: "归属没能判定", cls: "" },
+  you: { chip: "你这边的问题", cls: "chip--bad" },
+  us: { chip: "站点这边的问题", cls: "chip--warn" },
+  both: { chip: "两边都得看一眼", cls: "chip--warn" },
+  unknown: { chip: "判不出是谁的", cls: "" },
 };
 
 function retryBatch() {
@@ -4104,12 +4186,12 @@ function showSuccess(res) {
   const n = (res.modules && res.modules.length) || (state.lastBatch ? state.lastBatch.modules.length : 0);
   $("#run-kicker").textContent = "PR OPENED";
   const ttl = $("#run-ttl");
-  ttl.textContent = n > 1 ? `这一整套 ${n} 枚已受理，一个 PR 已开` : "上传已受理，PR 已开";
+  ttl.textContent = n > 1 ? `这一批 ${n} 个都收下了，审核已提交` : "收下了，审核已提交";
   ttl.classList.add("ok");
 
   const box = resultBody();
-  box.append(node("p", null, "服务端已经存下这一整套的每一个包，并自动开了一个只含元数据 JSON 的 PR："));
-  const link = node("a", null, url_ || "（没拿到 PR 链接）");
+  box.append(node("p", null, "服务端已经把每个包都存好了，也自动提交了只含模块信息的审核："));
+  const link = node("a", null, url_ || "（没拿到审核链接）");
   if (url_) {
     link.href = url_;
     link.target = "_blank";
@@ -4125,10 +4207,10 @@ function showSuccess(res) {
       const bits = [];
       if (m.versionCode !== undefined) bits.push(`code ${m.versionCode}`);
       if (m.assetName) bits.push(m.assetName);
-      if (m.sha256) bits.push(`服务端实算 sha256 ${String(m.sha256).slice(0, 16)}…`);
-      ul.append(node("li", null, `${m.id || "（没给 id）"} · ${bits.join(" · ") || "已受理"}`));
+      if (m.sha256) bits.push(`服务端实算的校验值 ${String(m.sha256).slice(0, 16)}…`);
+      ul.append(node("li", null, `${m.id || "（没给 ID）"} · ${bits.join(" · ") || "已收下"}`));
     }
-    box.append(node("p", "done__kicker", `这一次落盘的 ${res.modules.length} 枚`));
+    box.append(node("p", "done__kicker", `这次存下的 ${res.modules.length} 个`));
     box.append(ul);
   }
 
@@ -4138,21 +4220,21 @@ function showSuccess(res) {
   // 说「签名已经记账、要再改一次」就是假话 —— 用户会去找那一串根本不存在的签名。
   const viaSession = Boolean(state.lastBatch && state.lastBatch.session);
   for (const text of [
-    "点进 PR 能看到审核进度，以及这一整套每一枚的完整元数据。",
+    "点进审核能看到进度，以及每一个的完整信息。",
     // 这句原来说「对已收录模块的版本更新不会自动合入」—— 与契约 §4.1 同源的假话。
     // 新模块与版本更新走的是同一套机器判据，过了都自动进索引；差别只在「这一枚是不是你的」。
-    "新模块与版本更新走同一套机器判据：没命中拦截名单就可能自动通过。版本更新还多一道归属闸 —— 只有原作者能发。",
-    "PR 合并之后，这些模块才会出现在公开索引里，所有人才能在管理器里搜到并一键安装。",
+    "新模块和更新走同一套自动检查：没问题就自动通过。更新还多一道 —— 只有原作者能发。",
+    "审核合并之后，这些模块才会进模块库，别人才能在管理器里搜到、一键装。",
     viaSession
-      ? "这一趟走的是长效会话（90 天内免改签名），你的酷安签名这一次没有被动过；下次上传仍然不用改。"
-      : "这一串签名已经随这一次上传记账了（用过即废）。要再上传别的包，页面会给你新的一串 —— 签名要再改一次。",
+      ? "这次走长效会话（90 天内免改签名），你的酷安签名没动过；下次传也不用改。"
+      : "这一串签名已经用掉了（用过即废）。要再传别的包，页面会给你新的一串 —— 签名得再改一次。",
   ])
     ul.append(node("li", null, text));
   box.append(node("p", "done__kicker", "接下来"));
   box.append(ul);
 
   const ft = $("#run-ft");
-  const again = node("button", "btn btn--go", "清掉这一套，传下一套");
+  const again = node("button", "btn btn--go", "清空，传下一批");
   again.type = "button";
   again.addEventListener("click", () => {
     closeRun();
@@ -4208,7 +4290,7 @@ function showFailure(err) {
   $("#run-kicker").textContent = "REJECTED";
   const ttl = $("#run-ttl");
   const n = state.lastBatch ? state.lastBatch.modules.length : 0;
-  ttl.textContent = n > 1 ? `这一整套 ${n} 枚都没提交上去` : "这次没提交上去";
+  ttl.textContent = n > 1 ? `这一批 ${n} 个都没传上去` : "这次没传上去";
   ttl.classList.add("bad");
 
   const box = resultBody();
@@ -4222,7 +4304,7 @@ function showFailure(err) {
   const code = errCode(err) || (err && err.code) || "";
   if (code) head.append(node("span", "reason__code", `code: ${code}`));
   box.append(head);
-  box.append(node("p", null, "后端返回的原因："));
+  box.append(node("p", null, "服务端说："));
   box.append(node("div", "reason", reason));
 
   // 全有全无不是「保守起见」那种口彩，是 §15 第 3 条拍下的语义：说清楚它意味着什么。
@@ -4230,8 +4312,8 @@ function showFailure(err) {
     node(
       "p",
       "run__scope",
-      `这一次是**整套一次提交**，语义全有全无：任何一枚没过 ⇒ 整单拒、一个 GitHub 写入都没发生、` +
-        `签名也没被烧掉。所以${n > 1 ? `这 ${n} 枚` : "这一枚"}要么一起上线、要么一起还留在你手上 —— 页面上不会出现「一半传上了」那种状态。`
+      `这一次是整批一起提交，全有全无：任何一个没过 ⇒ 整批退回、GitHub 上一个字都没写、` +
+        `签名也没白烧。所以${n > 1 ? `这 ${n} 枚` : "这一个"}要么一起上架、要么一起留在你手上 —— 不会出现「一半传上了」那种情况。`
     )
   );
 
@@ -4250,9 +4332,9 @@ function showFailure(err) {
   if (err instanceof BackendError && (err.kind === "network" || err.kind === "not-configured")) {
     const hint = node("p");
     hint.append(
-      "这类失败通常不用改上传内容：先确认 ",
+      "这类失败一般不用改内容：先确认 ",
       node("code", null, "config.js"),
-      " 里的 API_BASE 填了、后端 Worker 在跑，并且它已经给响应加上 Access-Control-Allow-Origin。"
+      " 里的 API_BASE 填了、服务器在跑，并且已经给响应加上 Access-Control-Allow-Origin。"
     );
     box.append(hint);
   } else if (owner === "us") {
@@ -4260,7 +4342,7 @@ function showFailure(err) {
       node(
         "p",
         null,
-        "这一句不该由你改包来修：包、字段、签名都不用动。稍后重试一次，还是这样就这一屏的内容找站点 —— 表单与选中的包本页都给你留着。"
+        "这句不用你改包来修：包、字段、签名都不用动。稍后再试一次，还是这样就拿这一屏的内容找站点 —— 表单和选中的包都给你留着。"
       )
     );
   } else {
@@ -4268,7 +4350,7 @@ function showFailure(err) {
       node(
         "p",
         null,
-        "表单内容与选中的包我都留着了，改完可以直接重试这一整套，不用重新填一遍、也不用重新选文件。"
+        "表单和选中的包都留着，改完直接重试这一批，不用重新填、也不用重新选文件。"
       )
     );
   }
@@ -4279,14 +4361,14 @@ function showFailure(err) {
       node(
         "p",
         null,
-        "签名换了一串 —— 表单里「上传签名」那一行现在是新的，上一串已经作废。" +
-          "先把新串抄进酷安签名并保存，再回来点重试；签名没改就重试，后端还会说这一串不对。" +
-          "换的是这一整套共用的那**一串**：一次上传只改一次签名。"
+        "签名换了一串 —— 表单里那一行是新的，上一串已经作废。" +
+          "先把新串填进酷安签名保存，再回来点重试；没改就重试，服务端还会说不对。" +
+          "换的是这一批共用的那一串：一次上传只改一次签名。"
       )
     );
 
   const ft = $("#run-ft");
-  const retry = node("button", "btn btn--go", n > 1 ? `重试这一整套（${n} 枚）` : "重试提交");
+  const retry = node("button", "btn btn--go", n > 1 ? `重试这一批（${n} 个）` : "重试");
   retry.type = "button";
   retry.addEventListener("click", () => retryBatch());
   ft.append(retry);
@@ -4342,19 +4424,19 @@ function renderIndex() {
   if (!IS_INDEX_CONFIGURED) {
     list.textContent = "";
     $("#count").textContent = "";
-    $("#index-readout").textContent = "INDEX_URL 未配置 · 浏览页暂时拿不到数据";
+    $("#index-readout").textContent = "模块库地址还没配 · 暂时没数据";
     $("#index-readout").classList.add("bad");
     shell.hidden = false;
     shell.textContent = "";
-    shell.append(node("div", "empty__t", "索引地址还没配置"));
+    shell.append(node("div", "empty__t", "模块库地址还没配"));
     shell.append(
       node(
         "p",
         null,
-        "浏览页会直接请求 config.js 里的 INDEX_URL。填好公开索引 JSON 的地址，这里就会显示全部已收录模块。"
+        "这一页直接读 config.js 里的 INDEX_URL。填上模块库地址，这里就会显示全部模块。"
       )
     );
-    const go = node("a", "btn btn--ghost btn--sm", "看看这个站现在接了什么");
+    const go = node("a", "btn btn--ghost btn--sm", "看看这个站接了什么");
     go.href = "#/about";
     shell.append(go);
     return;
@@ -4362,11 +4444,11 @@ function renderIndex() {
 
   if (state.indexError) {
     list.textContent = "";
-    $("#index-readout").textContent = "索引读取失败";
+    $("#index-readout").textContent = "模块库读不到";
     $("#index-readout").classList.add("bad");
     shell.hidden = false;
     shell.textContent = "";
-    shell.append(node("div", "empty__t", "拉不到公开索引"));
+    shell.append(node("div", "empty__t", "拉不到模块库"));
     shell.append(node("p", null, state.indexError));
     const retry = node("button", "btn btn--ghost btn--sm", "重试");
     retry.type = "button";
@@ -4376,7 +4458,7 @@ function renderIndex() {
   }
 
   if (!state.index) {
-    $("#index-readout").textContent = "正在读取索引…";
+    $("#index-readout").textContent = "正在读模块库…";
     shell.hidden = false;
     shell.textContent = "";
     shell.append(node("div", "empty__t", "读取中"));
@@ -4389,7 +4471,7 @@ function renderIndex() {
   idxReadout.classList.remove("bad");
   // 日期包成 .nb 块整体不断行（「更新 2026-10-」/「11 11:02」拆开读起来像两段）
   idxReadout.replaceChildren(
-    `${name || "索引"} · ${modules.length} 个模块`,
+    `${name || "模块库"} · ${modules.length} 个模块`,
     ...(lastUpdate ? [" · 更新 ", node("span", "nb", fmtDate(lastUpdate))] : [])
   );
 
@@ -4411,16 +4493,16 @@ function renderIndex() {
     list.hidden = true;
     shell.hidden = false;
     shell.textContent = "";
-    shell.append(node("div", "empty__t", `索引里没有匹配「${q}」的模块`));
+    shell.append(node("div", "empty__t", `模块库里没有「${q}」`));
     const hit = ledgerHitFor(q);
     if (hit) {
       shell.append(
         node(
           "p",
           null,
-          `这个查询命中了一条处置记录：${incTitle(hit)}（${KIND_LABELS[hit.kind] || hit.kind || "处置"}）` +
-            ` —— ${REASON_LABELS[hit.reason] || hit.reason || "理由见条目"}。` +
-            "它不是没被上传过，是被下架或拒收了，所以不会出现在索引里。"
+          `查到一条处置记录：${incTitle(hit)}（${KIND_LABELS[hit.kind] || hit.kind || "处置"}）` +
+            ` —— ${REASON_LABELS[hit.reason] || hit.reason || "看条目里的理由"}。` +
+            "它不是没被传过，是被下架或拒收了，所以模块库里没有。"
         )
       );
       const why = node("a", "btn btn--ghost btn--sm", "去看这条处置");
@@ -4428,7 +4510,7 @@ function renderIndex() {
       shell.append(why);
       return;
     }
-    shell.append(node("p", null, "没找到不等于没被上传过 —— 查重以模块 ID 为准。确认自己手上的包还没收录的话，可以直接上传。"));
+    shell.append(node("p", null, "没找到不等于没传过 —— 查重只看模块 ID。确认自己的包还没上架，就直接传。"));
     const go = node("a", "btn btn--go btn--sm", "去上传");
     go.href = "#/submit";
     shell.append(go);
@@ -4447,9 +4529,9 @@ function renderIndex() {
  */
 function repoChip(m) {
   if (!m.repoUrl) return null;
-  if (!m.repoVerified) return node("span", "chip chip--idle", "源码校验失效");
-  if (!m.repoCoversLatest) return node("span", "chip chip--idle", "最新版未覆盖");
-  return node("span", "chip chip--ok", m.repoLicense ? "✓ 开源" : "✓ 公开源码");
+  if (!m.repoVerified) return node("span", "chip chip--idle", "源码对不上");
+  if (!m.repoCoversLatest) return node("span", "chip chip--idle", "最新版没覆盖");
+  return node("span", "chip chip--ok", m.repoLicense ? "✓ 开源" : "✓ 有公开源码");
 }
 
 function repoFact(key, value) {
@@ -4468,7 +4550,7 @@ function repoEvidence(m) {
   const box = node("details", "mod__repo");
   box.append(node("summary", "mod__repo-sum", "源码证据"));
   if (!m.repoUrl) {
-    box.append(node("p", "mod__repo-none", "作者未提供公开源码"));
+    box.append(node("p", "mod__repo-none", "作者没给公开源码"));
     return box;
   }
   const latest = m.latest || {};
@@ -4491,11 +4573,11 @@ function repoEvidence(m) {
   if (m.repoLicense) box.append(repoFact("LICENSE", m.repoLicense));
   const tag = typeof latest.repoTag === "string" ? latest.repoTag : "";
   const hex = String(latest.repoDigest || "").replace(/^sha256:/i, "");
-  if (tag) box.append(repoFact("命中 Release", tag));
-  else if (hex) box.append(repoFact("命中来源", "checksums 分支"));
-  if (hex) box.append(repoFact("包体 digest", `sha256:${hex.slice(0, 12)}`));
+  if (tag) box.append(repoFact("对上 Release", tag));
+  else if (hex) box.append(repoFact("对上来源", "checksums 分支"));
+  if (hex) box.append(repoFact("包的校验值", `sha256:${hex.slice(0, 12)}`));
   if (m.repoCheckedAt) box.append(repoFact("最近校验", fmtDate(Number(m.repoCheckedAt))));
-  box.append(repoFact("复验状态", m.repoVerified ? "通过（包体与仓库一致）" : "未通过（源码校验失效）"));
+  box.append(repoFact("复验状态", m.repoVerified ? "通过（和仓库一致）" : "没通过（源码对不上）"));
   return box;
 }
 
@@ -4551,7 +4633,7 @@ function whoRow(m) {
     authorName,
     authorLink,
     authorLink ? "未验证" : "",
-    "作者主页由上传人填写，本站没有核实它属于谁"
+    "作者主页是上传人填的，本站没核实过"
   );
   const uploaderItem = side("上传人", uploaderName, uploaderLink, "", "");
   if (authorItem) row.append(authorItem);
@@ -4573,7 +4655,7 @@ function authorEvidence(m) {
   if (!links.length) return null;
   const box = node("details", "mod__repo");
   // 这句话是这一格的全部意义：链接是上传人填的声明，不是本站核实过的身份。
-  box.append(node("summary", "mod__repo-sum", "作者主页（由上传人填写，未验证）"));
+  box.append(node("summary", "mod__repo-sum", "作者主页（上传人填的，没核实）"));
   for (const [key, link] of links) {
     const row = node("div", "mod__repo-row");
     row.append(node("span", "mod__repo-k", key));
@@ -4629,7 +4711,7 @@ function modRow(m, q) {
   }
   // 举报从「就是这一枚」这一格进去：带着 id 与 versionCode，签名的两个来源就不用用户手打。
   if (latest && SHA256_HEX_RE.test(String(latest.sha256 || ""))) {
-    const rep = node("a", "mod__rep", "举报这一枚");
+    const rep = node("a", "mod__rep", "举报");
     rep.href = `#/moderation?tab=report&id=${encodeURIComponent(m.id)}&vc=${encodeURIComponent(latest.versionCode)}`;
     ft.append(rep);
   }
@@ -4644,14 +4726,14 @@ function modRow(m, q) {
 async function loadIndex() {
   const shell = $("#index-state");
   shell.hidden = true;
-  $("#index-readout").textContent = "正在读取索引…";
+  $("#index-readout").textContent = "正在读模块库…";
   $("#index-readout").classList.remove("bad");
   state.indexError = null;
   try {
     state.index = await fetchIndex();
   } catch (err) {
     state.indexError =
-      err instanceof BackendError ? err.message : "索引读取失败，可能是网络或格式问题。";
+      err instanceof BackendError ? err.message : "模块库读不到，可能是网络问题。";
   }
   // 索引晚到也算数：当前那张卡若已经填了 ID，空着的来源 / 源码仓库 / 作者主页这时补上，
   // 「留空将沿用」那两句提示也才有依据（它们读的就是 state.index）。
@@ -4684,15 +4766,15 @@ const report = {
 /** 被举报的那一枚：签名绑 (id, 索引里那一版的 sha256)，这一格算不出来就没有可提交的签名。 */
 function reportTarget() {
   const id = $("#rp-id").value.trim();
-  if (!id) return { ok: false, why: "还没填模块 ID：签名那一串绑的就是那一枚的 id 与包体 sha256。" };
+  if (!id) return { ok: false, why: "还没填模块 ID：签名绑的就是它的 ID 和包的校验值。" };
   if (!state.index) {
-    return { ok: false, why: "公开索引还没读出来。签名要绑的那串 sha256 只在索引里，读不到就算不出那一串。" };
+    return { ok: false, why: "模块库还没读出来。签名要用的校验值只在模块库里，读不到就算不出来。" };
   }
   const m = state.index.modules.find((x) => x.id === id);
   if (!m) {
     return {
       ok: false,
-      why: `索引里没有 id=${id} 的模块。举报只管已经上架的模块 —— 请从 02 那一屏复制那一行小灰字，别手打。`,
+      why: `模块库里没有 id=${id} 的模块。举报只管已经上架的模块 —— 请从 02 那一屏复制那一行小灰字，别手打。`,
     };
   }
   const rawVc = $("#rp-vc").value.trim();
@@ -4701,14 +4783,14 @@ function reportTarget() {
     version = m.versions.find((v) => Number(v.versionCode) === Number(rawVc)) || null;
     if (!version) {
       const known = m.versions.map((v) => v.versionCode).sort((a, b) => a - b).join(", ");
-      return { ok: false, why: `这一版不在索引里；索引里这一枚有 versionCode=${known}。填其中一个，或者留空按最新那一枚判。` };
+      return { ok: false, why: `这一版不在模块库里；模块库里这一个有 versionCode=${known}。填其中一个，或者留空按最新那一个判。` };
     }
   } else {
     version = m.latest || m.versions[0] || null;
   }
-  if (!version) return { ok: false, why: "索引里这一枚没有任何版本条目 —— 那是索引自己的形状问题（本站的事）。" };
+  if (!version) return { ok: false, why: "模块库里这个没有任何版本记录 —— 这是模块库自己的问题（本站的事）。" };
   if (!SHA256_HEX_RE.test(String(version.sha256 || ""))) {
-    return { ok: false, why: "索引里那一枚没有 64 位的包体 sha256，签名算不出来 —— 本站索引的问题，你不需要改任何东西。" };
+    return { ok: false, why: "模块库里那个没有完整的校验值，签名算不出来 —— 这是模块库的问题，你不用改任何东西。" };
   }
   return { ok: true, module: m, version, id, sha: String(version.sha256).toLowerCase(), assumed: !rawVc };
 }
@@ -4775,7 +4857,7 @@ function refreshReportForm() {
     !report.busy;
   $("#rp-submit").disabled = !ok;
   $("#rp-vc-help").textContent = target.ok
-    ? `按这一枚判：versionCode=${target.version.versionCode}${target.assumed ? "（索引里最新那一版，留空时的默认）" : ""} · sha256 ${target.sha.slice(0, 12)}…`
+    ? `按这一个判：versionCode=${target.version.versionCode}${target.assumed ? "（模块库里最新那一版，留空时的默认）" : ""} · 校验值 ${target.sha.slice(0, 12)}…`
     : "读者装在身上的一般是最新那一版，所以留空是默认答案；要指旧那一版就填它的 code。";
   paintProof(target);
   const err = $("#rp-error");
@@ -4813,22 +4895,22 @@ function paintProof(target) {
       const now = reportTarget();
       if (!now.ok || `${now.id}|${now.sha}|${report.nonce}` !== expected) return;
       code.textContent = text;
-      const copy = node("button", "btn btn--ghost btn--sm proof__copy", "复制这一串");
+      const copy = node("button", "btn btn--ghost btn--sm proof__copy", "复制");
       copy.type = "button";
       copy.addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(text);
-          copy.textContent = "已复制";
+          copy.textContent = "复制好了";
         } catch {
-          copy.textContent = "浏览器不让复制，请自己选中";
+          copy.textContent = "浏览器不让复制，自己选中吧";
         }
-        setTimeout(() => (copy.textContent = "复制这一串"), 1500);
+        setTimeout(() => (copy.textContent = "复制"), 1500);
       });
       row.append(copy);
-      help.textContent = `这一串绑的是 id=${target.id} 与 versionCode=${target.version.versionCode} 那一枚的包体 sha256（${target.sha.slice(0, 16)}…）。`;
+      help.textContent = `这一串绑的是 id=${target.id}、versionCode=${target.version.versionCode} 那个包的校验值（${target.sha.slice(0, 16)}…）。`;
     },
     () => {
-      code.textContent = "这一串算不出来（浏览器不支持 SHA-256）";
+      code.textContent = "这一串算不出来（这个浏览器算不了）";
     }
   );
 }
@@ -4849,7 +4931,7 @@ function paintReportResult() {
   };
   add("判定", String(r.verdict || "（服务端没给）"));
   add("是谁的事", r.owner === "us" ? "本站的（你不需要改任何东西）" : r.owner === "you" ? "举报材料的（照着下面那句改）" : String(r.owner || "（没给）"));
-  add("公开动作", String(r.publicAction || "（没给）") + " —— 公开索引一个字都没动");
+  add("公开动作", String(r.publicAction || "（没给）") + " —— 模块库一个字都没动");
   if (r.reportId) add("记录号", r.reportId);
   box.append(kv);
   box.append(node("p", "field__help", String(r.nextStep || "服务端没给下一步 —— 这一句该由服务端说，缺它是本站的问题。")));
@@ -4871,7 +4953,7 @@ async function submitReport() {
   report.busy = true;
   report.error = "";
   $("#rp-submit").disabled = true;
-  $("#rp-readout").textContent = "正在提交：服务端要读一次索引、取一次归档，再在你签名的那一串里核对签名。";
+  $("#rp-readout").textContent = "正在提交：服务端要读一次模块库、取一次归档，再在你签名的那一串里核对签名。";
   try {
     const json = await reportModule({
       id: target.id,
@@ -4887,7 +4969,7 @@ async function submitReport() {
     report.nonce = makeNonce();
     paintReportResult();
     $("#rp-readout").textContent = json.established
-      ? "这条举报成立并记下了待办；公开索引这一刻还没动。下架由本站的自动流程按批提出（没有人工签字那一步），" +
+      ? "这条举报成立，已记下。模块库这一刻还没动 —— 下架由自动流程批量提出（没有人工签字那一步），" +
         "排到哪一格，切到「处置公示」那一半看顶部的队列读数 —— 那一格没显示数字就是读数还没到位，不等于没受理。"
       : "这条举报没有成立，但同样留下了待办记录；下面那句是服务端给的下一步。";
   } catch (err) {
@@ -4925,7 +5007,7 @@ function bindReport() {
   $("#rp-nonce-renew").addEventListener("click", () => {
     report.nonce = makeNonce();
     refreshReportForm();
-    $("#rp-proof-help").textContent = "换了新的一串：把上面这一串抄进签名并保存，之前那一串就作废了。";
+    $("#rp-proof-help").textContent = "换了新的一串：把上面这一串填进签名并保存，之前那一串就作废了。";
   });
   $("#rp-submit").addEventListener("click", () => {
     submitReport();
@@ -5011,7 +5093,7 @@ function incRow(item, q) {
   // 举报管的默认是「索引里最新那一枚」，正好是这一条要判的那一枚。
   const hitId = (item.selectors || []).find(([k]) => k === "id");
   if (hitId && hitId[1]) {
-    const rep = node("a", "mod__rep", "举报这一枚");
+    const rep = node("a", "mod__rep", "举报");
     rep.href = `#/moderation?tab=report&id=${encodeURIComponent(hitId[1])}`;
     ft.append(rep);
   }
@@ -5040,7 +5122,7 @@ function renderIncAppeal() {
       node(
         "span",
         "inc-appeal__unset",
-        "这个站还没配置索引仓库的 issue 地址 —— 先按上面那条记录的「证据」链接回到它自己的讨论。"
+        "这个站还没配申诉地址 —— 先点上面那条记录的「证据」链接，回到它自己的讨论。"
       )
     );
     return;
@@ -5056,9 +5138,9 @@ function renderIncLegend() {
   const host = $("#inc-legend");
   if (!host || host.childElementCount) return;
   const rows = [
-    ["下架 / 拒收", "下架挡住的是这一段内容（按模块 ID、ID+versionCode 或包的 sha256 命中）；拒收挡住的是一个人或一个 ID 未来上传的任何包。"],
+    ["下架 / 拒收", "下架只挡这一段内容（按模块 ID、ID+版本代号或包的校验值命中）；拒收会挡住这个人以后传的任何包。"],
     ["命中条件", "同一条里的多个条件是「且」的关系，不是「或」——写了 ID 又写 versionCode，就只命中那一个版本。"],
-    ["证据（by）", "新版是一枚机器章：`ci:audit@<提交>`，写的是这条处置被哪一次运行钉死，旁边那条复核命令任何人都能重跑一遍。它不是链接 —— 章里不带仓库地址，硬拼一个点得开的地址就是这一页在替它编一个它并不知道的去向。main 上还有换代前留下的记录，那一类的 by 是一条能点开的评论，照旧给链接。两种形状都认，因为只认新的那一种会把已经发生过的处置念成「没有证据」。形状不对的指针原样显示成文本。这一页显示的就是公示原文，判定发生在索引推导与 CI 里，前端不另判一份。"],
+    ["证据（by）", "新版是一个自动标记：`ci:audit@<提交>`，写的是这条处置被哪一次自动检查定下，旁边那条复核命令谁都能重跑。它不是链接 —— 章里不带仓库地址，硬拼一个能点的地址，等于替它编一个不知道的去向。main 上还有换代前留下的老记录，那一类的 by 是一条能点开的评论，照旧给链接。两种都认，只认新的那种会把已经发生过的处置说成「没有证据」。形状不对的指针原样显示成文本。这一页显示的就是公示原文，判定在模块库侧完成，前端不另判一份。"],
     ["复核（verify）", "有这一项时任何人都能自己跑一遍确认这条处置成立，而不是只能相信页面上写的。"],
     ["时间", "带时区的那一刻，不是「大概哪天」。"],
   ];
@@ -5127,13 +5209,59 @@ function groupPeople(items) {
   return { people: [...by.values()].sort((a, b) => (b.lastAtMs ?? 0) - (a.lastAtMs ?? 0)), unkeyed };
 }
 
+/* 人卡上的头像：真头像只存在于证据文件的身份快照里（identity.userBigAvatar）。
+   拿到之前先画首字占位，拿到之后原地换掉；取不到也换回同一个占位，不留裂图。
+   缓存里连「拉过但没有」一起记，所以重绘与搜索都不会重复请求同一份证据。 */
+function avatarImg(url, initial) {
+  const img = document.createElement("img");
+  img.className = "pc__av pc__av--pic";
+  img.src = url;
+  img.alt = "";
+  img.loading = "lazy";
+  img.referrerPolicy = "no-referrer";
+  img.addEventListener("error", () => {
+    const ph = node("span", "pc__av", initial || "?");
+    ph.dataset.initial = initial || "?";
+    img.replaceWith(ph);
+  });
+  return img;
+}
+
+function avatarNode(person) {
+  const initial = person.username ? Array.from(person.username)[0] : "?";
+  const cached = state.incAvatar[person.uid];
+  if (cached) return avatarImg(cached, initial);
+  const sp = node("span", "pc__av", initial);
+  sp.dataset.initial = initial;
+  return sp;
+}
+
+async function hydrateAvatars(people) {
+  for (const p of people) {
+    if (p.uid in state.incAvatar) continue;
+    const withFile = p.items.find((i) => (i.evidence || []).some((r) => r && r.file));
+    if (!withFile) continue;
+    const ref = (withFile.evidence || []).find((r) => r && r.file);
+    state.incAvatar[p.uid] = "";
+    const res = await fetchEvidence(ref.file);
+    const idn = res.ok && res.data && res.data.pending && res.data.pending.record ? res.data.pending.record.identity : null;
+    const url = idn && idn.userBigAvatar ? secureAvatarUrl(String(idn.userBigAvatar)) : "";
+    state.incAvatar[p.uid] = url || "";
+    if (!url) continue;
+    const initial = p.username ? Array.from(p.username)[0] : "?";
+    const card = [...document.querySelectorAll(".pc")].find((c) => c.dataset.uid === p.uid);
+    const host = card ? card.querySelector(".pc__av") : null;
+    if (host && host.tagName !== "IMG") host.replaceWith(avatarImg(url, initial));
+  }
+}
+
 function personCard(person, q) {
   const card = node("article", "pc");
   card.dataset.uid = person.uid;
 
   const cover = node("div", "pc__cover");
   const idrow = node("div", "pc__idrow");
-  const av = node("span", "pc__av", person.username ? Array.from(person.username)[0] : "?");
+  const av = avatarNode(person);
   idrow.append(av);
   const names = node("div", "pc__names");
   const nm = node("div", "pc__nm");
@@ -5160,7 +5288,7 @@ function personCard(person, q) {
   for (const r of reasons) rs.append(node("span", "pc__reason", r));
   card.append(rs);
 
-  const btn = node("button", "btn btn--ghost btn--sm pc__open", state.incOpenUid === person.uid ? "收起证据" : "展开三层证据");
+  const btn = node("button", "btn btn--ghost btn--sm pc__open", state.incOpenUid === person.uid ? "收起" : "展开处置");
   btn.type = "button";
   btn.addEventListener("click", () => togglePerson(person, q));
   card.append(btn);
@@ -5225,7 +5353,7 @@ function coolapkHeadCard(subject, identity) {
 
   const bio = node("div", "ck__bio");
   bio.append(node("span", "ck__bio-k", "签名"));
-  bio.append(node("span", "ck__bio-v", idn && idn.bio ? String(idn.bio) : "没有采到签名（这条处置早于身份快照落盘）"));
+  bio.append(node("span", "ck__bio-v", idn && idn.bio ? String(idn.bio) : "没有采到签名（这条处置早于身份快照存档）"));
   wrap.append(bio);
 
   const foot = node("div", "ck__foot");
@@ -5280,8 +5408,8 @@ function factsLayer(item, ev) {
   const pairs = [
     ["模块 ID", sel.id || (pkg && pkg.id) || "这条处置没按 ID 命中", ""],
     ["versionCode", sel.versionCode || v.versionCode || "没按版本命中", ""],
-    ["包体 sha256", sel.sha256 || (pkg && pkg.sha256) || v.sha256 || "没按哈希命中", ""],
-    ["包在哪", pkg && (pkg.zipUrl || pkg.assetName) ? pkg.assetName || pkg.zipUrl : "没有固化过，包体位置只能从索引历史里查", pkg && pkg.zipUrl ? pkg.zipUrl : ""],
+    ["包的校验值", sel.sha256 || (pkg && pkg.sha256) || v.sha256 || "没按校验值命中", ""],
+    ["包在哪", pkg && (pkg.zipUrl || pkg.assetName) ? pkg.assetName || pkg.zipUrl : "没有固化过，包体位置只能从模块库历史里查", pkg && pkg.zipUrl ? pkg.zipUrl : ""],
     ["大小", pkg && pkg.size !== undefined && pkg.size !== null ? `${pkg.size} B` : "没采到", ""],
     ["上传时刻", pkg && pkg.submittedAt ? String(pkg.submittedAt) : "没采到", ""],
     ["模块来源", (pkg && pkg.source) || "没采到", pkg && pkg.source ? String(pkg.source) : ""],
@@ -5306,8 +5434,8 @@ function machineLayer(item, ev) {
        未知值不编说法：原样印出来并标一句不认识 —— 新值出现的正确反应是改这张表，
        不是让页面替后端猜一个听起来合理的解释。 */
     const VIA_LABELS = {
-      bio: "酷安个性签名（单枚签名 v1）",
-      "bio-set": "酷安个性签名（整套共用一串签名 v2）",
+      bio: "酷安个性签名（单个签名 v1）",
+      "bio-set": "酷安个性签名（整批共用一串签名 v2）",
     };
     const viaRaw = own && own.via ? String(own.via) : "";
     const viaText = !viaRaw
@@ -5321,7 +5449,7 @@ function machineLayer(item, ev) {
       ["核验时刻", own && own.verifiedAt ? fmtDate(msOf(own.verifiedAt)) : "没写", ""],
     ]));
   } else {
-    left.append(node("p", "ec__miss", "没有承诺与所有权的快照 —— 这条处置早于 P0 那道闸上线。"));
+    left.append(node("p", "ec__miss", "没有承诺和归属的快照 —— 这条处置早于相关检查上线。"));
   }
   two.append(left);
 
@@ -5350,7 +5478,7 @@ function machineLayer(item, ev) {
     }
   } else {
     const why = !ev
-      ? "这条没有固化过的证据文件，机器层的读数只留在那条 PR 的评论里。"
+      ? "这条没有固化过的证据文件，自动检查的读数只留在那次审核的评论里。"
       : ev.report === null
         ? `证据里没有审核评论：${ev.reportWhy || "原因没写"}`
         : "证据里的审核评论没能解析出 AI 那一块（评论里的产物被截断或格式不是这一版认的）。";
@@ -5400,7 +5528,7 @@ function sealBlock(ref, ev, url) {
   hd.append(node("span", "es__at", ref.at ? `固化 ${fmtDate(msOf(ref.at))}` : "固化时刻没写"));
   box.append(hd);
   const name = node("div", "es__file");
-  name.append(node("span", "es__k", "原件（文件名 = 它自己字节的 sha256）："));
+  name.append(node("span", "es__k", "原件（文件名就是它的校验值）："));
   name.append(node("span", "es__hash", ref.file));
   box.append(name);
   const links = node("div", "es__links");
@@ -5412,7 +5540,7 @@ function sealBlock(ref, ev, url) {
     links.append(a);
   }
   if (ref.pr) {
-    const b = node("a", "es__link", `承载它的 PR #${ref.pr}`);
+    const b = node("a", "es__link", `来自第 #${ref.pr}`);
     b.href = ev && ev.pr && ev.pr.url ? ev.pr.url : `https://github.com/SukiSU-Community/modules-repo/pull/${ref.pr}`;
     b.target = "_blank";
     b.rel = "noopener noreferrer";
@@ -5435,16 +5563,18 @@ function sealBlock(ref, ev, url) {
 
 /** 一条处置 = 一张三层卡；三层各自的数据来源不同，边框也不同，见 §6.2。 */
 function dispositionCard(item, q) {
-  const card = node("article", "ec");
+  // 处置种类决定左边那条色：下架是琥珀，拒收（拉黑）是红 —— 一屏里两种混着时能扫出来。
+  const card = node("article", item.kind === "deny" ? "ec ec--deny" : "ec");
   const hd = node("div", "ec__title");
   const t = node("span", "ec__title-t");
   highlight(t, incTitle(item), q);
   hd.append(t);
-  hd.append(node("span", "ec__title-s", incSelText(item)));
-  // 结论摘要提到标题这一行：下面三层的编号是 01→03，正文按这个顺序读下来，
-  // 让人一眼看到的第一个词仍然是「这条是什么处置、为什么」。
-  const k = node("span", "ec__title-k", (KIND_LABELS[item.kind] || item.kind || "处置") + " · " + (REASON_LABELS[item.reason] || item.reason || "理由见条目"));
+  // 结论摘要（处置 + 理由）跟在标题同一行：先看「这是什么处置、为什么」。
+  const k = node("span", "ec__title-k", (KIND_LABELS[item.kind] || item.kind || "处置") + " · " + (REASON_LABELS[item.reason] || item.reason || "看条目里的理由"));
   hd.append(k);
+  // 命中条件单独一行：它是一串机器可读的键值（常常是 64 位十六进制），
+  // 跟标题挤在同一行会把标题淹掉，也把这一行撑成两三行高。
+  hd.append(node("span", "ec__title-s", incSelText(item)));
   if (!KIND_LABELS[item.kind] || !REASON_LABELS[item.reason]) hd.append(node("span", "chip chip--warn", "本页不认识的分类"));
   card.append(hd);
   card.append(factsLayer(item, null));
@@ -5507,7 +5637,18 @@ function renderPeopleWall(items, q) {
   for (const p of people) wall.append(personCard(p, q));
   host.append(wall);
   const open = people.find((p) => p.uid === state.incOpenUid);
-  if (open) renderPersonDetail(open, q);
+  if (open) {
+    renderPersonDetail(open, q);
+  } else {
+    // 收起时详情块必须整块撤掉。只清 incOpenUid 的话，人卡文案回到「展开」，
+    // 下面那块证据原样留着 —— 点下去看起来就像没反应。
+    const detail = $("#inc-detail");
+    if (detail) {
+      detail.hidden = true;
+      detail.textContent = "";
+    }
+  }
+  hydrateAvatars(people);
   return { people: people.length, unkeyed };
 }
 
@@ -5517,6 +5658,7 @@ function renderPersonDetail(person, q) {
   host.textContent = "";
   const hd = node("div", "pc-detail__hd");
   hd.append(node("span", "pc-detail__t", `展开：${person.username || person.uid}`));
+  hd.append(node("span", "pc-detail__n", `${person.items.length} 条处置`));
   const close = node("button", "btn btn--ghost btn--sm", "收起");
   close.type = "button";
   close.addEventListener("click", () => {
@@ -5567,7 +5709,7 @@ function paintReportQueue() {
   bits.push(
     q.artifacts === 0
       ? "下架队列：现在没有排队的模块"
-      : `下架队列：还有 ${q.artifacts} 枚在等下架（由 ${q.reports} 条成立的举报压过来）`
+      : `下架队列：还有 ${q.artifacts} 个在等下架（由 ${q.reports} 条成立的举报压过来）`
   );
   const at = Number(Date.parse(q.at));
   bits.push(`截至 ${Number.isFinite(at) ? fmtDate(at) : "（读数没给时刻）"}`);
@@ -5609,15 +5751,15 @@ function renderIncidents() {
     readout.classList.add("bad");
     shell.hidden = false;
     shell.textContent = "";
-    shell.append(node("div", "empty__t", "处置公示的地址来自公开索引地址"));
+    shell.append(node("div", "empty__t", "处置公示的地址来自模块库地址"));
     shell.append(
       node(
         "p",
         null,
-        "这一页直接读索引仓库里的 json/dispositions.json，路径按 config.js 的 INDEX_URL 同目录推导。索引地址填好之后这里就有内容；公示为空时它会明说「目前没有任何处置记录」。"
+        "这一页读的是模块库目录下的 json/dispositions.json，地址按 config.js 的 INDEX_URL 同目录算。模块库地址填好之后这里就有内容；没有处置时它会直说「目前没有任何处置记录」。"
       )
     );
-    const go = node("a", "btn btn--ghost btn--sm", "看看这个站现在接了什么");
+    const go = node("a", "btn btn--ghost btn--sm", "看看这个站接了什么");
     go.href = "#/about";
     shell.append(go);
     return;
@@ -5659,7 +5801,7 @@ function renderIncidents() {
   readout.replaceChildren(
     `${items.length} 条处置记录`,
     ...(lastUpdate ? [" · 公示更新 ", node("span", "nb", fmtDate(lastUpdate))] : []),
-    ...(schemaKnown ? [] : [" · 这份公示的 schema 标记本页不认识，按原文列出"])
+    ...(schemaKnown ? [] : [" · 这份公示里有本页认不出的字段，按原文列出"])
   );
 
   const q = state.incQuery;
@@ -5797,20 +5939,20 @@ function renderAbout() {
     },
     {
       k: "TURNSTILE_SITEKEY",
-      v: IS_TURNSTILE_CONFIGURED ? "已配置" : "未配置（提交时只带空 token 字段）",
+      v: IS_TURNSTILE_CONFIGURED ? "已配置" : "还没接（提交时只带空 token 字段）",
       ok: IS_TURNSTILE_CONFIGURED,
     },
     {
-      k: "上传上限（三个数都只从后端读）",
+      k: "上传上限（三个数都只从服务器读）",
       v: limitsReadout(),
       ok: state.limits.from === "backend",
     },
     {
       k: "批量上传形状",
       v:
-        "前端发的是 §17.3 那份 manifest + N 个 name=\"zip\" 的 file part（manifest 排第一个 part），签名走 v2 集合串。" +
-        "⚠ 这条要求后端已经认 `manifest`（§17.1）—— 还没上线时这一套会被旧版单枚逻辑读成缺字段，" +
-        "失败不是静默的，会原样回 4xx 与 code。",
+        "一次上传会带上所有模块的信息，并把每个包一起发出去，签名按整批算。" +
+        "⚠ 这需要服务端已经支持整批上传 —— 还没上线时，旧版会把它当成缺字段，`manifest`" +
+        "失败会直接报错，不会静默通过。",
       ok: true,
     },
     {
@@ -5824,8 +5966,8 @@ function renderAbout() {
       ok: IS_UID_VERIFY_ON,
     },
     {
-      k: "前端解压能力",
-      v: canInflateRaw() ? "支持 DecompressionStream" : "不支持，元数据需手填",
+      k: "这个页面能解开的包",
+      v: canInflateRaw() ? "支持 DecompressionStream" : "不支持，信息得手填",
       ok: canInflateRaw(),
     },
   ];
@@ -5855,7 +5997,7 @@ function renderAbout() {
     copy.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(CONFIG.INDEX_URL);
-        copy.textContent = "已复制";
+        copy.textContent = "复制好了";
       } catch {
         copy.textContent = "浏览器不让复制，请手动选中文本";
       }
@@ -5867,7 +6009,7 @@ function renderAbout() {
       node(
         "span",
         null,
-        "索引地址填进 config.js 的 INDEX_URL 之后，这里会自动出现订阅地址与一键加源按钮。"
+        "模块库地址填进 config.js 的 INDEX_URL 之后，这里会自动出现订阅地址与一键加源按钮。"
       )
     );
   }
@@ -5887,9 +6029,9 @@ function paintLimit() {
   const hint = $("#drop-hint");
   if (hint) {
     hint.textContent =
-      (one === null ? "单枚上限：后端没自报" : `单枚上限 ${one} MB`) +
-      (total === null ? "" : ` · 整套 ${total} MB`) +
-      (L.maxModules === null ? "" : ` · 一次最多 ${L.maxModules} 枚`) +
+      (one === null ? "单个上限：服务端没报" : `单个上限 ${one} MB`) +
+      (total === null ? "" : ` · 整批 ${total} MB`) +
+      (L.maxModules === null ? "" : ` · 一次最多 ${L.maxModules} 个`) +
       " · 不要多套一层文件夹";
   }
   // 上传规格那一格只有地方放两个数（四格 2×2 是钉住的布局），所以写「单枚 + 一次几枚」，
@@ -5897,9 +6039,9 @@ function paintLimit() {
   const spec = $("#spec-max");
   if (spec) {
     spec.replaceChildren(
-      one === null ? node("span", null, "问后端中…") : node("b", null, one),
-      one === null ? "" : " MB / 枚",
-      ...(one === null ? [] : L.maxModules !== null ? [` · 一次最多 `, node("b", null, L.maxModules), ` 枚`] : [])
+      one === null ? node("span", null, "正在问…") : node("b", null, one),
+      one === null ? "" : " MB / 个",
+      ...(one === null ? [] : L.maxModules !== null ? [` · 一次最多 `, node("b", null, L.maxModules), ` 个`] : [])
     );
   }
 }
@@ -5908,14 +6050,14 @@ function paintLimit() {
 function limitsReadout() {
   const L = state.limits;
   if (L.from !== "backend") {
-    return `没问到（${L.from === "not-configured" ? "API_BASE 未配置" : L.from === "unreachable" ? "后端没应答" : "后端应答里没有这三个字段"}）—— 单枚 / 整套 / 枚数三条前端都不拦，全部由服务端拒。`;
+    return `没问到（${L.from === "not-configured" ? "地址还没配" : L.from === "unreachable" ? "服务端没应答" : "服务端应答里没有这三个字段"}）—— 单个 / 整批 / 个数三条前端都不拦，全部交给服务端拒。`;
   }
   const bits = [
-    L.fields.maxBytes ? `单枚 ${fmtBytes(L.maxBytes)}` : "单枚上限后端没自报",
-    L.fields.maxTotalBytes ? `整套 ${fmtBytes(L.maxTotalBytes)}` : "整套上限后端没自报（这一条前端不拦）",
-    L.fields.maxModules ? `一次 ${L.maxModules} 枚` : "枚数上限后端没自报（这一条前端不拦）",
+    L.fields.maxBytes ? `单个 ${fmtBytes(L.maxBytes)}` : "单个上限服务端没报",
+    L.fields.maxTotalBytes ? `整批 ${fmtBytes(L.maxTotalBytes)}` : "整批上限服务端没报（这一条前端不拦）",
+    L.fields.maxModules ? `一次 ${L.maxModules} 个` : "个数上限服务端没报（这一条前端不拦）",
   ];
-  return `${bits.join(" · ")} —— 数字只有后端一个定义处，config.js 里没有拷贝。`;
+  return `${bits.join(" · ")} —— 数字只有服务端一处来源，config.js 里没有抄一份。`;
 }
 
 /**
@@ -5968,7 +6110,7 @@ function init() {
     const slot = $("#turnstile-slot");
     slot.hidden = false;
     slot.textContent =
-      "反机器人校验：后端接入 Cloudflare Turnstile 后，把 sitekey 填进 config.js 这里就会出现部件。在此之前，提交时只随表发送一个空的 token 字段，不做任何假验证码。";
+      "反机器人校验：服务器接上 Cloudflare Turnstile 后，把 sitekey 填进 config.js 这里就会出现部件。u8fd8没接时，提交只带一个空的 token 字段，不做假验证码。";
   }
 
   bindFile();
