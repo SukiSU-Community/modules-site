@@ -437,6 +437,13 @@
           <button type="button" class="seg__btn" id="tab-ledger" role="tab" aria-selected="true"
             aria-controls="panel-ledger" data-tab="ledger">处置公示</button>
         </div>
+        <!-- 公示读数与下架队列读数：跟切换条同一行，贴在它右边；只在公示这一半显示。 -->
+        <div class="mod-meta" id="mod-meta" aria-live="polite">
+          <p class="readout" id="inc-readout"></p>
+          <!-- 举报队列那一格（服务端每次定时器跑完记一笔，这里只读那一次）。
+               默认藏着：拿不到可信的数时不显示一个 0 —— 「没有在等」与「我们不知道」相反。 -->
+          <p class="readout" id="inc-queue" hidden></p>
+        </div>
 
         <div id="panel-report" role="tabpanel" aria-labelledby="tab-report" hidden>
           <div class="split">
@@ -538,11 +545,6 @@
         <div id="panel-ledger" role="tabpanel" aria-labelledby="tab-ledger">
           <div class="split">
             <div class="split__main">
-            <p class="readout" id="inc-readout" aria-live="polite"></p>
-            <!-- 举报队列那一格（服务端每次定时器跑完记一笔，这里只读那一次）。
-                 默认藏着：拿不到可信的数时不显示一个 0 —— 「没有在等」与「我们不知道」相反。 -->
-            <p class="readout" id="inc-queue" aria-live="polite" hidden></p>
-
             <div class="tools rise">
               <div class="search">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">

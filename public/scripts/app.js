@@ -652,6 +652,8 @@ function renderModerationTabs(tab) {
   const panelReport = $("#panel-report");
   if (panelLedger) panelLedger.hidden = tab !== "ledger";
   if (panelReport) panelReport.hidden = tab !== "report";
+  const meta = $("#mod-meta");
+  if (meta) meta.hidden = tab !== "ledger";
 }
 
 function switchModerationTab(tab) {
@@ -5805,7 +5807,7 @@ function paintReportQueue() {
   // 两个数不一样时不说清就像「有三个人的模块要下架」。
   bits.push(
     q.artifacts === 0
-      ? "下架队列：现在没有排队的模块"
+      ? "下架队列：暂无排队的模块"
       : `下架队列：还有 ${q.artifacts} 个在等下架（由 ${q.reports} 条成立的举报压过来）`
   );
   const at = Number(Date.parse(q.at));

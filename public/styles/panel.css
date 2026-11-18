@@ -4616,7 +4616,7 @@ html.kb-open .dock {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.82;
+  opacity: 0.7;
   pointer-events: none;
 }
 /* 暗层：保证任何封面图上白字都读得清；压在最底与图之上、正文之下。 */
@@ -4651,12 +4651,7 @@ html.kb-open .dock {
   border-top: 1px solid rgba(255, 255, 255, 0.16);
   background: transparent;
 }
-.pc__body .ck__bio {
-  background: rgba(8, 11, 15, 0.34);
-}
-.pc__body .ck__foot {
-  background: rgba(8, 11, 15, 0.38);
-}
+
 .pc__body .ck__foot {
   margin-top: auto;
 }
@@ -4717,7 +4712,7 @@ html.kb-open .dock {
   gap: 6px 8px;
   padding: 9px 12px 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(6, 9, 13, 0.9);
+  background: rgba(6, 9, 13, 0.5);
 }
 .pc__dock .pc__meta {
   grid-column: 1;
@@ -4744,6 +4739,30 @@ html.kb-open .dock {
 }
 .pc__dock .pc__open {
   margin: 0 0 0 auto;
+}
+
+/* —— 9. 处置页顶部：公示读数 + 下架队列读数贴着切换条右侧同一行 —— */
+.mod-meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 22px;
+  max-width: calc(100% - 220px);
+  margin: 0 0 2px 24px;
+  vertical-align: middle;
+}
+.mod-meta .readout {
+  margin: 0;
+  min-height: 0;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+@media (max-width: 980px) {
+  .mod-meta {
+    display: flex;
+    max-width: none;
+    margin: 9px 0 0;
+  }
 }
 
 
