@@ -3163,6 +3163,13 @@ mark {
   transition: transform 0.26s var(--ease), opacity 0.26s var(--ease);
 }
 
+/* 只有一枚模块时没有左右露头的窄条可让 —— 13% 的缩进只是在卡片里再套一层窄栏，
+   02 的输入框于是比 03 内缩约 72px（实测 91 对 19），两张卡摆在一条视线上很显眼。
+   单枚时归零，字段与卡片自己的内边距对齐；多枚时照旧留着，那是给 peek 让位的。 */
+.stage:not(.is-multi) .stage__main {
+  margin: 0;
+}
+
 /* 切换过渡：先淡下去再换内容，避免 id 串台的闪烁 */
 .stage.is-switching .stage__main {
   opacity: 0.35;
