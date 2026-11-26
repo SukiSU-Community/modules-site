@@ -58,9 +58,73 @@
     <!-- 首屏一定会打一次后端 GET /（取服务端自报的上限），提前把连接建起来。
          人机校验那个第三方域**故意不**预连：它按需加载，预连等于又把懒加载省下的时间还回去。 -->
     <link rel="preconnect" href="https://sukisu-module-api.pages.dev" crossorigin />
-    <link rel="stylesheet" href="./fonts/fonts.css" />
+    <!-- 字体声明直接内联：819 B 的 fonts.css 多一次请求就是多一个 RTT，而这段永远只有 5 条 @font-face。 -->
+    <style>
+      @font-face {
+        font-family: 'Chakra Petch';
+        font-style: normal;
+        font-weight: 600;
+        font-display: swap;
+        src: url('./fonts/chakrapetch-600.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'Chakra Petch';
+        font-style: normal;
+        font-weight: 700;
+        font-display: swap;
+        src: url('./fonts/chakrapetch-700.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'IBM Plex Mono';
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url('./fonts/plexmono-400.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'IBM Plex Mono';
+        font-style: normal;
+        font-weight: 500;
+        font-display: swap;
+        src: url('./fonts/plexmono-500.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'IBM Plex Mono';
+        font-style: normal;
+        font-weight: 600;
+        font-display: swap;
+        src: url('./fonts/plexmono-600.woff2') format('woff2');
+      }
+    </style>
     <link rel="stylesheet" href="./styles/panel.css" />
+    <!-- app.js 的五个静态依赖：不预载的话，浏览器要先下完 app.js 才知道它们存在，
+         串成两级瀑布。modulepreload 让六个文件同时开始下载。 -->
+    <link rel="modulepreload" href="./scripts/config.js" />
+    <link rel="modulepreload" href="./scripts/api.js" />
+    <link rel="modulepreload" href="./scripts/zipread.js" />
+    <link rel="modulepreload" href="./scripts/moduleprop.js" />
+    <link rel="modulepreload" href="./scripts/proof.js" />
     <script type="module" src="./scripts/app.js"></script>
+    <!-- 模块库索引：app.js 一解析完就会拉它，提前按 fetch 语义预取，省掉一次「等脚本」的往返。
+         必须带 crossorigin，否则预取按 no-cors 发、与实际请求对不上，等于白预取。
+         本地已有 10 分钟内的缓存时不预取：预取不看 localStorage，硬写一个 link 会让复访也重下一遍，
+         把缓存省下的那次请求又还回去。缓存键与 TTL 与 app.js 的 INDEX_CACHE_KEY 保持一致。 -->
+    <script>
+      (function () {
+        try {
+          var raw = JSON.parse(localStorage.getItem("sukisu-index") || "null");
+          if (raw && Date.now() - (Number(raw.at) || 0) < 10 * 60 * 1000) return;
+        } catch (e) {
+          /* 读不到就当没有缓存，照常预取。 */
+        }
+        var link = document.createElement("link");
+        link.rel = "preload";
+        link.as = "fetch";
+        link.crossOrigin = "anonymous";
+        link.href = "https://sukisu-module-api.pages.dev/index.json";
+        document.head.appendChild(link);
+      })();
+    </script>
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>

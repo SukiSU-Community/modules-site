@@ -4746,14 +4746,49 @@ function modRow(m, q) {
   return li;
 }
 
+/** 索引缓存：模块库一天也改不了几次，同一份 JSON 不必每次进站都重下一遍。
+    缓存只负责「先画出来」，随后仍会静默刷新；10 分钟内不再重复请求。 */
+const INDEX_CACHE_KEY = "sukisu-index";
+const INDEX_CACHE_TTL = 10 * 60 * 1000;
+/** 同一时刻只允许一趟请求：先前 renderIndex 与路由切换会各调一次 loadIndex，
+    两次并发把同一份 index.json 下两遍（线上实测 2 次）。 */
+let indexLoad = null;
+
+function readIndexCache() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(INDEX_CACHE_KEY) || "null");
+    if (!raw || !raw.data || !Array.isArray(raw.data.modules)) return null;
+    return { data: raw.data, at: Number(raw.at) || 0 };
+  } catch (e) {
+    return null;
+  }
+}
+
+function writeIndexCache(data) {
+  try {
+    localStorage.setItem(INDEX_CACHE_KEY, JSON.stringify({ at: Date.now(), data }));
+  } catch (e) {
+    /* 本地存储满了或被禁用：缓存只是加速，失败不影响功能。 */
+  }
+}
+
 async function loadIndex() {
+  if (indexLoad) return indexLoad;
+  const cached = state.index ? null : readIndexCache();
+  if (cached) {
+    state.index = cached.data;
+    renderIndex();
+    if (Date.now() - cached.at < INDEX_CACHE_TTL) return;
+  }
+  indexLoad = (async () => {
   const shell = $("#index-state");
   shell.hidden = true;
-  $("#index-readout").textContent = "正在读模块库…";
+  if (!state.index) $("#index-readout").textContent = "正在读模块库…";
   $("#index-readout").classList.remove("bad");
   state.indexError = null;
   try {
     state.index = await fetchIndex();
+    writeIndexCache(state.index);
   } catch (err) {
     state.indexError =
       err instanceof BackendError ? err.message : "无法读取模块库，可能是网络问题。";
@@ -4769,6 +4804,12 @@ async function loadIndex() {
   renderIndex();
   // 索引是签名的来源之一：它晚到一步，04 那一屏上「算不出签名」那句就得当场改口。
   if (currentModTab() === "report") refreshReportForm();
+  })();
+  try {
+    await indexLoad;
+  } finally {
+    indexLoad = null;
+  }
 }
 
 /* ------------------------------------------- 举报那一半（报已上架的模块）
