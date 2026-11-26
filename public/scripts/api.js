@@ -27,36 +27,35 @@ export const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 export const CHECK_STATUS = {
   new: {
     tone: "ok",
-    label: "new",
-    title: "这是个新模块，索引里还没有",
-    hint: "欢迎上传。审核通过后所有人就能在管理器里搜到它。",
+    label: "新模块",
+  title: "新模块，索引中尚无记录",
+  hint: "可以上传。审核通过后即可在管理器中搜索到该模块。",
   },
   version_update: {
     tone: "ok",
-    label: "version_update",
-    title: "已有同名模块，你的是更新版本",
+    label: "可更新",
+    title: "已有同名模块，本次为更新版本",
     // 这句曾经写「不会被自动合进索引 —— 本站只有机器审核，没有人可以签它进来」，那是**假话**：
     // 版本更新走的是与首投同一套机器判据，过了就自动进索引。四个键与四档语义不动（App 在读），
     // 只有这句陈述改成真的 —— 否则页面在教用户「更新永远进不去」，而它其实进得去。
-    hint: "可以上传。版本更新与首次上传走同一套机器判据，通过后自动进索引。",
+    hint: "可以上传。版本更新与首次上传使用同一套自动判据，通过后进入索引。",
   },
   recorded: {
     tone: "muted",
-    label: "recorded",
-    title: "已经收录了，不需要再上传",
-    hint: "索引里已有这个 id，且线上版本不比你的旧。",
+    label: "已收录",
+    title: "该模块已收录，无需重复上传",
+    hint: "索引中已存在该 ID，且线上版本不低于本次提交。",
   },
   unknown: {
     tone: "muted",
-    label: "unknown",
-    title: "没能确认是否已收录",
-    hint: "服务端查不到（网络问题、索引本身挂了等）。可以继续上传。",
+    label: "无法确认",
+    title: "无法确认是否已收录",
+    hint: "服务端查询失败（网络异常或索引不可用）。可以继续上传。",
   },
 };
 
 const NETWORK_HINT =
-  "连不上后端。可能是 config.js 里的 API_BASE 还没填、Worker 没启动，" +
-  "或它还没返回 Access-Control-Allow-Origin（跨域被浏览器拦下）。";
+  "无法连接服务端：可能是网络异常，也可能是服务端暂时不可用。请稍后重试。";
 
 /**
  * 单枚查重：`GET /check?id=&versionCode=&uid=` —— §17.6 明写「一字不改」，因为 App 在读它，
@@ -64,7 +63,7 @@ const NETWORK_HINT =
  *
  * `uid` 是**可选**第三参：不传时请求逐字与从前一样（App 那条老路径就靠这一点）。
  * 传了它，后端才会在 `status === "version_update"` 时多回一格归属判断（`update_eligible`），
- * 因为「这一版该不该由你发」只有带上上传人 UID 才答得出。
+ * 因为「这一版该不该由你发」只有带上上传者 UID 才答得出。
  *
  * 返回 `{ status, updateEligible, updateReason }`，不再是裸字符串：
  * 归属那一格必须与 status 一起回到调用方，否则 app.js 只能再打一次请求（而那是同一次判定）。
@@ -73,7 +72,7 @@ const NETWORK_HINT =
  */
 export async function checkModule(id, versionCode, uid) {
   if (!IS_API_CONFIGURED) {
-    throw new BackendError("not-configured", "后端地址还没配置，暂时无法查重。");
+  throw new BackendError("not-configured", "后端地址尚未配置，暂时无法查重。");
   }
   const qs = new URLSearchParams({ id, versionCode: String(versionCode) });
   const who = String(uid || "").trim();
@@ -132,27 +131,27 @@ export async function checkModule(id, versionCode, uid) {
 export function submitContribution(batch, { onProgress } = {}) {
   if (!IS_API_CONFIGURED) {
     return Promise.reject(
-      new BackendError("not-configured", "后端地址还没配置：请在 config.js 填入 API_BASE 后再提交。")
+    new BackendError("not-configured", "后端地址尚未配置：请在 config.js 中填写 API_BASE 后重试。")
     );
   }
   const modules = Array.isArray(batch.modules) ? batch.modules : [];
   if (!modules.length) {
-    return Promise.reject(new BackendError("rejected", "本次要上传的整套是空的 —— 一个包都没选中，没什么可发的。"));
+  return Promise.reject(new BackendError("rejected", "本次提交为空：尚未选择任何安装包。"));
   }
   const noSha = modules.filter((m) => !SHA256_HEX_RE.test(String(m.sha256 || "")));
   if (noSha.length) {
     return Promise.reject(
       new BackendError(
         "rejected",
-        `有 ${noSha.length} 枚的整包 sha256 还没算出来（${noSha.map((m) => m.id || "（没模块 ID）").join("、")}）—— ` +
-          "批量上传逐枚必须声明整包哈希，缺任何一枚服务端都会按 manifest 不合法拒掉这一整套。"
+    `有 ${noSha.length} 个模块的整包 sha256 尚未计算完成（${noSha.map((m) => m.id || "（未填写模块 ID）").join("、")}）—— ` +
+    "批量上传需逐个模块声明整包校验值；缺少任何一项，服务端都会拒绝整次提交。"
       )
     );
   }
   const noFile = modules.filter((m) => !m.zip);
   if (noFile.length) {
     return Promise.reject(
-      new BackendError("rejected", "队列里有枚还没拿到包体字节，这一整套发不出去 —— 重新选一次那个文件。")
+    new BackendError("rejected", "队列中仍有模块未读取到安装包字节，本次提交无法发出。请重新选择该文件。")
     );
   }
 
@@ -167,7 +166,7 @@ export function submitContribution(batch, { onProgress } = {}) {
   // Turnstile 预留位：没接入时也是发空字符串，不做任何前端假验证码。
   // 一次 POST 一份令牌 —— 整套一次提交只需要解一次题，比逐枚提交少 N-1 次。
   form.append(CONFIG.TURNSTILE_FIELD, IS_TURNSTILE_CONFIGURED ? batch.turnstile || "" : "");
-  // 长效会话令牌：手里有就带上（这一次不用改签名），没有就发空串（照旧走签名那条路）。
+  // 会话凭据令牌：手里有就带上（这一次不用改签名），没有就发空串（照旧走签名那条路）。
   // 必须排在第一个 file part 之前 —— 与上面那几个共享字段同一条规矩（见 ① 与 manifest_late）。
   form.append("session", batch.session || "");
   // ③ N 个 name="zip" 的 file part，按 manifest 的顺序追加（配对不看顺序、看包内 module.prop
@@ -215,7 +214,7 @@ export function submitContribution(batch, { onProgress } = {}) {
       reject(backendFailure(xhr.status, json, body));
     });
     xhr.addEventListener("error", () => reject(new BackendError("network", NETWORK_HINT)));
-    xhr.addEventListener("abort", () => reject(new BackendError("network", "上传已中断。")));
+  xhr.addEventListener("abort", () => reject(new BackendError("network", "上传已中断。")));
     xhr.send(form);
   });
 }
@@ -263,35 +262,35 @@ export function buildManifest(modules) {
 export const SUBMIT_ERROR_TEXT = {
   zip_too_large: {
     owner: "you",
-    text: "这一套里有枚超过服务端自报的单枚上限，服务端在收字节的这一格就拒了。哪一枚超了页面上已经标出来 —— 换那一枚的包，或者把它拆成单独一次上传。",
+    text: "本次提交中有模块超过服务端提供的单文件上限，服务端在接收数据阶段即拒绝。超限模块已在页面标出：请更换该文件，或将其拆分为单独一次上传。",
   },
   batch_too_large: {
     owner: "you",
-    text: "这一套的总字节超过服务端自报的整套上限。这不是你包坏了：把这一整套拆成两次上传就行（每次改一次签名、只放得下的那几枚）。",
+    text: "本次提交的总字节数超过服务端提供的整次提交上限。安装包本身没有问题：将本次提交拆成两次上传即可（每次需修改一次签名，只保留容量范围内的模块）。",
   },
   too_many_modules: {
     owner: "you",
-    text: "一次上传带的枚数超过服务端自报的上限。拆成两次上传，其余的包留着下次选就行。",
+    text: "单次上传的模块数量超过服务端提供的上限。请拆分为两次上传，其余安装包可留待下次选择。",
   },
   manifest_invalid: {
     owner: "us",
-    text: "服务端没能把这份 manifest 读成它要的形状。**这一条多半是站点侧的问题**：前端字段形状与设计文档 §17.3 不一致，或后端尚未上线批量通道。无需改动安装包，也请勿再次修改签名 —— 请将这句话原样反馈给站点。",
+    text: "服务端无法解析本次提交的结构。该项通常需要本站处理：前端字段结构与后端口径不一致，或后端尚未支持批量提交。无需修改模块包，也无需修改签名串；请把本提示原文发给站点。",
   },
   manifest_late: {
     owner: "us",
-    text: "服务端说 manifest 没排在第一个文件之前 —— 而前端是把 manifest 作为第一个 part 发出去的（FormData 的插入序）。两边对不上时是后端解析器的问题，你什么都不用改。",
+    text: "服务端提示提交顺序不符，而前端始终先发送清单、再发送文件。两者不一致时需要本站处理，你无需修改任何内容。",
   },
   batch_incomplete: {
     owner: "you",
-    text: "声明的那一套与递上来的字节对不上：少一枚、多一枚、同一枚重复都会回这一句，服务端整单拒。先在页面上核对队列里有几枚、模块 ID 分别是什么，再重试；还不行就是前端把集合算错了，把这一句发给站点。",
+    text: "声明的模块集合与实际提交的字节不一致：缺少、多余或重复均会触发此提示，服务端将拒绝整次提交。请先在页面核对队列中的模块数量与各模块 ID，然后重试；若仍然失败，属于前端集合计算错误，请将本提示反馈给站点。",
   },
   sha_mismatch: {
     owner: "you",
-    text: "某一枚的字节与声明的整包 sha256 不一致：选完之后那个文件被改过、或下载不完整最常见。把那一枚重新选一次文件再来。若你确定包没动过，那是前端哈希口径与后端不一致 —— 属于站点的 bug，把这一句一起发出来。",
+    text: "某模块的字节与声明的整包 sha256 不一致，常见原因是选择文件后文件被修改，或下载不完整。请重新选择该模块的文件后重试。若确认文件未变动，则属于前端哈希计算口径与后端不一致，请将本提示一并反馈。",
   },
   proof_used: {
     owner: "you",
-    text: "这一串签名已在服务端记账（用过即废）。前端会自动更换新的一串；需先将新串填入酷安签名并保存，再返回重试 —— 签名未改即重试会得到同一提示。",
+    text: "该签名已在服务端登记（使用后即失效）。前端会自动生成新签名：请先将新签名填入酷安并保存，再返回重试；签名未修改时重试将得到同一提示。",
   },
   /* ── POST /report（举报入口，下架侧第一步）那九条 ──────────────────────────
      同一条规矩（§17.7）：后端加一个 code，这张表必须同轮加一条，否则页面只能拿一句通用
@@ -304,15 +303,15 @@ export const SUBMIT_ERROR_TEXT = {
      去糊两种相反的失败，所以 tools/selftest.mjs 有一根跨端钉子按后端源码里出现的 code 逐条对账。 */
   not_in_index: {
     owner: "you",
-    text: "服务端说这个模块 id 不在公开索引里，所以没有可下架的东西。举报这条路只管已经上架的模块：先在索引页确认 id 那一字不差（复制，不要手打）。如果它还没上架，那要走的是上传那一步，不是举报。",
+    text: "服务端返回该模块 ID 不在公开索引中，因此没有可下架的条目。举报仅适用于已收录模块：请在模块库页面确认 ID 完全一致（复制，不要手动输入）。若尚未收录，应走上传流程，而非举报。",
   },
   version_not_in_index: {
     owner: "you",
-    text: "你填的 versionCode 不在公开索引里那一枚的版本清单里，服务端会点名它有哪几个。填其中一个，或者干脆不填 —— 不填时服务端按最新那一枚判（记录里会写明它是按假设挑的）。",
+    text: "填写的版本代号不在该模块的已收录版本中，服务端会列出可用版本。请选择其中一个，或留空：留空时按最新版本判定，并在记录中注明。",
   },
   index_unavailable: {
     owner: "us",
-    text: "服务端读不出公开索引，或索引里那一枚没有可用的 sha256/zipUrl —— **这是本站的问题**。你不需要改任何东西，稍后再试一次；一直如此就把服务端那句原话发给站点。",
+    text: "服务端无法读取公开索引，或该条目缺少可用的 sha256 / zipUrl。此为本站问题，你无需修改任何内容；请稍后重试，若持续出现，请将服务端原始提示反馈给站点。",
   },
   /* 「/submit 没带有效会话」这件事，后端此刻**没有**回 `identity_required` 这个码的
      生产者（worker 的 /session/issue 用 `identity_invalid` 表示「请求本身发得不对」）。
@@ -321,84 +320,84 @@ export const SUBMIT_ERROR_TEXT = {
      那一天再补（补的时候连同 owner 一起想清楚是哪一侧的事）。 */
   identity_invalid: {
     owner: "us",
-    text: "这次请求**本身发得不对**（字段缺/错、content-type 不对、nonce 形状不对）—— 这跟「没带会话」是两件事，也**不是你的包的问题**：回身份页把 UID / 签名 / 承诺重新生成一次再点验证，包不用重选。一直这样就按这一屏的内容找站点维护者。",
+    text: "本次请求本身不合法（字段缺失或错误、content-type 不正确、nonce 格式错误）。这与「未携带会话」是两件事，也与安装包无关：请返回身份页重新生成 UID、签名与承诺，再执行核实；无需重新选择安装包。若持续出现，请按本页内容联系站点维护者。",
   },
   /* 下面这三是 POST /session/issue 的三种「没换成令牌」，共同点是**都没开始收包**：
      状态码都落在 4xx，但下一步要做的事完全不同 —— 自己去升等级 / 去酷安把签名改对 /
      等我们修。混成一句「验证失败」就等于把「你等级不够」与「我们这边坏了」说成同一件事。 */
   level_too_low: {
     owner: "you",
-    text: "服务端认出了这个账号，但等级不够：这个入口要**酷安等级 Lv2 及以上**。先去酷安把等级提上去（这一步只能你自己做），再回来点「我已升级，重新验证」—— 在那之前这一发是锁住的，硬点只会再撞同一句。等级与令牌无关，签名不用改、包不用重选。",
+    text: "服务端已识别该账号，但等级不足：此入口要求酷安等级 Lv2 及以上。请先在酷安提升等级（此步骤只能由你完成），再返回点击「已完成升级，重新核实」；在此之前请求会被拒绝。等级与令牌无关，签名与安装包均无需修改。",
   },
   session_missing: {
     owner: "us",
-    text: "服务端说这次请求**没带会话令牌**。前端在没有令牌时不该发这一发 —— 多半是本机的凭据掉了、或者你从一个很早的标签页里点的，**跟你的包没有关系**：回身份页重新验证一次就会拿到新的；验证过还是这一句，那是我们的前端漏带了令牌，把这一屏发给站点。",
+    text: "服务端提示本次请求未携带会话令牌。前端在无令牌时不应发出该请求，通常是因为本机凭据丢失，或从较早的标签页发起；与安装包无关。请返回身份页重新核实以获取新令牌；若核实后仍出现，属于前端未携带令牌，请将本页内容反馈给站点。",
   },
   session_invalid: {
     owner: "you",
-    text: "这张会话令牌服务端不认了（90 天到期、或在别处被作废过）。凭据本身没坏：回身份页重新验证一次就行，同一串签名照样能用 —— 不用再改酷安签名，也不用重选包。",
+    text: "服务端已不认可该会话令牌（90 天到期，或在其他位置被作废）。凭据本身未损坏：返回身份页重新核实即可，同一签名仍可使用，无需修改酷安签名，也无需重新选择安装包。",
   },
   body_too_large: {
     owner: "you",
-    text: "这次带的包太大了（或某个字段太长），服务端在收字节这一格就拒了，没往下读 —— 少选几个再来：一次一枚、或者把这一套拆成两次上传（每次改一次签名）。",
+    text: "本次提交的安装包过大（或某字段过长），服务端在接收数据阶段即拒绝，未继续读取。请减少选择数量：一次上传一个，或将本次提交拆成两次（每次需修改一次签名）。",
   },
   rate_limited: {
     owner: "you",
-    text: "一小时内的验证次数用完了（额度按 IP 与账号一起算）—— **这跟你的令牌、包、签名都没关系**，本地那份会话不要退出，过一会儿再点一次验证就行。等的时候不用重选包。",
+    text: "一小时内可用的核实次数已用尽（额度按 IP 与账号合计）。这与令牌、安装包、签名均无关；请保留本地会话，稍后再次核实，期间无需重新选择安装包。",
   },
   not_owner: {
     owner: "you",
-    text: "这个模块已经被别人收录了，只有当初首发它的那个账号能发更新版本 —— 整单拒，一个 GitHub 写入都没发生，签名也没被烧掉。先确认「上传人酷安 UID」那一栏填的是首发时用的那个号：归属是按首发那份上传记的 UID 判的，换号发同一枚会被当成别人。如果这确实不是你的模块，就别再试了 —— 想改别人的模块只能走举报那条路。",
+    text: "该模块已被他人收录，仅最初首发该模块的账号可以发布更新版本。整次提交被拒绝，未发生任何 GitHub 写入，签名串也未失效。请确认「上传者酷安 UID」填写的是首发时使用的账号：归属按首发记录中的 UID 判定，更换账号提交同一模块会被视为他人。若该模块确实不属于你，请通过举报流程处理。",
   },
   owner_unknown: {
     owner: "us",
-    text: "服务端查不出这个模块归谁（归属台账读不到，翻提交历史对账也没成），于是 fail-closed 整单拒了 —— **这不是你的包的问题**：包、字段、签名都不用动，稍后再试一次；一直这样就按这一屏的内容找站点维护者。它和「不是你的模块」是两件事，别为了绕过它去换 UID。",
+    text: "服务端无法确定该模块的归属（归属记录不可读，提交历史核对也未成功），因此按最严规则拒绝整次提交。这不是安装包的问题：安装包、字段与签名均无需修改，请稍后重试；若持续出现，请按本页内容联系站点维护者。这与「模块不属于你」是两件事，请勿通过更换 UID 规避。",
   },
   bad_repo_url: {
     owner: "you",
-    text: "「源码仓库」那一格不是合法形状。只收 https://github.com/<owner>/<repo>（正好两段，不带 /tree、/releases 之类的尾巴，也不替你补协议）。把地址改成这个形状再来一次就行：来源那一格照旧、包不用重选，这一发在收包之前就被拒了。",
+    text: "「源码仓库」字段格式不合法。仅接受 https://github.com/<owner>/<repo>（恰好两段，不包含 /tree、/releases 等后缀，也不会自动补全协议）。请将地址改为该格式后重试：来源字段保持不变，无需重新选择安装包；本次请求在接收数据前即被拒绝。",
   },
   repo_locked: {
     owner: "you",
-    text: "「源码仓库」只能由模块的归属人设置或修改 —— 你不是这一枚的归属人，所以整单被拒了。两条路：① 仓库那一格留空（空着就沿用索引里作者已经登记的那个地址，不影响提交）；② 用当初首发这一枚的账号来发。别为了绕过它换 UID：归属判的就是首发那次记下的号。",
+    text: "「源码仓库」只能由模块归属人设置或修改。你不是该模块的归属人，整次提交被拒绝。可选处理：① 将仓库字段留空（留空时沿用索引中作者已登记的地址，不影响提交）；② 使用最初首发该模块的账号提交。请勿通过更换 UID 规避：归属按首发记录中的账号判定。",
   },
   // 作者主页那两格（契约 §2 / §3.3）：与仓库那条同一种「字段形状 / 归属」失败，
-  // 但说的对象不同 —— 这两格是上传人替作者写的声明，写错了被拒的是声明，不是包。
+  // 但说的对象不同 —— 这两格是上传者替作者写的声明，写错了被拒的是声明，不是包。
   bad_author_coolapk_url: {
     owner: "you",
-    text: "作者酷安主页必须是 https://www.coolapk.com/u/<4-12 位数字>：那一格要的是作者的个人主页，不是帖子链接，也不是别的站点。整单在收包之前就被拒了 —— 改成这个形状再来一次就行，包不用重选、签名也还在。作者没有酷安账号就把那一格留空。",
+    text: "作者酷安主页必须为 https://www.coolapk.com/u/<4–12 位数字>：该字段要求作者的个人主页，而非帖子链接或其他站点。整次提交在接收数据前即被拒绝：请改为该格式后重试，无需重新选择安装包，签名仍然有效。作者没有酷安账号时请将字段留空。",
   },
   bad_author_github_url: {
     owner: "you",
-    text: "作者 GitHub 主页必须是 https://github.com/<用户名>：只有一段路径，不是仓库地址（/owner/repo 两段会被拒），也不带 ?tab=repositories 这种尾巴。整单在收包之前就被拒了 —— 改成这个形状再来一次，包不用重选。作者没有 GitHub 账号就把那一格留空。",
+    text: "作者 GitHub 主页必须为 https://github.com/<用户名>：仅一段路径，不是仓库地址（/owner/repo 两段会被拒绝），也不包含 ?tab=repositories 之类后缀。整次提交在接收数据前即被拒绝：请改为该格式后重试，无需重新选择安装包。作者没有 GitHub 账号时请将字段留空。",
   },
   author_locked: {
     owner: "you",
-    text: "作者主页只能由模块归属人设置或修改：这一枚已经登记过作者主页，而你不是它的归属人（归属按首发那次上传记的酷安 UID 判），所以整单被拒。两条路：① 两格留空 —— 空着就沿用索引里已经登记的那一份，不影响提交；② 用当初首发这一枚的账号来发。别为了绕过它换 UID：归属判的就是首发那次记下的号。",
+    text: "作者主页只能由模块归属人设置或修改：该模块已登记作者主页，而你不是其归属人（归属按首发上传记录的酷安 UID 判定），整次提交被拒绝。可选处理：① 将两个字段留空（留空时沿用索引中已登记的版本，不影响提交）；② 使用最初首发该模块的账号提交。请勿通过更换 UID 规避。",
   },
   no_evidence_cited: {
     owner: "you",
-    text: "这条举报没有成立：逐字门槛要的是「包里那一段字节」，而这次没有可定位的引用（截图、转述、你自己的描述都不算）。把要指控的那一行从包里原样复制出来再来一次。",
+    text: "该举报未成立：逐字门槛要求引用安装包中的实际字节，而本次没有可定位的引用（截图、转述、自行描述均不算）。请将需要指控的那一行从安装包中原样复制后重试。",
   },
   evidence_not_in_package: {
     owner: "you",
-    text: "与包体不符：服务端把这个归档的每一条条目都读出来了，你引用的那段字节不在里面。请把那一行从包里**原样复制**（改动过的文本、全半角标点之差、被换行拆开的那一行都不算逐字）。这一条不会被写成对作者的指控。",
+    text: "与安装包内容不符：服务端已读取该归档的每个条目，你引用的字节不在其中。请从安装包中原样复制该行（修改过的文本、全角与半角标点差异、被换行拆分的行均不算逐字）。该记录不会作为对作者的指控。",
   },
   package_unreadable: {
     owner: "us",
-    text: "这个包我们读不出来（有条目解不开，或归档取不到）—— **不是你的材料问题**，服务端不会在这时候说「不在包里」。这条举报已记下待办，落点是站点维护者按记录里的清单补读取能力；你不需要改任何东西。",
+    text: "服务端无法读取该安装包（存在无法解压的条目，或归档获取失败）。这并非材料问题，服务端不会在此情况下判定「不在包内」。该举报已记录为待办，由站点维护者根据记录补充读取能力；你无需修改任何内容。",
   },
   archive_digest_mismatch: {
     owner: "us",
-    text: "归档里取回的字节与公开索引里那条 sha256 不是同一枚 —— 这是索引或归档自己的故障，与你的材料无关。这条举报已记下待办，由维护者核对那一枚 asset；稍后重试或直接发给站点。",
+    text: "从归档获取的字节与公开索引中记录的 sha256 不一致，属于索引或归档自身故障，与你提交的材料无关。该举报已记录为待办，由维护者核对该 asset；请稍后重试，或直接反馈给站点。",
   },
   located: {
     owner: "us",
-    text: "这条举报成立：举报人过了实名闸，且引用的那段字节在归档里逐字定位到了。下一步不在这一片 —— 由机器 seal 写公示、开下架 PR；在那之前公开索引一个字都没改（publicAction 就是「none」）。",
+    text: "该举报成立：举报人已通过身份门槛，引用的字节在归档中逐字定位成功。后续处理不在此处：由自动流程写入公示并发起下架 PR；在此之前公开索引未做任何改动。",
   },
   report_record_failed: {
     owner: "us",
-    text: "服务端判完了但没能把这条举报记进账（自家 KV 写不进去）。它**不算已经受理** —— 判定不落账就等于没发生过。重试一次；反复如此就把服务端那句原话发给站点。",
+    text: "服务端已完成判定，但无法将举报写入记录（内部存储写入失败）。这不视为已受理：判定未落记录即未生效。请重试；若反复出现，请将服务端原始提示反馈给站点。",
   },
 };
 
@@ -418,7 +417,7 @@ function backendFailure(status, json, body) {
   const detail = known ? known.text : serviceSideHint(status, reason);
   return new BackendError(
     "rejected",
-    `${detail}${reason ? ` —— 服务端原话：「${reason}」` : `（HTTP ${status}，服务端没给原因）`}`,
+      `${detail}${reason ? `。服务端原话：「${reason}」` : `（HTTP ${status}，服务端未提供原因）`}`,
     body,
     { code, owner: known ? known.owner : status >= 500 ? "us" : "unknown" }
   );
@@ -427,10 +426,10 @@ function backendFailure(status, json, body) {
 /** 没有 code 时**不许替用户猜原因**：按 HTTP 段说是哪一侧的问题，剩下的交回服务端原话。 */
 function serviceSideHint(status, reason) {
   if (status >= 500) {
-    return "后端自己出错了（5xx）。**这是我们的问题**：你的包与签名都不用动，稍后再试一次，一直这样就把这一句发给站点。";
+  return "后端自身错误（5xx）。这是本站问题：你的安装包与签名均无需修改，请稍后重试；若持续出现，请将本提示反馈给站点。";
   }
-  if (reason) return "服务端拒了这一次上传，这一条我们没能归到具体哪一种。";
-  return "服务端拒绝了这次上传。";
+  if (reason) return "服务端拒绝了本次上传，但该错误未能归入具体类别。";
+  return "服务端拒绝了本次上传。";
 }
 
 /**
@@ -486,7 +485,7 @@ export async function fetchReportQueue() {
  */
 export async function reportModule(body) {
   if (!IS_API_CONFIGURED) {
-    throw new BackendError("not-configured", "后端地址还没配置：请在 config.js 填入 API_BASE 后再举报。");
+  throw new BackendError("not-configured", "后端地址尚未配置：请在 config.js 中填写 API_BASE 后再举报。");
   }
   let res;
   let text = "";
@@ -533,7 +532,7 @@ export async function reportModule(body) {
  */
 export async function checkModulesBatch(modules) {
   if (!IS_API_CONFIGURED) {
-    return { statuses: new Map(), why: "后端地址还没配置，查重没打成 —— 已收录那一条暂时拦不了。", via: "single" };
+  return { statuses: new Map(), why: "后端地址尚未配置，查重未执行；已收录状态暂时无法拦截。", via: "single" };
   }
   const payload = {
     modules: (Array.isArray(modules) ? modules : [])
@@ -556,11 +555,11 @@ export async function checkModulesBatch(modules) {
     });
     if (!res.ok) {
       // 404/405 最常见的原因是后端还没上这一条路 ⇒ 交回逐枚那条，不是「查不到」。
-      return { statuses: new Map(), why: `批量查重回 HTTP ${res.status}`, via: "single" };
+    return { statuses: new Map(), why: `批量查重返回 HTTP ${res.status}`, via: "single" };
     }
     const json = await res.json();
     const rows = json && Array.isArray(json.results) ? json.results : null;
-    if (!rows) return { statuses: new Map(), why: "批量查重的响应里没有 results 数组", via: "single" };
+  if (!rows) return { statuses: new Map(), why: "批量查重的响应中没有 results 数组", via: "single" };
     const statuses = new Map();
     for (const row of rows) {
       if (!row || typeof row.id !== "string") continue;
@@ -622,7 +621,7 @@ export function normalizeCoolapkUrl(raw) {
 }
 
 /* --------------------------------------------- 作者主页（契约 §2 / §3.1 / §3.2）
-   这两格是**上传人替作者填的声明**，与「来源」那格（帖子链接）不是一回事：一个指向人，
+   这两格是**上传者替作者填的声明**，与「来源」那格（帖子链接）不是一回事：一个指向人，
    一个指向那条动态。两格都选填，填了就必须是「个人主页」的形状 —— 帖子、仓库、组织页都不算。
    索引里那一串属于外部数据：渲染前要拿这两个函数**再归一一次**，形状不对只当文本显示，
    绝不把它直接塞进 href（`javascript:`、`//evil` 这类串不可能靠「看着像」过滤干净）。 */
@@ -743,46 +742,45 @@ export function normalizeRepoUrl(raw) {
 export const USER_STATUS = {
   off: {
     tone: "muted",
-    label: "not checked",
+    label: "未核实",
     title: "署名未经核实",
-    hint: "后端还没接酷安核实接口，这次上传的 UID 只是格式对，没有确认存在。",
+    hint: "本站尚未接入酷安核实：本次 UID 仅校验格式，未确认该账号是否存在。",
   },
   verified: {
     tone: "ok",
-    label: "verified",
+    label: "已核实",
     title: "酷安用户已核实",
     hint: "",
   },
   not_found: {
     tone: "bad",
-    label: "not_found",
+    label: "查无此人",
     title: "酷安查不到这个 UID",
-    hint: "在酷安 App「我的」→ 点头像进个人主页 → 右上角三点 → 「查看我的资料」里找用户 UID。填对的再提交。",
+    hint: "在酷安「我的」点开头像进入个人主页，再点右上角三点 →「查看我的资料」，即可看到用户 UID。",
   },
   unavailable: {
     tone: "warn",
-    label: "unavailable",
+    label: "暂时无法核实",
     title: "暂时无法核实",
     hint:
-      "酷安接口没响应或后端核实不可用。署名会标为未核实；签名串要核实通过才生成，所以现在还提交不了 —— " +
-      "把 UID 重敲一遍会再查，一直不通是后端还没接上核实。",
+      "酷安接口无响应，或本站核实服务暂不可用。本次署名将标为未核实；签名串需核实通过后才会生成，因此暂时无法提交。" +
+      "重新输入 UID 会再次查询；持续失败说明核实服务尚未接通。",
   },
   // 后端明确告诉我们「只收到、没核实」。和 unavailable（想核实但没核实成）不同，
   // 这一档是后端目前压根没有核实能力 —— 界面必须说清楚是哪一种，
-  // 否则上传人会以为「显示未核实」只是网络抖动，而实际上是这条能力还没接。
+  // 否则上传者会以为「显示未核实」只是网络抖动，而实际上是这条能力还没接。
   self_reported: {
     tone: "muted",
-    label: "self reported",
+    label: "自报署名",
     title: "署名未经核实",
     hint:
-      "后端收到了 UID，但目前没有核实它对应哪个真实酷安账号。" +
-      "这个署名属于「你自己报的」，出问题时公示按自报处理；核实这条没接上，签名串也就生成不了，" +
-      "上传通道此时是关着的 —— 要站点把核实接上才会开。",
+      "本站已收到 UID，但暂不具备核实能力，无法确认它对应哪个酷安账号。" +
+      "该署名按「上传者自报」处理；核实未接通时不会生成签名串，上传通道暂不开放。",
   },
 };
 
 /**
- * 核实上传人的酷安 UID。契约照 /check 的风格：任何情况都回 HTTP 200，
+ * 核实上传者的酷安 UID。契约照 /check 的风格：任何情况都回 HTTP 200，
  * 前端只读 status，所以 Worker 挂了也不会让表单卡死。
  */
 export async function lookupCoolapkUser(uid) {
@@ -823,7 +821,7 @@ export async function lookupCoolapkUser(uid) {
   return { status: "unavailable" };
 }
 
-/* --------------------------------------------- 长效会话令牌（90 天免改签名） */
+/* --------------------------------------------- 会话凭据令牌（90 天免改签名） */
 
 // 会话令牌的形状与整包 sha256 恰好同形（64 位小写十六进制），但**不共用** SHA256_HEX_RE：
 // 那一条的名字与注释说的都是「整包哈希」，两条口径将来谁动都不该牵动另一条。
@@ -849,7 +847,7 @@ async function fetchWithTimeout(target, options, ms) {
 }
 
 /**
- * 校验长效会话令牌（90 天免改签名）。
+ * 校验会话凭据令牌（90 天免改签名）。
  *
  * 为什么「恒 200、只读 ok」：契约照 /check 那一套 —— **令牌过期、被注销、后端压根不认这一串，
  * 都是 HTTP 200 里的一条结论**，不是一次请求失败。状态码在这一格没有信息量：
@@ -922,7 +920,7 @@ export async function checkSession(token) {
 }
 
 /**
- * 注销长效会话令牌（幂等）。
+ * 注销会话凭据令牌（幂等）。
  *
  * 幂等：同一个令牌注销两次，第二次照样算成功 —— 服务端认的是「这一串现在不能用了」，
  * 不是「我刚刚删掉了它」。所以这里不区分「删掉了」与「本来就没有」，只看 ok。
@@ -1212,7 +1210,7 @@ const FRESH = { method: "GET", cache: "no-cache" };
   } catch {
     throw new BackendError(
       "network",
-      "拉不到公开索引。可能是地址写错、该主机不允许浏览器跨域读取，或网络不通。"
+      "无法读取公开索引。可能是地址写错、该主机不允许浏览器跨域读取，或网络不通。"
     );
   }
   if (!res.ok) throw new BackendError("bad-response", `索引返回 HTTP ${res.status}。`);
@@ -1251,7 +1249,7 @@ export function normalizeIndex(json) {
         // 读进来的串一律当成不可信的外部数据。
         authorCoolapkUrl: typeof m.authorCoolapkUrl === "string" ? m.authorCoolapkUrl.trim() : "",
         authorGithubUrl: typeof m.authorGithubUrl === "string" ? m.authorGithubUrl.trim() : "",
-        // 列表那一行的「上传人」一侧：昵称与 UID 都是可选四格里的两格，老条目可能一个都没有。
+        // 列表那一行的「上传者」一侧：昵称与 UID 都是可选四格里的两格，老条目可能一个都没有。
         // UID 只用来现拼主页链接，索引里没有（也不该有）派生出来的 URL 字段。
         uploader: typeof m.uploader === "string" ? m.uploader.trim() : "",
         coolapkUid: typeof m.coolapkUid === "string" ? m.coolapkUid.trim() : "",
@@ -1292,7 +1290,7 @@ export const KNOWN_LEDGER_SCHEMAS = ["sukisu-dispositions-v2", "sukisu-dispositi
  * 为什么可以换文件名：索引和公示在索引仓库里就是同目录下的两个 json，只有 CDN 前缀
  * 会不同。把这个约定写成第二份完整 URL，就等于再造一个会和第一份漂移的定义处 ——
  * 后端 Worker 的 dispositionsRawUrl 是同一个理由、同一个做法。
- * 索引地址上挂的 query 原样保留：有些 CDN 靠它鉴权，去掉就变成拉不到。
+ * 索引地址上挂的 query 原样保留：有些 CDN 靠它鉴权，去掉就变成无法读取。
  */
 export function dispositionsUrl() {
   const direct = CONFIG.DISPOSITIONS_URL.trim();
@@ -1503,7 +1501,7 @@ export async function fetchDispositions() {
   } catch {
     throw new BackendError(
       "network",
-      "拉不到处置公示。可能是地址写错、该主机不允许浏览器跨域读取，或网络不通。"
+      "无法读取处置公示。可能是地址写错、该主机不允许浏览器跨域读取，或网络不通。"
     );
   }
   if (!res.ok) throw new BackendError("bad-response", `处置公示返回 HTTP ${res.status}。`);

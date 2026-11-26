@@ -204,12 +204,12 @@ async function begin() {
     console.error("[turnstile] config.js 加载失败", err);
     slot.hidden = true;
     // 重试也读不到同一份配置，给一个按钮只会让用户原地转圈。
-    fail("校验页配置加载失败，请更新 App 后重试。", { retry: false });
+    fail("校验组件未能加载。请稍后重试；若持续出现，请更新 App 或联系站点。", { retry: false });
     return;
   }
   if (!CONFIG.TURNSTILE_SITEKEY.trim()) {
     slot.hidden = true;
-    fail("站点还没配置 Turnstile sitekey，暂时无法校验。", { retry: false });
+    fail("本站尚未接入人机校验，暂时无法提交。请稍后再试。", { retry: false });
     return;
   }
   slot.hidden = false;

@@ -205,15 +205,15 @@
   </head>
   <body>
     <main class="card" aria-labelledby="ttl">
-      <p class="eyebrow">COOL MODULE / TURNSTILE</p>
+      <p class="eyebrow">酷模 / 人机校验</p>
       <h1 id="ttl">请完成人机校验</h1>
       <p class="lede">
-        这是防止机器人批量上传的一道校验。勾选下面的方框即可，完成后结果会自动交回 App，不用手动返回。
+        本页用于阻止自动化脚本批量提交。完成下方校验后，结果会自动交回 App，无需手动返回。
       </p>
 
       <p class="notice" id="no-bridge" hidden>
-        请从 App 打开此页
-        <small>本页只供 Android App 内嵌使用；在浏览器里直接打开，校验结果无法交回。</small>
+        请从 App 打开本页
+        <small>本页仅供 Android App 内嵌使用；在浏览器中直接打开时，校验结果无法交回。</small>
       </p>
 
       <div class="slot" id="slot"></div>
@@ -221,7 +221,7 @@
       <button class="retry" id="retry" type="button" hidden>重新校验</button>
 
       <p class="foot">
-        本页不收集任何信息，只向 Cloudflare 请求一次人机校验。校验令牌一次性使用。
+        本页不收集个人信息。校验结果仅用于本次提交，且只能使用一次。
       </p>
     </main>
     <noscript>

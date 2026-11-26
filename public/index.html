@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-    <title>酷模 · 好模块的公共模块库</title>
+    <title>酷模 · 公共模块索引</title>
     <meta
       name="description"
-      content="把散在酷安帖子和网盘里的 KernelSU / Magisk 模块收进一个公共模块库：传 zip、自动读取信息、查重、检查通过就上架，管理器里一键安装。"
+      content="将分散在酷安帖子与网盘中的 KernelSU / Magisk 模块收录到公共索引：上传 ZIP、自动读取信息、查重，通过检查后收录；管理器可直接搜索并一键安装。"
     />
     <meta name="theme-color" id="theme-color" content="#0F1218" />
     <script>
@@ -131,7 +131,7 @@
               </div>
             </div>
             <a class="who__item" role="menuitem" href="#/records" id="who-records">上传记录</a>
-            <button class="who__item who__item--out" role="menuitem" type="button" id="session-forget">退出该身份</button>
+            <button class="who__item who__item--out" role="menuitem" type="button" id="session-forget">退出当前身份</button>
           </div>
         </div>
       </div>
@@ -144,40 +144,40 @@
           <div class="hero__grid">
             <div>
               <h1 id="h-submit">
-                好模块<br />
-                该被所有人用上
+                好模块，<br />
+                应该被找到
               </h1>
               <p class="hero__lede" id="hero-lede">
-                很多国内作者做的模块，只在酷安帖子里发个网盘链接，几个月就失效，管理器里也搜不到。
-                这里就是给它们开的入口：传个 zip、写清来源，我们帮你存成长期可用的下载地址，
-                检查通过就进公共模块库，别人在管理器里<span class="hl">直接搜到、一键安装</span>。
+                许多模块仅通过酷安帖子与网盘分发，链接容易失效，管理器也无法搜索。
+                上传模块包、填写来源与版本，通过检查后进入公共索引；
+                管理器可以直接搜索，并<span class="hl">一键安装</span>。
               </p>
             </div>
             <!-- 四条硬性条件排成 2×2：窄屏占满整行（与下面的 .panel 同宽），
                  ≥1100px 起它就是 hero 的右列（见 panel.css 文末断点地图） -->
             <div class="spec" aria-label="上传条件">
               <div class="spec__cell">
-                <span class="spec__k">单个包最大</span>
-                <span class="spec__v" id="spec-max">正在问服务器…</span>
+                <span class="spec__k">单包上限</span>
+                <span class="spec__v" id="spec-max">单包上限读取中…</span>
               </div>
               <div class="spec__cell">
-                <span class="spec__k">包里要有</span>
+                <span class="spec__k">包内必需</span>
                 <span class="spec__v">根目录的 <b>module.prop</b></span>
               </div>
               <div class="spec__cell">
-                <span class="spec__k">你的账号</span>
+                <span class="spec__k">账号要求</span>
                 <span class="spec__v">酷安 <b>Lv2 以上</b></span>
               </div>
               <div class="spec__cell">
-                <span class="spec__k">传完之后</span>
-                <span class="spec__v">自动检查，通过即上架</span>
+                <span class="spec__k">提交之后</span>
+                <span class="spec__v">自动检查，通过后收录</span>
               </div>
             </div>
           </div>
         </div>
 
         <!-- 会话恢复期间先按「不确定」处理：表单不出场，避免先渲染再被送走。 -->
-        <p class="auth-wait" id="auth-wait" hidden>正在确认你的登录状态…</p>
+        <p class="auth-wait" id="auth-wait" hidden>正在确认登录状态…</p>
 
         <form id="form" novalidate>
           <div class="form__col">
@@ -185,13 +185,13 @@
           <section class="panel rise" aria-labelledby="p1t">
             <div class="panel__hd">
               <span class="panel__no">01</span>
-              <h2 id="p1t">目标模块</h2>
-              <span class="panel__tag">zip</span>
+              <h2 id="p1t">待上传模块</h2>
+              <span class="panel__tag">ZIP</span>
             </div>
             <p class="panel__note">
-              可以一次选<b>多个</b>包。选好后浏览器当场读一遍包里的
-              <code>module.prop</code>，把信息自动填到下面 —— <b>每个都能单独改</b>。
-              这一批<b>只算一次提交</b>。
+              可以一次选择<b>多个</b>模块包。浏览器会读取每个包里的
+              <code>module.prop</code>，并自动填入下面的信息；<b>每项都可以单独修改</b>。
+              全部模块包共用<b>一次提交</b>。
             </p>
 
             <label class="drop" id="drop">
@@ -199,8 +199,8 @@
                 <path d="M12 3 3 7.5v9L12 21l9-4.5v-9L12 3Z" />
                 <path d="M3 7.5 12 12l9-4.5M12 12v9" />
               </svg>
-              <span class="drop__t">拖入 zip 文件，或点击选择</span>
-              <span class="drop__s" id="drop-hint">正在读取上限…</span>
+              <span class="drop__t">拖入 ZIP 文件，或点击选择</span>
+              <span class="drop__s" id="drop-hint">单包上限读取中…</span>
               <input type="file" id="file" name="zip" accept=".zip,application/zip" multiple />
             </label>
 
@@ -211,13 +211,13 @@
                  换一枚的字节就等于换一整套，签名那一串会当场作废重算。 -->
             <div class="queue" id="queue" hidden>
               <div class="queue__hd">
-                <span class="queue__t">这一批</span>
+                <span class="queue__t">本次上传</span>
                 <span class="queue__n" id="queue-count"></span>
               </div>
               <div class="zipwall" id="zip-wall" role="list" aria-label="本次上传动作里的模块"></div>
               <div class="queue__ft">
-                <button type="button" class="btn btn--ghost btn--sm" id="queue-add">再加几个</button>
-                <button type="button" class="btn btn--ghost btn--sm" id="queue-clear">全部清空</button>
+                <button type="button" class="btn btn--ghost btn--sm" id="queue-add">继续添加</button>
+                <button type="button" class="btn btn--ghost btn--sm" id="queue-clear">清空列表</button>
               </div>
               <p class="queue__note" id="queue-note"></p>
             </div>
@@ -239,9 +239,9 @@
                  读数与队列用的是同一份判据（activeCard），不是第二个状态；只有一枚时这一行不出现。 -->
             <div class="editing" id="editing" hidden></div>
             <p class="panel__note" id="meta-note">
-              中间这一张为当前正在编辑的模块，左右点击切换。信息一般从包里的
-              <code>module.prop</code> 自动读出来，你改的只影响这次提交，zip 本身不会变。
-              每个都要填齐，漏一个就整批传不上去。
+              此处为当前编辑的模块，可用左右箭头切换。信息通常从包内的
+              <code>module.prop</code> 读取；修改只影响本次提交，不会改动 ZIP 文件。
+              所有必填项均需填写；任一项为空都无法提交。
             </p>
 
             <div class="stage" id="stage">
@@ -261,7 +261,7 @@
                     <div class="field__lab"><label for="f-id">模块 ID<span class="req">*</span></label></div>
                     <input class="mono" type="text" id="f-id" data-k="id" placeholder="如：kasucc-free" autocomplete="off" spellcheck="false" required />
                     <p class="field__help">
-                      管理器按这个 <b>id</b> 认模块，不是名称。填完版本号会自动查重，别人传过会提醒你。
+                      管理器用这个 <b>ID</b> 识别模块，不使用名称。填写版本代号后会自动检查是否已有人上传；如有，会在这里提示。
                     </p>
                     <p class="field__err" data-err="id">请填写模块 ID</p>
                   </div>
@@ -273,19 +273,19 @@
                   <div class="field">
                     <div class="field__lab"><label for="f-version">版本名<span class="req">*</span></label></div>
                     <input class="mono" type="text" id="f-version" data-k="version" placeholder="v1.2.0" autocomplete="off" required />
-                    <p class="field__help">给人看的，比如 <b>v1.2.0</b>。</p>
+                    <p class="field__help">展示给用户看的版本号，例如 <b>v1.2.0</b>。</p>
                     <p class="field__err" data-err="version">请填写版本名</p>
                   </div>
                   <div class="field">
                     <div class="field__lab"><label for="f-versionCode">版本代号<span class="req">*</span></label></div>
                     <input class="mono" type="number" id="f-versionCode" data-k="versionCode" placeholder="12" step="1" min="0" inputmode="numeric" required />
-                    <p class="field__help">整数，用来比新旧。每次更新加 1 就行。</p>
+                    <p class="field__help">整数，用于比较版本新旧；每次更新加 1。</p>
                     <p class="field__err" data-err="versionCode">必须是整数</p>
                   </div>
                   <div class="field span2">
                     <div class="field__lab"><label for="f-author">模块作者<span class="opt">选填</span></label></div>
                     <input type="text" id="f-author" data-k="author" placeholder="原作者的署名或酷安昵称" autocomplete="off" />
-                    <p class="field__help">写<b>原作者</b>，不是你自己。</p>
+                    <p class="field__help">填写<b>原作者</b>，不是上传者本人。</p>
                   </div>
                   <!-- 作者主页两格：跟着「模块作者」走，因为说的都是同一个人。选了作者名却没给主页，
                        列表里就只有名字、点不过去；给了主页才画链接，且一律标「未验证」。 -->
@@ -293,8 +293,8 @@
                     <div class="field__lab"><label for="f-author-coolapk">作者酷安主页<span class="opt">选填</span></label></div>
                     <input class="mono" type="text" id="f-author-coolapk" data-k="authorCoolapkUrl" placeholder="https://www.coolapk.com/u/123456" autocomplete="off" spellcheck="false" />
                     <p class="field__help">
-                      作者<b>本人</b>的酷安主页，形如 <b>https://www.coolapk.com/u/123456</b>，不是模块帖子的链接。
-                      这一格由上传的人代填，我们不核实归属；已上架的模块留空就沿用上次的值。
+                      作者<b>本人</b>的酷安主页，例如 <b>https://www.coolapk.com/u/123456</b>，不是模块帖子链接。
+                      此栏由上传者代填；本站不核实该主页是否属于作者本人。已收录模块留空时沿用上次的值。
                     </p>
                     <p class="field__err" data-err="authorCoolapkUrl">请填作者的个人主页，如 https://www.coolapk.com/u/123456</p>
                   </div>
@@ -302,14 +302,14 @@
                     <div class="field__lab"><label for="f-author-github">作者 GitHub 主页<span class="opt">选填</span></label></div>
                     <input class="mono" type="text" id="f-author-github" data-k="authorGithubUrl" placeholder="https://github.com/octocat" autocomplete="off" spellcheck="false" />
                     <p class="field__help">
-                      作者<b>本人</b>的 GitHub 主页，形如 <b>https://github.com/octocat</b>，只到用户名这一层，不要带仓库名。
+                      作者<b>本人</b>的 GitHub 主页，例如 <b>https://github.com/octocat</b>；只填到用户名，不要带仓库名。
                     </p>
                     <p class="field__err" data-err="authorGithubUrl">请填作者的个人主页，如 https://github.com/octocat</p>
                     <p class="field__help" id="author-hint" hidden></p>
                   </div>
                   <div class="field span2">
                     <div class="field__lab"><label for="f-description">描述<span class="opt">选填</span></label></div>
-                    <textarea class="mono" id="f-description" data-k="description" placeholder="一句话说清它是干什么的" rows="3"></textarea>
+                    <textarea class="mono" id="f-description" data-k="description" placeholder="用一句话说明模块用途" rows="3"></textarea>
                   </div>
                 </div>
               </div>
@@ -332,18 +332,18 @@
             <div class="panel__hd">
               <span class="panel__no">03</span>
               <h2 id="p3t">来源与源码</h2>
-              <span class="panel__tag">source</span>
+              <span class="panel__tag">来源</span>
             </div>
             <p class="panel__note">
-              来源有两种：<b>酷安帖子</b>和<b>GitHub 源码仓库</b>，<b style="color: var(--amber)">至少填一个，也可以都填</b>。
-              帖子用来证明这个包从哪来、出事时找得到人；源码仓库让人能对着源码核对这个包。
-              两个都是<b>每个模块单独填</b>（在 02 那一屏跟着当前模块改）。
+              来源有两种：<b>酷安帖子链接</b>和<b>GitHub 源码仓库</b>，<b style="color: var(--amber)">至少填写一项，也可以都填</b>。
+              帖子用于说明模块包来源，出问题时能找到发布者；源码仓库用于对照源码核对模块包。
+              两项都<b>按模块单独填写</b>，在「模块信息」中跟随当前模块切换。
             </p>
             <div class="field">
               <div class="field__lab"><label for="f-source">酷安帖子链接</label></div>
               <input class="mono" type="text" id="f-source" data-k="source" placeholder="https://www.coolapk.com/feed/65432100" autocomplete="off" spellcheck="false" />
               <p class="field__help">
-                发这个模块的<b>酷安帖链接</b>。若无，可另发一条存档帖作为宣传。
+                发布该模块的<b>酷安帖子链接</b>。如果没有，可以另发一条存档帖作为来源说明。
               </p>
               <p class="field__err" data-err="source">请填酷安站内链接</p>
             </div>
@@ -351,13 +351,13 @@
               <div class="field__lab"><label for="f-repo">源码仓库（GitHub）</label></div>
               <input class="mono" type="text" id="f-repo" data-k="repoUrl" placeholder="https://github.com/owner/repo" autocomplete="off" spellcheck="false" />
               <p class="field__help">
-                公开的 GitHub 仓库地址，形如 <b>https://github.com/owner/repo</b>，正好两段，别带 /tree 之类的尾巴。
-                填了之后机器人会对着仓库里的 Release 或 checksums.txt 核对包体，对得上就在列表里挂一个源码标记。
+                公开的 GitHub 仓库地址，例如 <b>https://github.com/owner/repo</b>；只填仓库根地址，不要带 /tree、/releases 等路径。
+                填写后，自动检查会对照仓库中的 Release 或 checksums.txt 核对模块包；核对通过后，列表会显示源码标记。
               </p>
               <p class="field__err" data-err="repoUrl">请填 https://github.com/&lt;owner&gt;/&lt;repo&gt; 这种形式</p>
               <p class="field__help" id="repo-hint" hidden></p>
             </div>
-            <p class="field__err" id="src-err">来源和源码仓库，至少填一个</p>
+            <p class="field__err" id="src-err">来源和源码仓库至少填写一项</p>
           </section>
 
           <!-- 04 确认与上传 -->
@@ -365,15 +365,15 @@
             <div class="panel__hd">
               <span class="panel__no">04</span>
               <h2 id="p4t">确认并上传</h2>
-              <span class="panel__tag">irreversible</span>
+              <span class="panel__tag">不可撤销</span>
             </div>
             <p class="panel__note">
-              上传是<b style="color: var(--amber)">公开、长期保留</b>的，所以提交前要再点一次确认。
+              上传内容会<b style="color: var(--amber)">公开并长期保留</b>，因此提交前需要再次确认。
             </p>
 
             <div class="callout" id="authbar" hidden>
-              <b>尚未验证身份。</b>可先填写内容；点击「上传前确认」时需完成一次身份验证，此后 90 天内无需重复验证。
-              <a href="#/identity">前往验证 →</a>
+              <b>尚未完成身份核实。</b>可以先填写内容；点击「上传前确认」时需要完成一次身份核实，此后 90 天内无需重复核实。
+              <a href="#/identity">前往核实 →</a>
             </div>
 
             <ul class="gate" id="gate" aria-label="提交前自检"></ul>
@@ -382,7 +382,7 @@
 
             <div class="btn-row cta-inline">
               <button type="button" class="btn btn--go" data-open-confirm disabled>上传前确认</button>
-              <span class="count hide-sm" id="gate-note">先把上面填完</span>
+              <span class="count hide-sm" id="gate-note">请先填写必填项</span>
             </div>
           </section>
           </div>
@@ -424,8 +424,8 @@
         <div class="hero rise">
           <h1 id="h-moderation">举报与<span class="hi">处置</span></h1>
           <p class="hero__lede">
-            模块以 root 权限运行，一个坏包可以毁掉整台设备。所以这里不做私下处理：每次下架和拒收都逐条公开，带上可核对的凭据，随 git 历史长期留档。
-            对做恶意模块、或拿别人作品改一改夹私货的，我们保留报案和<span class="hl">依法追究责任</span>的权利。
+            模块以 root 权限运行，一个恶意包即可造成设备级损害。因此本站不做私下处理：每次下架与拒收都逐条公开，附可核对的凭据，并随 Git 历史长期留档。
+            对制作恶意模块、或将他人的作品略作改动后夹带私货的行为，本站保留报案与<span class="hl">依法追究责任</span>的权利。
           </p>
         </div>
 
@@ -449,9 +449,9 @@
           <div class="split">
             <div class="split__main">
             <p class="mod__lede">
-              已经在模块库里的模块，干了用户没同意的事，可以在这里报。硬要求只有一条：
-              <b>实名，并且能在包里逐字找到你引用的那段内容</b>。找不到就判「与包体不符」，
-              也不会写成对作者的指控 —— 这条要求防的就是「谁写得漂亮谁杀人」。
+              如果已收录模块存在未经用户同意的行为，可以在此举报。唯一硬性要求是：
+              <b>以本人酷安账号署名举报，并且能在模块包中逐字找到所引用的内容</b>。未找到引用内容时，
+              记录会判定为「与模块包内容不符」，不构成对作者的指控。
             </p>
 
             <p class="readout" id="rp-readout" aria-live="polite"></p>
@@ -459,18 +459,18 @@
             <div class="panel rise panel--form">
               <div class="field field--half">
                 <div class="field__lab"><label for="rp-id">被举报的模块 ID<span class="req">*</span></label></div>
-                <input class="mono" type="text" id="rp-id" placeholder="在模块库那一行的小灰字里复制" autocomplete="off" spellcheck="false" required />
-                <p class="field__help">只能举报<b>已经上架</b>的模块。还没上架的走上传那条路，不在这里。</p>
+                <input class="mono" type="text" id="rp-id" placeholder="从模块库条目中复制" autocomplete="off" spellcheck="false" required />
+                <p class="field__help">仅可举报<b>已收录</b>模块；尚未收录的模块请通过上传流程提交。</p>
               </div>
               <div class="field field--half">
-                <div class="field__lab"><label for="rp-vc">哪一版</label></div>
-                <input class="mono" type="text" id="rp-vc" inputmode="numeric" placeholder="留空 = 按最新版判" autocomplete="off" spellcheck="false" />
-                <p class="field__help" id="rp-vc-help">大家装的一般是最新版，留空就行；要指旧版，填那一版的版本代号。</p>
+                <div class="field__lab"><label for="rp-vc">涉及版本</label></div>
+                <input class="mono" type="text" id="rp-vc" inputmode="numeric" placeholder="留空表示按最新版本判定" autocomplete="off" spellcheck="false" />
+                <p class="field__help" id="rp-vc-help">通常留空即可；如需指定旧版本，请填写该版本的版本代号。</p>
               </div>
               <div class="field">
-                <div class="field__lab"><label for="rp-reason">它干了什么<span class="req">*</span></label></div>
-                <textarea id="rp-reason" rows="3" placeholder="一句话说清它做了哪件用户没同意的事"></textarea>
-                <p class="field__help">这里只是给人看的说明，<b>不算证据</b>。要指控的代码，请从包里原样复制到下面几格。</p>
+                <div class="field__lab"><label for="rp-reason">具体行为<span class="req">*</span></label></div>
+                <textarea id="rp-reason" rows="3" placeholder="简要说明未经用户同意的具体行为"></textarea>
+                <p class="field__help">此栏仅用于说明，<b>不构成证据</b>。作为证据的代码请从模块包中原样复制到下方各栏。</p>
               </div>
               <div class="field">
                 <div class="field__lab">
@@ -479,38 +479,38 @@
                 </div>
                 <div id="rp-ev-list"></div>
                 <p class="field__help">
-                  这几段会逐字拿到归档包里找：大小写差一个字母、全角标点打成半角、
-                  被换行拆开，都算<b>没找到</b> —— 要求就是这么死，松了就只剩一句漂亮话。
+                  这些片段会在归档模块包中逐字匹配：大小写不一致、全角与半角标点不同、
+                  被换行拆分，都会视为<b>未找到</b>。匹配要求严格，以确保引用可核验。
                 </p>
                 <p class="field__help">
-                  <button type="button" class="btn btn--ghost btn--sm" id="rp-ev-add">再加一条</button>
+                  <button type="button" class="btn btn--ghost btn--sm" id="rp-ev-add">添加一条</button>
                 </p>
               </div>
               <div class="field">
                 <div class="field__lab"><label for="rp-uid">你的酷安 UID<span class="req">*</span></label></div>
                 <input class="mono" type="text" id="rp-uid" placeholder="4-12 位数字" inputmode="numeric" autocomplete="off" spellcheck="false" required />
                 <p class="field__help">
-                  打开酷安「我的」→ <b>点自己头像</b> → 右上角<b>三点</b> →
-                  「查看我的资料」里的 <b>用户 UID</b>。填你自己的，这条记录会署你的名。
+                  打开酷安「我的」，<b>点击头像</b>，再点右上角<b>三点</b>；
+                  在「查看我的资料」中复制 <b>用户 UID</b>。请填写本人 UID，该记录将以此署名。
                 </p>
               </div>
               <div class="field">
-                <div class="field__lab"><label for="rp-nick">你的酷安昵称<span class="req">*</span></label></div>
-                <input type="text" id="rp-nick" placeholder="和你的账号同名" autocomplete="nickname" />
-                <p class="field__help">这里只是你自己写的，最终以 UID 查回来的昵称为准，改名的人不会被永久挡住。</p>
+                <div class="field__lab"><label for="rp-nick">酷安昵称<span class="req">*</span></label></div>
+                <input type="text" id="rp-nick" placeholder="与账号昵称一致" autocomplete="nickname" />
+                <p class="field__help">此栏由你填写；最终以 UID 查询到的昵称为准，修改昵称不影响后续核实。</p>
               </div>
               <div class="field" id="rp-proof-field">
                 <span class="field__lab">举报签名<span class="req">*</span></span>
                 <div class="proofs" id="rp-proof-list"></div>
                 <p class="field__help" id="rp-proof-help"></p>
                 <p class="field__help">
-                  打开酷安「我的 → 编辑资料 → 个性签名」，把上面那串贴进去保存，再回来提交。
-                  这一串与<b>被举报的模块、包体校验值</b>绑定，更换模块或版本即会变化。
-                  它证明这个账号是你的 —— 公示只认这个凭据，用别人的 UID 报不了。
+                  打开酷安「我的 → 编辑资料 → 个性签名」，粘贴上方签名串并保存，然后返回提交。
+                  该签名串与<b>被举报模块及模块包校验值</b>绑定，更换模块或版本后会变化。
+                  它用于证明该账号归你所有；公示流程仅接受此凭据。
                 </p>
                 <p class="field__help">
-                  <button type="button" class="btn btn--ghost btn--sm" id="rp-nonce-renew">更换一串</button>
-                  提交成功后这一串即作废；如需举报其他模块，返回点击「更换一串」重新填写。
+                  <button type="button" class="btn btn--ghost btn--sm" id="rp-nonce-renew">更换签名串</button>
+                  提交成功后该签名串即失效；如需举报其他模块，请点击「更换签名串」重新生成。
                 </p>
               </div>
               <p class="field__err" id="rp-error" hidden></p>
@@ -523,19 +523,18 @@
             </div>
             <aside class="split__side">
             <div class="panel rise doc">
-              <h3><span>NEXT</span>提交之后会怎样</h3>
+              <h3><span>后续</span>提交后的处理流程</h3>
               <p>
-                提交本身不会改动模块库：不管成不成立，先记进一份<b>待办</b>，
-                应答里那句 <code>publicAction: none</code> 说的就是这一刻。
+                提交本身不会改动模块库。无论举报是否成立，都会先记入<b>待办</b>；
+                此处会显示为「模块库未做任何改动」。
               </p>
               <p>
-                之后自动流程接手：定时把待办提成一条<b>公示</b>，再由自动检查独立取一次归档，
-                <b>逐字</b>核对你说的是不是真在包里 —— 核实了才下架、才在这一页挂出来。
-                
-                <b>全程没有人工签字</b>，所以别拿它赌气：要么按证据成立，要么按证据不成立，中间没人在看。
+                随后由自动流程处理：定时将待办生成<b>公示</b>记录，再由自动检查独立获取归档模块包，
+                <b>逐字</b>核对引用内容是否确实存在于包中。核实成立后才会下架，并在本页公示。
+                <b>全程没有人工审批</b>：结论只取决于证据是否成立。
               </p>
               <p class="field__help">
-                举报限流按 IP 和账号各算一份，和上传的次数分开：举报烧不到上传额度，反过来也一样。
+                举报的频率限制分别按 IP 与账号计算，与上传次数分开；举报不占用上传次数，上传也不占用举报次数。
               </p>
             </div>
             </aside>
@@ -555,7 +554,7 @@
                   type="text"
                   id="q-inc"
                   class="mono"
-                  placeholder="搜模块 ID、酷安 UID 或校验值"
+                  placeholder="搜索模块 ID、酷安 UID 或校验值"
                   aria-label="过滤处置记录"
                   autocomplete="off"
                   spellcheck="false"
@@ -569,34 +568,32 @@
 
             <div class="inc__layerhead" id="inc-list-head" hidden>
               <span class="inc__layerhead-t">全部记录</span>
-              <span class="inc__layerhead-s">上面按人分组，只分得出写了身份的；这里是一条不落的全部记录，按理由归类。</span>
+              <span class="inc__layerhead-s">上方按上传者分组，仅包含已核实身份的记录；此处列出全部记录，并按原因归类。</span>
             </div>
             <div id="inc-groups"></div>
             <div class="empty" id="inc-state" hidden></div>
             </div>
             <aside class="split__side">
             <div class="panel rise doc inc-appeal">
-              <h3><span>APPEAL</span>觉得处置不对，去哪儿说</h3>
+              <h3><span>申诉</span>对处置结果有异议时</h3>
               <p>
-                正式的渠道只有<strong>模块库仓库的 issue</strong>。被下架的，在 issue 里说清哪一条不对、
-                附上你的证据；审核没通过、没上架的，在你自己的上传说明里讲。
+                正式渠道仅有<strong>模块库仓库的 issue（议题）</strong>。模块被下架时，请在议题中说明具体哪一项判定有误，
+                并附上证据；审核未通过、未被收录的情况，请在对应的上传说明中说明。
               </p>
               <p>
-                每条下架记录上都有一个<strong>自动标记</strong>（<code>ci:audit@&lt;提交&gt;</code>）：
-                写明这条是哪一次检查判定，旁边的命令任何人可重新执行核对。
-                <strong>这里没有人工审批</strong> —— 全是自动检查，想让结论翻过来，别找人，
-                把证据摆到那次检查看得见的地方。
+                每条下架记录都标明由哪一次自动检查判定，旁边的命令可由任何人重新执行核对。
+                <strong>本站没有人工审批</strong>，全部由自动检查完成；如需推翻结论，
+                请提交可被该检查验证的证据。
               </p>
               <p class="inc-appeal__where" id="inc-appeal-where"></p>
               <p class="inc-appeal__note">
-                这里不承诺多久回复，也不承诺一定回复。能保证的是：每次放行或下架都留下可查的运行和证据，
-                所以「谁判的」永远查得到。站内聊天可以聊，但<strong>只认 issue</strong>
-                —— 帖子会删、评论会折叠，那些都不算数。
+                本站不承诺回复时限，也不承诺一定回复。可以保证的是：每次放行或下架都会留下可查的运行记录与证据，
+                判定来源始终可追溯。酷安私信与评论仅供参考；<strong>只有议题中的材料会纳入处理</strong>。
               </p>
             </div>
 
             <div class="panel rise doc inc-how">
-              <h3><span>LEGEND</span>这些词什么意思</h3>
+              <h3><span>图例</span>术语说明</h3>
               <ul class="inc-legend" id="inc-legend"></ul>
             </div>
             </aside>
@@ -607,66 +604,66 @@
       <!-- ====================== 04 说明 ====================== -->
       <section class="view" id="view-about" aria-labelledby="h-about">
         <div class="hero rise">
-          <h1 id="h-about">为什么要有<span class="hi">这个站</span></h1>
-          <p class="hero__lede">就解决一件很具体的事：好模块找不到，找到的又下不下来。</p>
+          <h1 id="h-about">为什么需要<span class="hi">这个站</span></h1>
+          <p class="hero__lede">它只解决一个具体问题：好模块难以发现，找到了也常常下载失败。</p>
         </div>
 
         <article class="panel rise doc">
-          <h3><span>A</span>好模块，其实到处都是</h3>
+          <h3><span>A</span>好模块并不少</h3>
           <p>
-            KernelSU / Magisk 的模块都是 zip，管理器从一份清单里读，
-            所以能浏览、能一键装。但一大堆国内作者做的模块不在任何清单里 ——
-            zip 传网盘，帖子里发个链接，别人下下来手动刷。
+            KernelSU 与 Magisk 的模块都是 ZIP 文件，管理器从模块库读取，
+            因此可以浏览并一键安装。但许多国内作者制作的模块不在任何模块库中：
+            ZIP 放在网盘，帖子里发一个链接，用户下载后手动刷入。
           </p>
           <ol class="pains">
-            <li><b>主流仓库进不去。</b>正式仓库要求模块 ID 跟仓库名一样、还得是仓库所有者才能提交，个人做的对不上。</li>
-            <li><b>网盘链接会死。</b>有效期、要转存、账号一封，几个月后帖子里只剩一个打不开的页面。</li>
-            <li><b>搜不到。</b>清单里没有，只能靠人传人。装过的永远知道，没装过的永远不知道。</li>
+            <li><b>正式仓库接收门槛高。</b>要求模块 ID 与仓库名一致，且只有仓库所有者可以提交；个人项目通常不符合这些条件。</li>
+            <li><b>网盘链接容易失效。</b>有效期限制、需要转存、分享账号被封，几个月后帖子里只剩一个无法打开的页面。</li>
+            <li><b>难以搜索。</b>模块库中没有条目，只能依赖口口相传；用过的人知道，新用户找不到。</li>
           </ol>
 
-          <h3><span>B</span>传上去之后会怎样</h3>
+          <h3><span>B</span>上传之后会发生什么</h3>
           <p>
-            手上有个还没被收录的模块，谁都能传。流程是固定的：
+            尚未收录的模块可以由符合要求的用户上传。流程固定如下：
           </p>
           <ol class="flow">
-            <li><i>1</i><div><b>你传 zip</b>我们收下这个包。</div></li>
-            <li><i>2</i><div><b>存成长期下载地址</b>放在 GitHub 上，稳定可下载，替掉会失效的网盘链接。</div></li>
-            <li><i>3</i><div><b>自动提交审核</b>只提交模块信息，不含 zip 本体。</div></li>
-            <li><i>4</i><div><b>自动检查</b>扫一遍脚本里的危险操作、偷偷联网和敏感信息。</div></li>
-            <li class="gate"><i>5</i><div><b>更新只认原作者</b>已上架的模块，只接受第一次上传那个账号发的新版，判据和首投一样。</div></li>
-            <li><i>6</i><div><b>进公共模块库</b>从此管理器里搜得到，下载地址长期有效。</div></li>
+            <li><i>1</i><div><b>上传模块包</b>由本站接收并保存。</div></li>
+            <li><i>2</i><div><b>保存为长期下载地址</b>托管在 GitHub 上，提供稳定下载，替代容易失效的网盘链接。</div></li>
+            <li><i>3</i><div><b>自动提交审核</b>只提交模块信息，不包含 ZIP 文件。</div></li>
+            <li><i>4</i><div><b>自动检查</b>检查脚本中的危险操作、未声明联网和敏感信息。</div></li>
+            <li class="gate"><i>5</i><div><b>更新仅限归属人</b>已收录模块只接受首次上传该模块的酷安账号提交新版本，判定标准与首次上传相同。</div></li>
+            <li><i>6</i><div><b>进入公共模块库</b>管理器可以搜索到，下载地址长期有效。</div></li>
           </ol>
           <div class="callout">
-            <b>传完不等于立刻上架。</b>新模块和更新走<b>同一套自动检查</b>：
-            没问题就自动通过，有问题就卡住等人改规则。
-            更新还多一道：<b>只有原作者能发</b> —— 否则有人 fork 一个热门模块、
-            加几行坏代码、伪装成「更新」上传，所有装了的人都会收到恶意更新。
-            是否原作者按第一次上传的酷安账号认，换号传同一个会被当成别人。
+            <b>上传完成不等于立即收录。</b>新模块与更新使用<b>同一套自动检查</b>：
+            通过后自动收录；未通过时会停在检查环节，等待修改后重新提交。
+            更新还多一项限制：<b>仅归属人可以发布</b>。否则他人可以复刻热门模块、
+            加入恶意代码并伪装成更新，已安装的用户会收到恶意版本。
+            归属人身份以首次上传的酷安账号为准；更换账号上传同一模块会被视为其他上传者。
           </div>
 
-          <h3><span>C</span>两个入口</h3>
+          <h3><span>C</span>两种入口</h3>
           <p>
-            手机上用<b>管理器 App</b>，选本地 zip 时会提示上传。<br />
-            电脑上、或者作者本人，就用<b>这个网页</b>。
+            在手机上使用<b>管理器 App</b>，选择本地 ZIP 时会提示上传。<br />
+            在电脑上，或由作者本人操作时，使用<b>本网页</b>。
           </p>
 
-          <h3><span>D</span>为什么一定要填酷安 UID</h3>
+          <h3><span>D</span>为什么要求填写酷安 UID</h3>
           <p>
-            清单是公开的，谁都能往里塞东西，所以唯一靠得住的办法是<b>「找得到人」</b>。
-            名字可以随便写，酷安 UID 是唯一的、点开就知道是谁、平台也能处理：
-            出事时打开 <code>coolapk.com/u/&lt;UID&gt;</code> 就清楚了，社区也能对具体账号做处理。
+            模块库公开，任何人都可以提交内容，因此最关键的是<b>能够找到上传者</b>。
+            昵称可以随意填写，酷安 UID 唯一，打开主页即可确认账号身份，平台也可以处理违规账号：
+            出现问题时，打开 <code>coolapk.com/u/&lt;UID&gt;</code> 即可核对；社区也可以对具体账号采取措施。
           </p>
           <p>
-            来源同理，只收<b>酷安站内链接</b>：模块得能追到某个帖子或某个作者主页，
-            网盘直链、匿名转存都不算。源码只收 GitHub 上公开的那一个，两者至少填一个。
+            来源同样只接受<b>酷安站内链接</b>：模块必须能追溯到具体帖子或作者主页；
+            网盘直链与匿名转存不计为来源。源码只接受 GitHub 上的公开仓库。两项至少填写一项。
           </p>
           <div class="callout">
-            <b>昵称和 UID 是两回事。</b>昵称给人看，会显示在列表里；UID 给审核和追责用。
-            UID 填对了会自动核实账号存在，还会把昵称填上。
+            <b>昵称与 UID 不同。</b>昵称用于展示，会显示在列表中；UID 用于核实与追责。
+            UID 填写正确时，系统会核实账号是否存在，并自动填入昵称。
           </div>
 
-          <h3><span>E</span>怎么加到管理器里</h3>
-          <p id="addsrc">模块库地址还没配好，配好后这里会给出一键添加的链接。</p>
+          <h3><span>E</span>如何添加到管理器</h3>
+          <p id="addsrc">模块库地址尚未配置；配置完成后，这里会提供一键添加链接。</p>
 
         </article>
       </section>
@@ -674,47 +671,47 @@
       <!-- ====================== 05 身份验证（前置步骤：不在顶栏里，只能从上传页被送进来） ====================== -->
       <section class="view" id="view-identity" aria-labelledby="h-identity">
         <div class="hero rise">
-          <h1 id="h-identity">先确认<span class="hi">是你</span></h1>
+          <h1 id="h-identity">确认<span class="hi">上传者身份</span></h1>
           <p class="hero__lede" id="identity-lede">
-            通过这道验证与自动检查后，包会直接进入模块库与公开仓库。
-            模块在他人设备上以 <b>root 权限</b>运行，一个坏包的影响没有上限，
-            因此<b>必须能查到上传者身份</b>。填写酷安 UID，并把这一页给出的<b>验证串</b>写入酷安签名，
-            系统读取一次签名即可核对；此后 <b>90 天内</b>再次上传无需重复验证。
+            完成身份核实与自动检查后，模块包会进入模块库与公开仓库。
+            模块在他人设备上以 <b>root 权限</b>运行，恶意模块包可能造成严重影响，
+            因此<b>必须能够确认上传者身份</b>。填写酷安 UID，并将本页生成的<b>签名串</b>写入酷安签名；
+            系统读取一次签名即可完成核对。此后 <b>90 天内</b>再次上传时，无需重复核实。
           </p>
         </div>
 
-        <p class="field__help" style="margin:-4px 0 14px"><a href="#/submit">← 返回上传页</a>，稍后再验证。</p>
+        <p class="field__help" style="margin:-4px 0 14px"><a href="#/submit">← 返回上传页</a>，稍后再核实。</p>
 
         <form class="idform rise" id="idform" novalidate>
           <section class="panel" aria-labelledby="pid1t">
             <div class="panel__hd">
               <span class="panel__no">01</span>
               <h2 id="pid1t">你的酷安账号</h2>
-              <span class="panel__tag">who</span>
+              <span class="panel__tag">账号</span>
             </div>
             <p class="panel__note">
-              要求上传者酷安 <b>Lv2 以上</b>（防止乱传）。
+              上传者的酷安账号需达到 <b>Lv2 以上</b>。
             </p>
             <div class="field">
-              <div class="field__lab"><label for="f-uid">上传人酷安 UID<span class="req">*</span></label></div>
+              <div class="field__lab"><label for="f-uid">上传者酷安 UID<span class="req">*</span></label></div>
               <input class="mono" type="text" id="f-uid" data-k="coolapkUid" placeholder="4-12 位数字" inputmode="numeric" autocomplete="off" spellcheck="false" required />
               <p class="field__help">
-                打开酷安「我的」→ <b>点自己头像</b> → 右上角<b>三点</b> →
-                「查看我的资料」里的 <b>用户 UID</b> 点击即可复制。
+                打开酷安「我的」，<b>点击头像</b>，再点右上角<b>三点</b>；
+                在「查看我的资料」中复制 <b>用户 UID</b>。
               </p>
-              <p class="field__err" data-err="coolapkUid">UID 应是 4-12 位纯数字</p>
+              <p class="field__err" data-err="coolapkUid">UID 应为 4–12 位数字</p>
             </div>
             <!-- 昵称不是要填的字段，是按上面那个 UID 反查回来的结果，所以整行默认不出现：
                  取到了只读显示；取不到（核实没开 / 酷安不可达 / UID 查无此人）才放开让你自己填 ——
                  Worker 那边 uploader 空着直接 400，不能让酷安抖动把真人挡在上传之外。 -->
             <div class="field" id="nick-field" hidden>
               <div class="field__lab">
-                <label for="f-uploader">上传人酷安昵称</label>
-                <span class="auto" id="uploader-tag">按 UID 自动取</span>
+                <label for="f-uploader">上传者酷安昵称</label>
+                <span class="auto" id="uploader-tag">根据 UID 自动获取</span>
               </div>
-              <input type="text" id="f-uploader" data-k="uploader" placeholder="没取到昵称，自己写一个" autocomplete="nickname" />
+              <input type="text" id="f-uploader" data-k="uploader" placeholder="未获取到昵称，请手动填写" autocomplete="nickname" />
               <p class="field__help" id="uploader-help"></p>
-              <p class="field__err" data-err="uploader">这一项没取到昵称，请自己填一个署名</p>
+              <p class="field__err" data-err="uploader">未能获取昵称，请填写署名</p>
             </div>
             <div class="status" id="uid-check" hidden aria-live="polite">
               <span class="uid__face">
@@ -735,38 +732,38 @@
           <section class="panel" aria-labelledby="pid2t">
             <div class="panel__hd">
               <span class="panel__no">02</span>
-              <h2 id="pid2t">把酷安签名临时改为这一串</h2>
-              <span class="panel__tag">commit</span>
+              <h2 id="pid2t">将酷安签名临时改为以下内容</h2>
+              <span class="panel__tag">签名</span>
             </div>
-            <p class="panel__note">为了证明你填写的 UID 确实是你在用。</p>
+            <p class="panel__note">用于证明所填 UID 归你所有。</p>
             <div class="commit">
               <code class="mono commit__val" id="identity-commit" aria-live="polite">……</code>
               <div class="commit__acts">
-                <button type="button" class="btn btn--ghost btn--sm" id="identity-copy">复制这一串</button>
+                <button type="button" class="btn btn--ghost btn--sm" id="identity-copy">复制签名串</button>
               </div>
             </div>
             <p class="field__help" id="identity-commit-cap">
-              打开酷安「我 → 编辑资料 → 个性签名」，把这一串粘贴保存；验证通过后换回原来的签名。
+              打开酷安「我 → 编辑资料 → 个性签名」，粘贴并保存该签名串；核实通过后恢复原签名。
             </p>
           </section>
 
           <section class="panel" aria-labelledby="pid3t">
             <div class="panel__hd">
               <span class="panel__no">03</span>
-              <h2 id="pid3t">三条承诺</h2>
-              <span class="panel__tag">pledge</span>
+              <h2 id="pid3t">三项承诺</h2>
+              <span class="panel__tag">承诺</span>
             </div>
             <p class="panel__note">
-              之后用这个账号传的每个模块都适用这三条，承诺跟账号一起存档。
+              此后使用该账号上传的每个模块都适用这三项承诺；承诺与账号一并存档。
             </p>
             <ul class="ticks ticks--flat">
-              <li><span class="tick__txt">我传的模块<b>不含恶意代码</b>：不偷账号、不偷偷回传数据、不破坏系统和数据。</span></li>
-              <li><span class="tick__txt">我是<b>作者</b>，或者该模块<b>本身是公开分享</b>，或者<b>已获得作者授权</b>，填的来源真实可查。</span></li>
-              <li><span class="tick__txt">我传的包里<b>没有个人隐私、账号信息和密钥</b>。</span></li>
+              <li><span class="tick__txt">我上传的模块<b>不包含恶意代码</b>：不窃取账号、不擅自回传数据、不破坏系统与数据。</span></li>
+              <li><span class="tick__txt">我是<b>作者</b>，或该模块<b>已公开分享</b>，或<b>已获得作者授权</b>；所填来源真实可查。</span></li>
+              <li><span class="tick__txt">我上传的模块包中<b>不包含个人隐私、账号信息与密钥</b>。</span></li>
             </ul>
             <label class="tick tick--pledge" for="ck-pledge">
               <input type="checkbox" id="ck-pledge" />
-              <span class="tick__txt">我确认这三条，违反会被公开处置并追责。</span>
+              <span class="tick__txt">我已阅读并确认以上三项；违反将按下架与拒收规则处置。</span>
             </label>
           </section>
         </form>
@@ -786,12 +783,12 @@
              并在按钮旁边保留一条手动解除途径（升级后需手动点击解除 —— 不自动解除，否则每 30 秒
              白烧一次接口额度）。 -->
         <p class="callout callout--err" id="id-level-block" hidden>
-          <b>去酷安把等级升到 Lv2 以上，再回来验证</b>
+          <b>请先将酷安等级提升至 Lv2 以上，再返回核实</b>
         </p>
         <div class="btn-row cta-inline">
-          <button type="button" class="btn btn--go" id="id-verify" disabled>验证并继续</button>
-          <button type="button" class="btn btn--ghost btn--sm" id="id-level-recheck" hidden>我升好了，再验一次</button>
-          <span class="count hide-sm" id="id-note">先把上面填完</span>
+          <button type="button" class="btn btn--go" id="id-verify" disabled>核实并继续</button>
+          <button type="button" class="btn btn--ghost btn--sm" id="id-level-recheck" hidden>等级已提升，重新核实</button>
+          <span class="count hide-sm" id="id-note">请先填写以上内容</span>
         </div>
         <p class="callout callout--err" id="id-err" hidden></p>
       </section>
@@ -801,15 +798,15 @@
         <div class="hero rise">
           <h1 id="h-records">上传<span class="hi">记录</span></h1>
           <p class="hero__lede" id="records-lede">
-            这个账号传过的模块都在这儿。点某一枚的「上传更新版」会回到上传页，信息自动填好、
-            版本代号自动 +1 —— 你只要选新包。
+            这里列出当前账号上传过的模块。选择「上传更新版」会返回上传页，模块信息自动填入，
+            版本代号自动加 1；你只需选择新的模块包。
           </p>
         </div>
         <div class="panel rise" aria-labelledby="prect">
           <div class="panel__hd">
             <span class="panel__no">01</span>
-            <h2 id="prect">我传过的</h2>
-            <span class="panel__tag">mine</span>
+            <h2 id="prect">已上传模块</h2>
+            <span class="panel__tag">我的</span>
           </div>
           <!-- 「我的模块」：只有手里那张会话令牌成立时才去问 GET /mine。
                三档结果的处理在这里全是有意的：索引读不到（degraded）照常显示不报错、
@@ -829,8 +826,8 @@
 
     <!-- 移动端常驻操作条 -->
     <div class="dock" id="dock">
-      <span class="dock__txt"><b id="dock-t">还差：模块 zip</b><span id="dock-s">填完必填项，再确认一次</span></span>
-      <button type="button" class="btn btn--go btn--sm" data-open-confirm disabled>去确认</button>
+      <span class="dock__txt"><b id="dock-t">还差：模块 ZIP</b><span id="dock-s">填写必填项后，再进行确认</span></span>
+      <button type="button" class="btn btn--go btn--sm" data-open-confirm disabled>前往确认</button>
     </div>
 
     <!-- 未验证身份时的提示：点「上传前确认」才出现 -->
@@ -844,20 +841,20 @@
             <circle cx="12" cy="16.2" r="1.1" fill="currentColor" stroke="none" />
           </svg>
           <div>
-            <div class="warn__ttl" id="auth-ttl">Verify Identity</div>
-            <p class="warn__sub">需要验证你的酷安身份（完成一次验证后，90 天内无需重复验证）</p>
+            <div class="warn__ttl" id="auth-ttl">身份核实</div>
+            <p class="warn__sub">需要核实你的酷安身份；完成一次核实后，90 天内无需重复核实。</p>
           </div>
         </div>
         <div class="warn__body">
           <ul class="ticks ticks--flat">
-            <li><span class="tick__txt">模块在他人设备上以 <b>root 权限</b>运行，因此必须能查到上传者身份。</span></li>
-            <li><span class="tick__txt">验证只需一步：把本页给出的<b>验证串</b>写入酷安签名，系统读取一次即可确认。</span></li>
-            <li><span class="tick__txt">验证通过后，右上角会显示<b>酷安头像</b>；点击可查看上传记录或<b>退出该身份</b>。</span></li>
+            <li><span class="tick__txt">模块在他人设备上以 <b>root 权限</b>运行，因此必须能够确认上传者身份。</span></li>
+            <li><span class="tick__txt">核实只需一步：将本页生成的<b>签名串</b>写入酷安签名，系统读取一次即可确认。</span></li>
+            <li><span class="tick__txt">核实通过后，右上角会显示<b>酷安头像</b>；点击可查看上传记录或<b>退出当前身份</b>。</span></li>
           </ul>
         </div>
         <div class="warn__ft">
-          <button type="button" class="btn btn--ghost" id="auth-later">稍后验证</button>
-          <button type="button" class="btn btn--go" id="auth-go">去验证身份</button>
+          <button type="button" class="btn btn--ghost" id="auth-later">稍后核实</button>
+          <button type="button" class="btn btn--go" id="auth-go">前往身份核实</button>
         </div>
       </div>
     </div>
@@ -873,19 +870,19 @@
             <circle cx="12" cy="17.8" r="1.1" fill="currentColor" stroke="none" />
           </svg>
           <div>
-            <div class="warn__ttl" id="warn-ttl">Confirm Upload</div>
-            <p class="warn__sub">勾上下面的确认，「上传」按钮才会亮。账号的三条承诺在上一页确认过了，这里只确认<b>这一次这一批</b>。</p>
+            <div class="warn__ttl" id="warn-ttl">确认上传</div>
+            <p class="warn__sub">勾选下方确认项后，「确认并上传」按钮才会启用。账号的三项承诺已在身份页确认；这里只确认<b>本次上传</b>。</p>
           </div>
         </div>
         <div class="warn__body">
-          <p class="warn__lead">! 这个文件马上会被公开</p>
+          <p class="warn__lead">本次上传将立即公开</p>
           <ul class="ticks ticks--flat">
-            <li><span class="tick__txt">这个包会被<b>公开存储：谁都能下载、长期保留，提交后撤不回来</b>。</span></li>
-            <li><span class="tick__txt">传完要过<b>自动检查</b>才会进模块库；已上架、有更新源的模块，只有原作者能发新版。</span></li>
+            <li><span class="tick__txt">模块包将<b>公开存储：任何人都可以下载，内容长期保留，提交后不可撤回</b>。</span></li>
+            <li><span class="tick__txt">上传后需通过<b>自动检查</b>才会进入模块库；已收录且有更新来源的模块，仅归属人可以发布新版本。</span></li>
           </ul>
           <label class="tick tick--pledge" for="ck-confirm">
             <input type="checkbox" id="ck-confirm" />
-            <span class="tick__txt">我知道这两条，继续上传。</span>
+            <span class="tick__txt">我已了解以上两项，继续上传。</span>
           </label>
           <div class="warn__sum" id="warn-sum"></div>
         </div>
@@ -900,7 +897,7 @@
     <div class="layer" id="layer-run" role="dialog" aria-modal="true" aria-labelledby="run-ttl" hidden>
       <div class="done">
         <div class="done__hd">
-          <div class="done__kicker" id="run-kicker">UPLOADING</div>
+          <div class="done__kicker" id="run-kicker">上传中</div>
           <h2 class="done__ttl" id="run-ttl">正在上传…</h2>
         </div>
         <div class="done__body">
@@ -911,7 +908,7 @@
             </div>
             <div class="bar"><div class="bar__fill" id="run-fill"></div></div>
             <p class="field__help" style="margin-top:10px">
-              别关页面。传完服务端会解包检查、再提交审核，这两步不受本页控制。
+              请保持页面打开。上传完成后，服务端会解包检查，再提交审核；这两步不受本页控制。
             </p>
           </div>
           <div id="run-result" hidden></div>
@@ -921,7 +918,7 @@
     </div>
 
     <footer class="nameplate">
-      <span>COOL MODULE — 好模块的公共模块库</span>
+      <span>COOL MODULE · 公共模块索引</span>
     </footer>
 
     <script>

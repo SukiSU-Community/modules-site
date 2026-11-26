@@ -67,7 +67,7 @@ export const CONFIG = {
   // 若后端约定的字段名不同（例如 cf-turnstile-response），只改上面一行。
 
   // --- 待填 ④：酷安身份核实 ---------------------------------------------------
-  // 上传人必须给酷安 UID（https://www.coolapk.com/u/<UID> 末尾那串数字）。
+  // 上传者必须给酷安 UID（https://www.coolapk.com/u/<UID> 末尾那串数字）。
   // 昵称与 UID 分两个字段发出：
   //   uploader    = 昵称（索引里公开展示）
   //   <UID_FIELD> = 酷安 UID 数字
@@ -117,7 +117,7 @@ export const CONFIG = {
   // 取名「酷模」的寓意：这个索引主要收的就是从酷安来的模块。
   SITE_NAME: "酷模",
   SITE_NAME_EN: "COOL MODULE",
-  SITE_SUBTITLE: "人人共建的 KernelSU / Magisk 模块索引",
+  SITE_SUBTITLE: "由社区共建的 KernelSU / Magisk 模块索引",
 };
 
 // 派生值，不要改这里以下的东西。
