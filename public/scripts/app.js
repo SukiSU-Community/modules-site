@@ -1193,7 +1193,8 @@ function statusOf(card) {
   // 但归属发不了的那一枚（update_eligible === false）不能跟着变绿：那一枚整单会被 403 拒掉，
   // 标成 ok 就是在教用户白抄一次签名。
   if (status === "version_update") {
-    if (ownershipOf(card) === "other") return { tone: "warn", text: "更新 · 非归属人" };
+    // 这一句同时是 SHORT_STATUS 的键：写错一个字，chip 会静默回落到整句 —— 两处必须逐字一致。
+    if (ownershipOf(card) === "other") return { tone: "warn", text: "更新 · 非首发账号" };
     return { tone: "ok", text: "更新 · 可上传" };
   }
   if (status === "new") return { tone: "ok", text: "未收录 · 可上传" };
@@ -4440,9 +4441,22 @@ function resetForm() {
 
 /* ------------------------------------------------------- 02 已收录模块视图 */
 
+/** 模块库读取期间的骨架卡：形状按真实卡片（标题 / 描述 / 底栏）排好，
+    数据到了整块替换 —— 页面不会先空一段、再突然长出一列。 */
+function skeletonCard(i) {
+  const li = node("li", "mod mod--sk");
+  li.setAttribute("aria-hidden", "true");
+  li.style.setProperty("--sk-delay", `${i * 90}ms`);
+  li.append(node("div", "sk sk--nm"));
+  li.append(node("div", "sk sk--ds"));
+  li.append(node("div", "sk sk--ft"));
+  return li;
+}
+
 function renderIndex() {
   const list = $("#mods");
   const shell = $("#index-state");
+  list.removeAttribute("aria-busy");
 
   if (!IS_INDEX_CONFIGURED) {
     list.textContent = "";
@@ -4482,19 +4496,22 @@ function renderIndex() {
 
   if (!state.index) {
     $("#index-readout").textContent = "正在读取模块库…";
-    shell.hidden = false;
+    shell.hidden = true;
     shell.textContent = "";
-    shell.append(node("div", "empty__t", "正在读取"));
+    list.hidden = false;
+    list.setAttribute("aria-busy", "true");
+    list.textContent = "";
+    for (let i = 0; i < 3; i += 1) list.append(skeletonCard(i));
     loadIndex();
     return;
   }
 
-  const { name, lastUpdate, modules } = state.index;
+  const { lastUpdate, modules } = state.index;
   const idxReadout = $("#index-readout");
   idxReadout.classList.remove("bad");
   // 日期包成 .nb 块整体不断行（「更新 2026-10-」/「11 11:02」拆开读起来像两段）
   idxReadout.replaceChildren(
-    `${name || "模块库"} · ${modules.length} 个模块`,
+    `公共模块索引 · ${modules.length} 个模块`,
     ...(lastUpdate ? [" · 更新 ", node("span", "nb", fmtDate(lastUpdate))] : [])
   );
 
@@ -5040,7 +5057,10 @@ async function submitReport() {
     report.result = null;
     paintReportResult();
     report.error = err instanceof BackendError ? err.message : "提交失败，请稍后重试；持续出现请把这一屏发给站点。";
-    $("#rp-readout").textContent = "本次举报未被受理，请按下方提示修改后重试。";
+    // 失败那一支必须说清这串还在：用户此刻看着屏幕上的签名，会以为「又白改了」而去找新的口令。
+    // 受理之后才轮换（见上面成功支），所以这里一个 nonce 都不生成。
+    $("#rp-readout").textContent =
+      "本次举报未被受理，请按下方提示修改后重试；这一次没有成立，它没消耗你的签名，签名串仍然有效。";
   } finally {
     report.busy = false;
     refreshReportForm();

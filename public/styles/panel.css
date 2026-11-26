@@ -1685,6 +1685,43 @@ textarea:focus {
   border-color: var(--amber-line);
   transform: translateX(2px);
 }
+/* 读取中的骨架卡：与真实卡片同形状，扫光只落在占位条上。
+   卡片还没有任何可点的东西，所以 hover 的位移与高亮都关掉。 */
+.mod--sk {
+  pointer-events: none;
+}
+.mod--sk:hover {
+  border-color: var(--line);
+  transform: none;
+}
+.sk {
+  height: 11px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--panel-2) 0%, var(--panel-3) 50%, var(--panel-2) 100%);
+  background-size: 200% 100%;
+  animation: sk-sweep 1.15s var(--ease) infinite;
+  animation-delay: var(--sk-delay, 0ms);
+}
+.sk--nm {
+  width: 38%;
+  height: 15px;
+}
+.sk--ds {
+  width: 86%;
+  margin-top: 10px;
+}
+.sk--ft {
+  width: 62%;
+  height: 9px;
+  margin-top: 14px;
+}
+@keyframes sk-sweep {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sk { animation: none; }
+}
 .mod__hd {
   display: flex;
   gap: 10px;

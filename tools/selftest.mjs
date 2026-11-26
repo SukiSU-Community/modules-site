@@ -640,7 +640,7 @@ async function main() {
       /fetch\(CONFIG\.INDEX_URL, FRESH\)/.test(apiSrc) &&
       /fetch\(target, FRESH\)/.test(apiSrc)
   );
-  check("浏览页搜不到时会去查公示，命中就说明是被处置了", /ledgerHitFor\(q\)/.test(appSrc) && /它不是没被上传过，是被下架或拒收了/.test(appSrc));
+  check("浏览页搜不到时会去查公示，命中就说明是被处置了", /ledgerHitFor\(q\)/.test(appSrc) && /该模块并非未被上传，而是已被下架或拒收/.test(appSrc));
 
   check(
     "举报那一行错误有三个来源（本地形状 / 口令来源不齐 / 服务端原文），且 hidden 由内容决定",
@@ -680,19 +680,19 @@ async function main() {
     "utf8"
   );
   check(
-    "昵称整行默认不出现，出现时叫「上传人酷安昵称」且不挂必填星号",
+    "昵称整行默认不出现，出现时叫「上传者酷安昵称」且不挂必填星号",
     /id="nick-field" hidden/.test(formHtml) &&
-      /<label for="f-uploader">上传人酷安昵称<\/label>/.test(formHtml) &&
-      !/for="f-uploader">上传人酷安昵称<span class="req">/.test(formHtml)
+      /<label for="f-uploader">上传者酷安昵称<\/label>/.test(formHtml) &&
+      !/for="f-uploader">上传者酷安昵称<span class="req">/.test(formHtml)
   );
-  // 界面上只有「上传人」这一个称呼（about 页早就这么写了），混用会让人以为是两个人
+  // 界面上只有「上传者」这一个称呼（术语表定的那一个），混用会让人以为是两个人
   check(
-    "UID 那栏点名是「上传人酷安 UID」，且全站不再出现第二种称呼",
-    /<label for="f-uid">上传人酷安 UID<span class="req">\*<\/span><\/label>/.test(formHtml) &&
+    "UID 那栏点名是「上传者酷安 UID」，且全站不再出现第二种称呼",
+    /<label for="f-uid">上传者酷安 UID<span class="req">\*<\/span><\/label>/.test(formHtml) &&
       !formHtml.includes("投稿人") &&
       !appSrc.includes("投稿人") &&
-      !formHtml.includes("上传者") &&
-      !appSrc.includes("上传者")
+      !formHtml.includes("上传人") &&
+      !appSrc.includes("上传人")
   );
   // placeholder 是全站都会渲染出来的字符串，往里塞一个真实 UID 等于把它贴公开。
   check(
@@ -779,9 +779,9 @@ async function main() {
     "索引里给不出那一枚就不许提交：enable 判据含 reportTarget().ok，缺哪一样说哪一样的真话",
     /const ok =\s*\n?\s*target\.ok &&/.test(appSrc) &&
       /\$\("#rp-submit"\)\.disabled = !ok;/.test(appSrc) &&
-      /举报只管已经上架的模块/.test(appSrc) &&
-      /没有 64 位的包体 sha256/.test(appSrc) &&
-      /这一版不在索引里/.test(appSrc)
+      /举报仅适用于已收录模块/.test(appSrc) &&
+      /缺少完整校验值/.test(appSrc) &&
+      /该版本不在模块库中/.test(appSrc)
   );
   /* 「不许在失败那一支里轮换 nonce」这一条不能拿「往后数 400 个字符里没有 makeNonce」来判：
      窗口会漂到下一个函数（renderReport 里就有轮换），改了代码结构就假红。切那一段 catch 体本身。 */
@@ -808,11 +808,12 @@ async function main() {
   );
   check(
     "举报页把「这一发不动索引」与「之后由逐字复验决定下架」都写在界面上，且不承诺有人在签",
-    /publicAction: none/.test(rpPanel) &&
-      /逐字节/.test(rpPanel) &&
-      /实名 \+ 包内逐字定位到/.test(rpPanel) &&
-      /全程没有人工签字那一步/.test(rpPanel) &&
-      /与上传那 5 格\/小时是分开的两本账/.test(rpPanel)
+    /提交本身不会改动模块库/.test(rpPanel) &&
+      // 页面上那个「逐字」是 <b> 强调，字面被标签切断 —— 按标记后的原文钉，仍是同一句话。
+      /<b>逐字<\/b>核对引用内容是否确实存在于包中/.test(rpPanel) &&
+      /以本人酷安账号署名举报，并且能在模块包中逐字找到所引用的内容/.test(rpPanel) &&
+      /全程没有人工审批/.test(rpPanel) &&
+      /举报的频率限制分别按 IP 与账号计算，与上传次数分开/.test(rpPanel)
   );
   // 反向那一格是这次改版的全部内容：那句话在上一版是真话，在这一版是假话（队列真的会被人摘下来）。
   check(
@@ -888,9 +889,9 @@ async function main() {
   );
   const incLede = /id="view-moderation"[\s\S]*?<p class="hero__lede">([\s\S]*?)<\/p>/.exec(formHtml);
   check(
-    "公示导语留着威慑的四要素：root 权限 / 可核对的凭据 / 向公安机关报案 / 依法追究法律责任",
+    "公示导语留着威慑的四要素：root 权限 / 可核对的凭据 / 保留报案 / 依法追究责任",
     !!incLede &&
-      ["root 权限", "可核对的凭据", "向公安机关报案", "依法追究法律责任"].every((k) =>
+      ["root 权限", "可核对的凭据", "保留报案", "依法追究责任"].every((k) =>
         incLede[1].includes(k)
       )
   );
@@ -906,7 +907,8 @@ async function main() {
   );
   check(
     "标语字号只由 clamp 决定，没有任何媒体查询再用固定 px 把它压回去",
-    /h1 \{[^}]*font-size: clamp\((3[6-9]|[4-9][0-9])px/.test(panelCss) &&
+    // 34 是这一版的下限（设计稿从 36 收到 34）；媒体查询那一档也必须自己写 clamp，不许换回 px。
+    /h1 \{[^}]*font-size: clamp\((3[4-9]|[4-9][0-9])px/.test(panelCss) &&
       !/h1 \{[^}]*font-size: \d+px/.test(panelCss)
   );
   check(
@@ -935,9 +937,9 @@ async function main() {
     /syncUploaderField\(\);\s*\n\s*runUidCheck\(\);/.test(appSrc)
   );
   check(
-    "UID 改过、还没重查完时写的是「正在按新 UID 重查」，不是「需要你填」",
+    "UID 改过、还没重查完时写的是「正在重新核实」，不是「手动填写」",
     /const rechecking = state\.uidStatus === "verified" && !nickname;/.test(appSrc) &&
-      /rechecking \? "正在按新 UID 重查" : "需要你填"/.test(appSrc)
+      /rechecking \? "正在重新核实" : "手动填写"/.test(appSrc)
   );
   // 改了 UID 却没取到新昵称时，上一个 UID 的昵称必须消失 —— 而且要赶在「把这一行藏起来」
   // 之前：核实没接 / 酷安抖动时「正在查」也允许提交，清空晚一步就漏进索引。
@@ -1312,20 +1314,24 @@ async function main() {
       /const idsInSet = targets\.map\(\(c\) => cardValues\(c\)\.id\)\.filter\(Boolean\);/.test(gateBody) &&
       /if \(!nonce \|\| !set\.targets\.length\) \{/.test(appSrc) &&
       /if \(set\.incomplete\.length\) \{/.test(appSrc) &&
-      painted(gateBody).includes("队列里有两枚的模块 ID 是同一个"),
+      painted(gateBody).includes("队列中有两个相同的模块 ID"),
     `shown 主式在=${/shown: Boolean\(state\.nonce && proofId && state\.zipSha\)/.test(gateBody)} 集合那一半=${/&& targets\.length > 0 && incomplete\.length === 0 && !dupId/.test(gateBody)} renderProof 两分支=${/if \(!nonce \|\| !set\.targets\.length\) \{/.test(appSrc) && /if \(set\.incomplete\.length\) \{/.test(appSrc)}`
   );
   check(
     "还差哪个来源就点名哪个：清单三条各说一种「口令还差」",
-    ["签名串还差：填上模块 ID", "签名串还差：整包哈希还没算完", "签名串还差：还没选包"].every((k) => gateBody.includes(k)) &&
+    ["签名缺少模块 ID", "签名缺少校验值", "签名缺少安装包"].every((k) => gateBody.includes(k)) &&
       !gateBody.includes("随机段已生成 —— 填上模块 ID"),
     "口令行的文案又回到先报「已生成」后报缺什么"
   );
   check(
     "底栏那句「全部就绪」由 shown 把关：有 ok 但未 shown 的行时不许说就绪",
     /i\.ok && i\.shown === false/.test(refreshBody) &&
-      /blocking \? blocking\.text : "全部就绪，可以确认"/.test(refreshBody),
-    refreshBody.includes("全部就绪") ? "全部就绪还在，但没让 shown 先过一遍" : "底栏不再写「全部就绪」"
+      // 底栏现在分三档：有待补项时点名那一项，身份没核实说「需核实身份」，末档才是「可以确认」。
+      // 三档都在不影响这条钉子的意图：第一档必须由 blocking（含 firstNotShown）来定，不是一个写死的成功语。
+      // 三目在源码里是换行写的，判据必须容许空白 —— 否则「排在前面」这件事被排版否定。
+      /blocking\s*\? blocking\.text\s*:\s*needAuth/.test(refreshBody) &&
+      /"信息已填写，可以确认"/.test(refreshBody),
+    /blocking\s*\? blocking\.text/.test(refreshBody) ? "blocking 那一档没排在最前" : "底栏不再由 blocking 把关"
   );
   /* 旧断言说「ok 仍只看 state.nonce」。长效会话那一档不生成 nonce（它压根不需要签名），
      所以 ok 的来源变成两支：有令牌，或者有那一串。按钮那一半一个字没动 —— 仍然只看 ok，
@@ -1466,7 +1472,7 @@ async function main() {
     confirmBoxes.length === 1 &&
       confirmBoxes[0] === "ck-confirm" &&
       /<label[^>]*for="ck-confirm"/.test(confirmSlice) &&
-      /我已知晓以上两条/.test(confirmSlice),
+      /我已了解以上两项/.test(confirmSlice),
     `弹窗里 checkbox=${confirmBoxes.join(",") || "无"} / 有配对 label=${/<label[^>]*for="ck-confirm"/.test(confirmSlice)}`
   );
   check(
@@ -1476,11 +1482,15 @@ async function main() {
   );
   check(
     "旧的四勾计数没有残留：不写「三项」「三道」，也不再说「四项全部勾上」「勾完四项」",
-    !formHtml.includes("三项") &&
-      !appSrc.includes("三项") &&
+    // 「账号的三项承诺」是身份页那三条账号级承诺（真有三条），不是勾数 —— 禁的是拿数词去数勾。
+    !/(三|四)[项道]勾/.test(formHtml) &&
+      !/勾(完|满|上)\s*(三|四)[项道]/.test(formHtml) &&
       !formHtml.includes("三道") &&
       !/四项全部勾上/.test(formHtml) &&
-      !/勾完四项/.test(appSrc)
+      !/勾完四项/.test(appSrc) &&
+      // 弹窗自己只说「以上两项」，也不许把身份页那三条搬进来重数一遍
+      confirmSlice.includes("以上两项") &&
+      !/以上三条/.test(confirmSlice)
   );
   /* 承诺的版本号与那段文案必须绑在一起。
      归档里那句「他接受过承诺」以后是要被人拿出来的，它的可辩护性全靠「pledge-v2 指的是哪段话」
@@ -1497,11 +1507,11 @@ async function main() {
   })();
   const pledgeSent = /pledge:\s*["']([^"']+)["']/.exec(appSrc)?.[1] ?? "";
   check(
-    "承诺版本字面量与身份页三条绑在一起：pledge-v2、「不窃取凭据」、「随账号存档」必须同时存在",
+    "承诺版本字面量与身份页三条绑在一起：pledge-v2、「不窃取账号」、「承诺与账号一并存档」必须同时存在",
     pledgeSent === "pledge-v2" &&
-      identitySlice.includes("不窃取凭据") &&
-      identitySlice.includes("随账号存档"),
-    `app.js 发的 pledge=${JSON.stringify(pledgeSent)}，身份页有「不窃取凭据」=${identitySlice.includes("不窃取凭据")}、有「随账号存档」=${identitySlice.includes("随账号存档")}`
+      identitySlice.includes("不窃取账号") &&
+      identitySlice.includes("承诺与账号一并存档"),
+    `app.js 发的 pledge=${JSON.stringify(pledgeSent)}，身份页有「不窃取账号」=${identitySlice.includes("不窃取账号")}、有「承诺与账号一并存档」=${identitySlice.includes("承诺与账号一并存档")}`
   );
   /* 身份页那几句与 App 端 strings.xml 是同一份话（module_upload_identity_commit_title 等），
      两边一起改才叫「同一件事一个说法」。旧写法「上传人酷安等级 ≥ 2」把门槛说成**上传人的属性**，
@@ -1511,15 +1521,16 @@ async function main() {
      于是这条正反两侧都钉：身份段里没有「换一串」；整页也不再有不带「签名」二字的「换一串」，
      而「换一串签名」那一处还在 —— 少任何一侧，都等于悄悄把一半的入口换了名。 */
   check(
-    "身份页文案与 App 端同一句话：标题「酷安签名临时改成下面这串」、门槛「需要酷安等级 Lv2 及以上」，且这一段里不再有「换一串」",
-    identitySlice.includes("酷安签名临时改成下面这串") &&
-      identitySlice.includes("需要酷安等级") &&
-      identitySlice.includes("Lv2 及以上") &&
+    "身份页文案与 App 端同一句话：标题「将酷安签名临时改为以下内容」、门槛「酷安账号需达到 Lv2 以上」，且这一段里不再有「换一串」",
+    identitySlice.includes("将酷安签名临时改为以下内容") &&
+      identitySlice.includes("酷安账号需达到") &&
+      identitySlice.includes("Lv2 以上") &&
       !identitySlice.includes("换一串") &&
       !/换一串(?!签名)/.test(formHtml) &&
-      formHtml.includes("换一串签名") &&
+      // 旧版举报页那颗按钮叫「换一串签名」，这一版叫「更换签名串」：名字换了，入口还在。
+      formHtml.includes("更换签名串") &&
       !formHtml.includes("上传人酷安等级"),
-    `身份段：有标题=${identitySlice.includes("酷安签名临时改成下面这串")}、有 Lv2 门槛=${identitySlice.includes("Lv2 及以上")}、含「换一串」=${identitySlice.includes("换一串")}；整页残留的无「签名」二字「换一串」=${/换一串(?!签名)/.test(formHtml)}`
+    `身份段：有标题=${identitySlice.includes("将酷安签名临时改为以下内容")}、有 Lv2 门槛=${identitySlice.includes("Lv2 以上")}、含「换一串」=${identitySlice.includes("换一串")}；整页残留的无「签名」二字「换一串」=${/换一串(?!签名)/.test(formHtml)}`
   );
   /* 冷却门控：同一指纹（uid + commit）连续失败 30s / 60s / 120s / 之后 300s 封顶，成功清零。
      三件事必须同时钉住，少一条这道门都是装饰品：
@@ -1532,8 +1543,11 @@ async function main() {
     appSrc.includes('IDENTITY_COOLDOWN_KEY = "sukisu.identity.cooldown"') &&
       appSrc.includes("IDENTITY_COOLDOWN_STEPS = [30, 60, 120, 300]") &&
       /function identityFingerprint\(uid, commit\)[\s\S]{0,400}?`\$\{u\}:\$\{c\}`/.test(appSrc) &&
-      /fp: cd\.fp, fails: cd\.fails, until: cd\.until/.test(appSrc) &&
-      appSrc.includes("请 ${wait} 秒后再试") &&
+      // 读回来的那份要真的按 fp / fails / until 三个字段判：判据是 cd.fp 比对与 cd.until 倒计时。
+      /cd\.fp !== fp/.test(appSrc) &&
+      /\(cd\.until - Date\.now\(\)\) \/ 1000/.test(appSrc) &&
+      // 屏幕上的那句话（旧版是「请 N 秒后再试」，现在把秒数写在前面）
+      appSrc.includes("${wait} 秒后可重试") &&
       (appSrc.match(/countIdentityFailure\(fp\)/g) || []).length >= 2 &&
       /saveIdentityCooldown\(null\)/.test(appSrc)
   );
@@ -1552,9 +1566,9 @@ async function main() {
       /recheck\.hidden = !blocked/.test(appSrc) &&
       /#id-level-recheck"\)[\s\S]{0,120}?clearIdentityLevelBlock\(\)/.test(appSrc) &&
       formHtml.includes('id="id-level-block"') &&
-      formHtml.includes("先去酷安把等级提升到 Lv2 及以上，再回来验证") &&
+      formHtml.includes("请先将酷安等级提升至 Lv2 以上，再返回核实") &&
       formHtml.includes('id="id-level-recheck"') &&
-      formHtml.includes("我已升级，重新验证") &&
+      formHtml.includes("等级已提升，重新核实") &&
       /level_too_low:\s*\{\s*\n\s*owner:\s*["'](you|us|both)["']/.test(apiSrc)
   );
   check(
@@ -1662,8 +1676,8 @@ async function main() {
   check(
     "cardGaps：「来源」与「源码仓库」二选一，都空才报一次",
     gapsBody.includes('if (!v.source && !v.repoUrl) gaps.push("来源或源码仓库");') &&
-      gapsBody.includes('if (v.source && !normalizeCoolapkUrl(v.source)) gaps.push("来源不是酷安站内链接");') &&
-      gapsBody.includes('if (v.repoUrl && !normalizeRepoUrl(v.repoUrl)) gaps.push("源码仓库地址形状不对");'),
+      gapsBody.includes('if (v.source && !normalizeCoolapkUrl(v.source)) gaps.push("来源必须是酷安链接");') &&
+      gapsBody.includes('if (v.repoUrl && !normalizeRepoUrl(v.repoUrl)) gaps.push("源码地址格式不正确");'),
     gapsBody.slice(0, 80)
   );
   const requiredLine = appSrc.slice(
@@ -1681,9 +1695,9 @@ async function main() {
   );
   check(
     "闸门里那条二选一的文案与契约原文一致，且形状错的两句话都在",
-    gateItemsBody.includes("请至少填写「来源」或「源码仓库」之一") &&
-      gateItemsBody.includes("每一枚都填了「来源」或「源码仓库」至少一项") &&
-      gateItemsBody.includes("源码仓库必须是 https://github.com/<owner>/<repo> 形式"),
+    gateItemsBody.includes("来源或源码仓库至少填写一项") &&
+      gateItemsBody.includes("来源必须是酷安站内链接") &&
+      gateItemsBody.includes("源码仓库必须写成 https://github.com/<owner>/<repo>"),
     gateItemsBody.slice(0, 80)
   );
   const payloadBody = appSrc.slice(
@@ -1703,9 +1717,9 @@ async function main() {
   check(
     "列表 chip 单状态：无仓库不画；失效 / 未覆盖 / 开源或公开源码三选一",
     chipBody.includes("if (!m.repoUrl) return null;") &&
-      chipBody.includes("源码校验失效") &&
-      chipBody.includes("最新版未覆盖") &&
-      chipBody.includes('m.repoLicense ? "✓ 开源" : "✓ 公开源码"'),
+      chipBody.includes("源码不匹配") &&
+      chipBody.includes("未覆盖最新版本") &&
+      chipBody.includes('m.repoLicense ? "✓ 开源" : "✓ 有公开源码"'),
     chipBody.slice(0, 80)
   );
   const evidenceBody = appSrc.slice(
@@ -1714,11 +1728,11 @@ async function main() {
   );
   check(
     "证据块：无仓库只说「作者未提供公开源码」，有仓库才画 tag / digest / 时间 / 复验",
-    evidenceBody.includes('"源码证据"') &&
+    evidenceBody.includes('"源码信息"') &&
       evidenceBody.includes('"作者未提供公开源码"') &&
       evidenceBody.includes("hex.slice(0, 12)") &&
       evidenceBody.includes("checksums 分支") &&
-      evidenceBody.includes("命中 Release") &&
+      evidenceBody.includes("对应 Release") &&
       evidenceBody.includes("最近校验") &&
       evidenceBody.includes("复验状态"),
     evidenceBody.slice(0, 80)
@@ -1854,10 +1868,10 @@ async function main() {
   );
   const modRowBody = appSrc.slice(appSrc.indexOf("function modRow("), appSrc.indexOf("\n}", appSrc.indexOf("function modRow(")));
   check(
-    "列表行两个身份：作者与上传人并排，名字有主页才画链接，作者那侧永远带「未验证」",
+    "列表行两个身份：作者与上传者并排，名字有主页才画链接，作者那侧永远带「未核实」",
     whoBody.includes('"作者"') &&
-      whoBody.includes('"上传人"') &&
-      whoBody.includes('"未验证"') &&
+      whoBody.includes('"上传者"') &&
+      whoBody.includes('"未核实"') &&
       whoBody.includes("authorHomepage(m)") &&
       whoBody.includes("uploaderCoolapkUrl(m.coolapkUid)") &&
       whoBody.includes("safeUrl(") &&
@@ -1867,8 +1881,8 @@ async function main() {
     whoBody.slice(0, 80)
   );
   check(
-    "作者主页那一行：没有链接就整个不画（不留空壳），有链接才挂「由上传人填写，未验证」",
-    authEvBody.includes('"作者主页（由上传人填写，未验证）"') &&
+    "作者主页那一行：没有链接就整个不画（不留空壳），有链接才挂「由上传者代填，未核实」",
+    authEvBody.includes('"作者主页（由上传者代填，未核实）"') &&
       authEvBody.includes("if (!links.length) return null;") &&
       authEvBody.includes("normalizeCoolapkUserUrl(m.authorCoolapkUrl)") &&
       authEvBody.includes("normalizeGithubUserUrl(m.authorGithubUrl)") &&
@@ -1900,10 +1914,10 @@ async function main() {
   check(
     "cardGaps：两格作者主页填了就必须是个人主页的形状，空着不进 gap",
     gapsBody.includes(
-      'if (v.authorCoolapkUrl && !normalizeCoolapkUserUrl(v.authorCoolapkUrl)) gaps.push("作者酷安主页不是个人主页");'
+      'if (v.authorCoolapkUrl && !normalizeCoolapkUserUrl(v.authorCoolapkUrl)) gaps.push("酷安主页必须是个人主页");'
     ) &&
       gapsBody.includes(
-        'if (v.authorGithubUrl && !normalizeGithubUserUrl(v.authorGithubUrl)) gaps.push("作者 GitHub 主页不是个人主页");'
+        'if (v.authorGithubUrl && !normalizeGithubUserUrl(v.authorGithubUrl)) gaps.push("GitHub 主页必须是个人主页");'
       ),
     gapsBody.slice(0, 80)
   );
@@ -1972,27 +1986,31 @@ async function main() {
     "被 recorded 摘出去的那一枚不进口令绑的那个集合：口令那一串与提交用同一个 submitTargets() 判据，并在屏幕上点名它不含谁",
     /for \(const card of submitTargets\(\)\)/.test(targetsFn) &&
       /!isRecorded\(c\)/.test(targetsBody) &&
-      /const rec = state\.cards\.filter\(\(c\) => isRecorded\(c\)\);[\s\S]{0,200}不含：/.test(appSrc) &&
+      /const rec = state\.cards\.filter\(\(c\) => isRecorded\(c\)\);[\s\S]{0,200}不包含：/.test(appSrc) &&
       /const zipSha = live \? state\.zipSha : card\.zipSha;/.test(appSrc),
-    `proofTargets 起点=${appSrc.indexOf("function proofTargets()")} roster那一句在=${/不含：/.test(appSrc)}`
+    `proofTargets 起点=${appSrc.indexOf("function proofTargets()")} roster那一句在=${/不包含：/.test(appSrc)}`
   );
   /* 旧的两条字面量（「不算在本次投稿里」「口令不生成，签名里不用抄它」）是逐枚提交那一版的说法：
      那时摘出一枚只是少发一个请求。v2 摘出一枚会**换掉屏幕上那一串口令**（集合变了前缀就变了），
      所以这一句要说的三件事也换了：点名是哪一枚、它不进 manifest、剩下那几枚算出来的才是新的一串。
-     措辞的边界按 §17.6 与本轮的实测说真话，一条都不许多：公开索引里不带投稿人 UID ⇒ 分不清是谁投的；
+     措辞的边界按 §17.6 与本轮的实测说真话，一条都不许多：公开索引里没有上传者 UID ⇒ 分不清是谁上传的；
      还在 pending/ 里的同 id 今天查不到 ⇒ 那一档这一轮拦不住。这两句必须留在那一行里，
-     否则「已被投稿过」这五个字会被读成「有人证明了我不是第一个投的」——那不是这台闸能说的话。 */
+     否则「已被上传过」这五个字会被读成「有人证明了我不是第一个投的」——那不是这台闸能说的话。
+     现行那一行把「不进 manifest」说成「已从本次上传移除」，并且把「签名那一串按剩下的算」说成
+     「签名将按剩余 N 个模块重新计算（移除前填入的签名需要再次填写）」—— 后者比 v1 那句更硬；
+     manifest 侧的排除仍由上面那条 submitTargets 同源判据钉着，这里不减一条判据。 */
   const recordedLine = painted(
     gateBody.slice(gateBody.indexOf("if (recorded.length)"), gateBody.indexOf("if (state.cards.length > 1)"))
   );
   check(
-    "已收录那一档拦下来时闸门点的是那一枚、说的是这个 id 已被上传过：那条行写在 gateItems 里，并说清它分不清谁上传的",
-    recordedLine.includes("这个 id 已被上传过") &&
-      recordedLine.includes("已从这一套里摘出去") &&
-      recordedLine.includes("它不进 manifest") &&
-      recordedLine.includes("签名那一串按剩下的") &&
-      recordedLine.includes("分不清是谁上传的") &&
-      recordedLine.includes("查不到还在待审的那一份") &&
+    "已收录那一档拦下来时闸门点的是那一枚、说的是这个 ID 已被上传过：那条行写在 gateItems 里，并说清它分不清谁上传的",
+    recordedLine.includes("该 ID 已有上传记录") &&
+      recordedLine.includes("已从本次上传移除") &&
+      recordedLine.includes("签名将按剩余") &&
+      recordedLine.includes("个模块重新计算") &&
+      recordedLine.includes("移除前填入的签名需要再次填写") &&
+      recordedLine.includes("无法确认上传者") &&
+      recordedLine.includes("无法查到仍在审核的记录") &&
       /namesOf\(recorded\)/.test(recordedLine),
     `那一段剥掉注释之后=${recordedLine.slice(0, 80).replace(/\s+/g, " ") || "(切不到)"}`
   );
@@ -2137,25 +2155,25 @@ async function main() {
   );
   const capPaint = paintBody.slice(paintBody.indexOf("cap.textContent ="), paintBody.indexOf("box.hidden = false;"));
   check(
-    "口令那一格说清容量（v2）：一串 19 个字符、覆盖本次这一整套、签名上限实测 60 个字符、只改一次签名",
+    "口令那一格说清容量（v2）：一串 19 个字符、覆盖本次上传的整套模块、签名最多 60 个字符、只需改一次签名",
     capPaint.includes("cap.textContent =") &&
       /\|\| 19\} 个字符/.test(capPaint) &&
-      /覆盖本次这一整套（\$\{set\.targets\.length\} 枚）/.test(capPaint) &&
-      /酷安签名上限实测 60 个字符/.test(capPaint) &&
-      /只改一次签名、一次提交整套/.test(capPaint) &&
-      /增删任一枚/.test(capPaint) &&
+      /覆盖本次上传（\$\{set\.targets\.length\} 个模块）/.test(capPaint) &&
+      /酷安签名最多 60 个字符/.test(capPaint) &&
+      /签名只需修改一次，整组一次提交/.test(capPaint) &&
+      /增删模块/.test(capPaint) &&
       !/一次大约放 3 条|改一次投一枚|15 个字符/.test(capPaint),
     capPaint.slice(0, 100)
   );
   // 两条边界不许藏：一条写在代码注释里，一条写在界面小字里。
   check(
     "边界的两条都写着：代码注释有 pending/ 那一条（要后端加一档状态，本轮不做）",
-    /pending\//.test(appSrc) && /要拦那一档得后端加一档状态/.test(appSrc)
+    /pending\//.test(appSrc) && /那一档这一轮拦不住/.test(appSrc)
   );
   check(
     "边界的两条也写在界面小字里：索引不带酷安 UID（分不清谁投的）+ 没合进索引的查不到",
-    /索引里不带酷安 UID/.test(appSrc) &&
-      /已经上传但还没合进索引的那些今天查不到/.test(appSrc) &&
+    /无法确认上传者/.test(appSrc) &&
+      /无法查到仍在审核的记录/.test(appSrc) &&
       /queue-note/.test(appSrc) &&
       /id="queue-note"/.test(formHtml)
   );
@@ -2195,16 +2213,16 @@ async function main() {
      「失败只算在这一枚上」这句旧话反过来钉一次不许回来：全有全无之下它会把零写入说成
      「别的枚已经上了」，那是另一种假话。原始目的没动 —— 界面上的结论与网络上真发生的事说同一件事。 */
   check(
-    "整套的诚实说法（§17.4 / §17.5）：一个结论说整套 + 逐枚报明细（落盘 sha256 是服务端实算那份），不许出现「一半传上了」那种状态",
+    "整套的诚实说法（§17.4 / §17.5）：一个结论说整套 + 逐枚报明细（落盘校验值是服务端实算那份），不许出现「只上传成功一部分」那种状态",
     !/本次投稿已提交|已经全部提交完成/.test(appSrc) &&
       !/失败只算在这一枚上/.test(appSrc) &&
       /const \{ pr, modules, session \} = await submitContribution\(payload/.test(appSrc) &&
-      /枚已受理，一个 PR 已开/.test(appSrc) &&
-      /这一次落盘的 \$\{res\.modules\.length\} 枚/.test(appSrc) &&
-      /服务端实算 sha256/.test(appSrc) &&
-      /语义全有全无/.test(appSrc) &&
-      /整单拒、一个 GitHub 写入都没发生/.test(appSrc) &&
-      /页面上不会出现「一半传上了」那种状态/.test(appSrc),
+      /个模块均已接收，审核已提交/.test(appSrc) &&
+      /本次保存的 \$\{res\.modules\.length\} 个模块/.test(appSrc) &&
+      /服务端实际计算的校验值/.test(appSrc) &&
+      /全有全无：任一模块未通过，整批退回/.test(appSrc) &&
+      /GitHub 上不会写入任何内容/.test(appSrc) &&
+      /不会出现只上传成功一部分的情况/.test(appSrc),
     `逐枚明细=${/这一次落盘的/.test(appSrc)} 全有全无那一句=${/语义全有全无/.test(appSrc)}`
   );
 
@@ -2252,8 +2270,8 @@ async function main() {
       /if \(state\.parsing\) \{\s*\n\s*state\.pendingSwitch = key;/.test(appSrc)
   );
   check(
-    "单枚不出现「本次要上传 N 枚」这种噪音：队列那一行只在 cards.length > 1 时进清单",
-    /if \(state\.cards\.length > 1\) \{[\s\S]{0,260}?队列里本次要上传 \$\{n\} 枚/.test(gateBody)
+    "单枚不出现「本次将上传 N 个模块」这种噪音：队列那一行只在 cards.length > 1 时进清单",
+    /if \(state\.cards\.length > 1\) \{[\s\S]{0,400}?队列中本次将上传 \$\{n\} 个模块/.test(gateBody)
   );
   check(
     "只有一枚时队列条退化成一行：安静档由 cards.length<=1 且没有摘出去的枚决定，标题与边界小字一起收（CSS 也在那一档）",
@@ -2263,8 +2281,8 @@ async function main() {
   );
   const singleProof = /nonceText = state\.cards\.length > 1/.test(gateBody);
   check(
-    "只有一枚时口令那句仍是原来那一句（「上传口令已生成（填进酷安签名）」原样留着）",
-    singleProof && gateBody.includes('"签名串已生成（请填进酷安签名）"'),
+    "只有一枚时签名那一句仍是原来那一句（「签名已生成（填入酷安签名）」原样留着）",
+    singleProof && gateBody.includes('"签名已生成（填入酷安签名）"'),
     "单枚的签名串文案被改写了"
   );
   check(
@@ -2298,6 +2316,9 @@ async function main() {
   const workerCandidates = [
     process.env.WORKER_SRC,
     "../../sukisu/contrib/worker/src/index.ts",
+    // 本仓库与 contrib 同为 H:\sukisu 下的兄弟目录（modules-site；selftest 从 tools/ 解析），
+    // ../../contrib 才是它，上面的 ../../sukisu/contrib 多套了一层。两项都留着：换机器布局不同。
+    "../../contrib/worker/src/index.ts",
     "../contrib/worker/src/index.ts",
   ].filter(Boolean);
   const workerPath = workerCandidates.map((p) => resolve(here, p)).find((p) => existsSync(p));
@@ -2416,8 +2437,16 @@ async function main() {
       check("网关 _routes.json 必须读得到（Worker 每条镜像路的隐形闸）", false, `找不到 ${gatewayPath}`);
     } else {
       const include = JSON.parse(readFileSync(gatewayPath, "utf8")).include || [];
+      // 网关可以把整站一次放行（当前就是 include: ["/*"]）：那不是「缺一条」，而是全部都收了。
+      // 按 include 的真实语义判覆盖：/* 通吃，带 * 的按前缀，其余按等值比；照字面量比对会翻成假红。
+      const gwCovers = (p) =>
+        include.some((inc) => {
+          if (inc === "/*") return true;
+          if (inc.endsWith("*")) return `/${p}`.startsWith(inc.slice(0, -1));
+          return inc === `/${p}`;
+        });
       const missing = ["index.json", "dispositions.json", "evidence/*"].filter(
-        (p) => !include.includes(`/${p}`)
+        (p) => !gwCovers(p)
       );
       // 两个方向都要对：网关少一条 = 线上静默 404；Worker 少一条而网关放着 = 放行一条不存在的路，
       // 白名单在这里没有意义，所以只比"名字都在两边"，不比顺序、不比别的路径。
@@ -2636,6 +2665,7 @@ async function main() {
   const dispCandidates = [
     process.env.REPO_DISPOSITIONS_SRC,
     "../../sukisu/contrib/repo/scripts/dispositions.mjs",
+    "../../contrib/repo/scripts/dispositions.mjs",
     "../contrib/repo/scripts/dispositions.mjs",
   ].filter(Boolean);
   const dispPath = dispCandidates.map((p) => resolve(here, p)).find((p) => existsSync(p));
@@ -2770,7 +2800,7 @@ async function main() {
 
     // 高仿头卡读的字段必须在 Worker 那份白名单里：不在就等于那一格永远显示「没采到」，
     // 而页面看起来仍然是对的（这一条就是 goods_count 那三个字段被发现没进快照的方式）。
-    const workerIdx = [process.env.WORKER_INDEX_SRC, "../../sukisu/contrib/worker/src/index.ts", "../contrib/worker/src/index.ts"]
+    const workerIdx = [process.env.WORKER_INDEX_SRC, "../../sukisu/contrib/worker/src/index.ts", "../../contrib/worker/src/index.ts", "../contrib/worker/src/index.ts"]
       .filter(Boolean).map((p) => resolve(here, p)).find((p) => existsSync(p));
     if (!workerIdx) {
       skip("头卡读的字段都在后端采到的那份白名单里", "找不到 worker/src/index.ts");
@@ -2853,20 +2883,23 @@ async function main() {
   );
   check(
     "没有 subject 的条目走降级那一格，措辞不是「没有处置」",
-    /pc-wall__none/.test(appSrc) && /所以下面按条那一层就是全部/.test(appSrc) && /只在下面按条那一层列出/.test(appSrc)
+    /pc-wall__none/.test(appSrc) &&
+      /因此下方按条列出的就是全部内容/.test(appSrc) &&
+      /仅在下方按条列出/.test(appSrc)
   );
   check(
     "证据取不到时说的是取不到，不是一片空白",
-    /es--miss/.test(appSrc) && /取不到 \$\{ref\.file\}（\$\{res\.reason\}）|—— \$\{res\.reason\}/.test(appSrc)
+    /es--miss/.test(appSrc) && /\$\{ref\.file\}：\$\{res\.reason\}/.test(appSrc)
   );
   // 03 那一层的语义整块换掉了（人工结论 → 机器章），而它对 main 上那 5 条旧形状的记录
   // 必须说不同的话：给一条评论 URL 戴上「机器章」的帽子，就是公示页在替它编一个不存在的凭据。
   const cssSrc = readFileSync(resolve(here, "../public/styles/panel.css"), "utf8");
   check(
-    "03 那一层按 by 的形状分两支：机器章说章、旧版评论说评论，且人工那一层不再存在",
+    "03 那一层按 by 的形状分两支：存档凭据说凭据、旧版评论说评论，且人工那一层不再存在",
     /bySeal\(item\.by\)/.test(appSrc) &&
-      /机器章：哪一次运行把这条处置钉死的/.test(appSrc) &&
-      /旧版处置的证据：一条能点开的评论/.test(appSrc) &&      !/ec__layer--human/.test(appSrc) &&
+      /存档凭据：该处置由哪一次运行写入/.test(appSrc) &&
+      /旧版处置证据：一条可打开的评论/.test(appSrc) &&
+      !/ec__layer--human/.test(appSrc) &&
       !/人工结论/.test(appSrc) &&
       !/function humanLayer/.test(appSrc),
     (appSrc.match(/ec__layer--human|人工结论|humanLayer/g) || []).join(",") || "形状齐"
@@ -2879,15 +2912,17 @@ async function main() {
   // 就是在替新版公示编一个并不存在的署名 —— 而这一页下面那 5 条旧记录确实还是评论，
   // 所以两种形状都要说到，缺一种就是假陈述。
   check(
-    "LEGEND 讲 by 的那一格：机器章与旧版评论两种形状都说到，且不再说「看那条评论的作者」",
-    /机器章/.test(appSrc) && /main 上还有换代前留下的记录/.test(appSrc) && !/看那条评论的作者/.test(appSrc),
+    "LEGEND 讲 by 的那一格：新记录说自动标记、换代前旧记录说评论链接两种形状都说到，且不再说「看那条评论的作者」",
+    /标明该处置由哪一次自动检查确定/.test(appSrc) &&
+      /换代前的旧记录以评论链接展示/.test(appSrc) &&
+      !/看那条评论的作者/.test(appSrc),
     (appSrc.match(/看那条评论的作者/g) || []).length + " 处旧说法还在"
   );
   check(
     "申诉段不再指人「去 by 那条 issue 回帖」，也不承诺有人来签",
     !html.includes("「证据」指向的 issue") &&
-      html.includes("在 issue 里说明这一条哪里不对") &&
-      html.includes("这里没有人可以签东西进来"),
+      html.includes("请在议题中说明具体哪一项判定有误") &&
+      html.includes("本站没有人工审批"),
     "申诉段形状不对"
   );
   check(
@@ -2900,8 +2935,8 @@ async function main() {
     /\.ck__cover \{[\s\S]{0,400}?#131a22/.test(cssSrc) && /\.ck__lv \{[\s\S]{0,200}?#23c76a/.test(cssSrc)
   );
   check(
-    "申诉地址没配置时写的是「还没配置」，不给假链接",
-    /还没配置索引仓库的 issue 地址/.test(appSrc)
+    "申诉地址没配置时写的是「尚未配置」，不给假链接",
+    /尚未配置申诉地址/.test(appSrc)
   );
   check(
     "config 里的申诉地址要么为空、要么是一条 https 的 issues 列表",
@@ -2912,6 +2947,7 @@ async function main() {
   const pubCandidates = [
     process.env.REPO_PUBLISH_SRC,
     "../../sukisu/contrib/repo/scripts/publish-from-main.mjs",
+    "../../contrib/repo/scripts/publish-from-main.mjs",
     "../contrib/repo/scripts/publish-from-main.mjs",
   ].filter(Boolean);
   const pubPath = pubCandidates.map((p) => resolve(here, p)).find((p) => existsSync(p));
@@ -3032,8 +3068,10 @@ async function main() {
       `画的函数体${paintBody ? "找到了" : "没找到"}；少一件就是页面上永远没有那一行，而 selftest 照样绿`
     );
     check(
-      "那一格说的两件事都在文案里：按枚数说、以及「截至」那一轮的时刻",
-      /还有 \$\{q\.artifacts\} 枚在等下架/.test(appSrc) && /截至 /.test(appSrc) && /由 \$\{q\.reports\} 条成立的举报/.test(appSrc)
+      "那一格说的两件事都在文案里：按模块数说、以及「截至」那一轮的时刻",
+      /尚有 \$\{q\.artifacts\} 个模块等待下架/.test(appSrc) &&
+        /截至 /.test(appSrc) &&
+        /来自 \$\{q\.reports\} 条成立的举报/.test(appSrc)
     );
   }
 
@@ -3111,7 +3149,7 @@ async function main() {
     // 正向那一半也不能丢：非会话档必须照旧画出来（否则这一改就是把整行删了了事）。
     check(
       "非会话档的确认层照旧画签名行（proofTextOf 仍在 openConfirm 里）",
-      /proofTextOf\(\)\.then\(/.test(ocBody) && /这一整套共用的签名: /.test(ocBody),
+      /proofTextOf\(\)\.then\(/.test(ocBody) && /本次上传共用的签名：/.test(ocBody),
       "整行被删掉了 —— 会话档之外的人再也看不到要抄的那一串"
     );
   }
@@ -3255,13 +3293,13 @@ async function main() {
 
     // ① 假陈述清干净：三处界面文案 + 一句成功页，全都不许再说「不会被自动合进索引」。
     check(
-      "版本更新这一档的正文不再说「不会被自动合进索引」，改说与首投同一套机器判据",
+      "版本更新这一档的正文不再说「不会被自动合进索引」，改说与首投同一套自动检查",
       checkExtraBody.length > 100 &&
         !/不会被自动合进索引/.test(codeOnly(checkExtraBody)) &&
-        /同一套机器判据/.test(checkExtraBody) &&
+        /同一套自动检查/.test(checkExtraBody) &&
         !/没有人可以签它进来/.test(codeOnly(apiSrc)) &&
         !/不会被自动合进索引/.test(CHECK_STATUS.version_update.hint) &&
-        /自动进索引/.test(CHECK_STATUS.version_update.hint),
+        /通过后进入索引/.test(CHECK_STATUS.version_update.hint),
       `CHECK_EXTRA=${checkExtraBody.length}ch hint=${CHECK_STATUS.version_update.hint.slice(0, 20)}…`
     );
     check(
@@ -3271,19 +3309,19 @@ async function main() {
       `tones=${["new", "version_update", "recorded", "unknown"].map((k) => CHECK_STATUS[k] && CHECK_STATUS[k].tone).join("/")}`
     );
     check(
-      "statusOf 的 version_update 分支：可上传走 ok、归属不符的那一枚不许跟着变绿",
-      /if \(status === "version_update"\) \{[\s\S]*?ownershipOf\(card\) === "other"[\s\S]*?tone: "warn"[\s\S]*?tone: "ok", text: "版本更新 · 可上传"/.test(
+      "statusOf 的 version_update 分支：可上传走 ok、归属不符的那一枚不许跟着变绿，且短标签认得这两个状态",
+      /if \(status === "version_update"\) \{[\s\S]*?ownershipOf\(card\) === "other"[\s\S]*?tone: "warn", text: "更新 · 非首发账号"[\s\S]*?tone: "ok", text: "更新 · 可上传"/.test(
         statusBody
       ) &&
-        /"版本更新 · 可上传": "更新"/.test(appSrc) &&
-        /"版本更新 · 不是你的": "非本人"/.test(appSrc),
-      `分支=${/版本更新 · 可上传/.test(statusBody)} 短标签=${/版本更新 · 不是你的/.test(appSrc)}`
+        /"更新 · 可上传": "可更新"/.test(appSrc) &&
+        /"更新 · 非首发账号": "非首发"/.test(appSrc),
+      `分支=${/更新 · 可上传/.test(statusBody)} 短标签=${/更新 · 非首发账号/.test(appSrc)}`
     );
     check(
       "成功页不再说「版本更新不会自动合入、没有人工放行这一格」",
       !/不会自动合入/.test(codeOnly(successBody)) &&
         !/人工放行/.test(codeOnly(successBody)) &&
-        /版本更新还多一道归属闸/.test(successBody),
+        /更新额外校验发布者身份：仅原作者可发布/.test(successBody),
       "成功页那句是用户读得最认真的一段，留着就是让人以为更新永远进不去"
     );
     check(
@@ -3293,7 +3331,8 @@ async function main() {
         !/可能一直进不去/.test(html) &&
         !/版本更新不自动合并/.test(html) &&
         html.includes('<li class="gate">') &&
-        /归属闸/.test(html) &&
+        /更新仅限归属人/.test(html) &&
+        /判定标准与首次上传相同/.test(html) &&
         !html.includes("人工审核"),
       "说明页还在教旧规矩，而上传页已经按新规矩放行"
     );
@@ -3413,7 +3452,7 @@ async function main() {
         SUBMIT_ERROR_TEXT.owner_unknown &&
         SUBMIT_ERROR_TEXT.owner_unknown.owner === "us" &&
         /首发/.test(SUBMIT_ERROR_TEXT.not_owner.text) &&
-        /fail-closed/.test(SUBMIT_ERROR_TEXT.owner_unknown.text),
+        /按最严规则拒绝/.test(SUBMIT_ERROR_TEXT.owner_unknown.text),
       `not_owner=${SUBMIT_ERROR_TEXT.not_owner && SUBMIT_ERROR_TEXT.not_owner.owner} owner_unknown=${SUBMIT_ERROR_TEXT.owner_unknown && SUBMIT_ERROR_TEXT.owner_unknown.owner}`
     );
     check(
@@ -3533,7 +3572,7 @@ async function main() {
       /const show = sessionFor\(uid\) && \(mine\.loading \|\| mine\.rows\.length > 0 \|\| mine\.degraded\);/.test(
         paintMineBody
       ) &&
-        /这次没读到公开索引，清单可能不全/.test(paintMineBody) &&
+        /本次未能读取模块库，清单可能不完整/.test(paintMineBody) &&
         !/clearSession\(\)/.test(loadMineBody) &&
         !/alert\(/.test(loadMineBody) &&
         /state\.mine\.asked = "";/.test(loadMineBody),
@@ -3575,18 +3614,18 @@ async function main() {
       "替他猜版本串等于替他发错版；给预填卡补 file 就等于绕开 submitTargets 那道过滤"
     );
     check(
-      "版本号必须大于已收录那一版（等号也不行），且这一格说的是「还没选包」而不是「坏包」",
+      "版本号必须大于已收录那一版（等号也不行），且这一格说的是「尚未选择安装包」而不是「坏包」",
       /const base = card\.fromMine \? Number\(card\.fromMine\.versionCode\) \|\| 0 : 0;/.test(gapsBody) &&
         /Number\(v\.versionCode\) <= base/.test(gapsBody) &&
-        /gaps\.push\("还没选包"\)/.test(gapsBody),
+        /gaps\.push\("尚未选择安装包"\)/.test(gapsBody),
       "混成一句会让从「我的模块」来的卡看起来像坏包，而它只是还没选包"
     );
     check(
       "卡上写出已收录的那一版读数，且编辑条不再裸用 cur.file.name（预填卡没有 file）",
       /zipcard__was/.test(appSrc) &&
         /\.zipcard__was \{/.test(cssSrc) &&
-        /当前已收录：/.test(appSrc) &&
-        /cur\.file \? cur\.file\.name : "还没选包"/.test(appSrc) &&
+        /线上版本：/.test(appSrc) &&
+        /cur\.file \? cur\.file\.name : "尚未选择安装包"/.test(appSrc) &&
         !/v\.id \|\| cur\.file\.name/.test(appSrc),
       "裸用 cur.file.name 会在预填卡上抛 TypeError，队列一多就整块画不出来"
     );

@@ -229,7 +229,7 @@
                 <span class="spec__v">根目录的 <b>module.prop</b></span>
               </div>
               <div class="spec__cell">
-                <span class="spec__k">账号要求</span>
+                <span class="spec__k">上传者账号要求</span>
                 <span class="spec__v">酷安 <b>Lv2 以上</b></span>
               </div>
               <div class="spec__cell">
@@ -648,6 +648,8 @@
                 每条下架记录都标明由哪一次自动检查判定，旁边的命令可由任何人重新执行核对。
                 <strong>本站没有人工审批</strong>，全部由自动检查完成；如需推翻结论，
                 请提交可被该检查验证的证据。
+                记录里的存档凭据写作 <code>ci:audit@&lt;40 位提交 SHA&gt;</code>：那是判定这条记录时留下的机器章，
+                任何人在仓库里按这一串都能定位到对应提交，复跑旁边那条命令。
               </p>
               <p class="inc-appeal__where" id="inc-appeal-where"></p>
               <p class="inc-appeal__note">
