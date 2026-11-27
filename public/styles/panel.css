@@ -356,7 +356,7 @@ code {
 .nav a::before {
   content: "";
   position: absolute;
-  inset: 4px 0;
+  inset: 0;
   z-index: -1;
   border: 1px solid transparent;
   border-radius: var(--r);
@@ -379,6 +379,11 @@ code {
   border-color: var(--amber-line);
   background: var(--amber-wash);
 }
+/* 点击/键盘焦点都收在这项自己的边框里，不外扩，避免看着比导航项大一圈。 */
+.nav a:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
 
 /* 日/夜切换：太阳与月亮两枚图标拼成的分段开关，琥珀色圆底是滑块，
    切主题时滑到另一枚下面去。整颗是一个按钮，点哪半边都切 ——
@@ -397,6 +402,7 @@ code {
   background: var(--void-2);
   color: var(--ink-3);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   transition: border-color 0.18s var(--ease), background 0.18s var(--ease);
 }
 /* 滑块画在伪元素上：位置只由 data-theme 决定，位移交给 CSS 过渡，
@@ -415,9 +421,6 @@ code {
 }
 [data-theme="dark"] .theme::before {
   transform: translateX(calc(var(--slot) + 2px));
-}
-.theme:hover {
-  border-color: var(--amber-line);
 }
 .theme:active {
   transform: translateY(1px);
@@ -495,9 +498,8 @@ main {
 }
 
 .hero {
-  padding-bottom: 24px;
-  border-bottom: 1px dashed var(--line-2);
-  margin-bottom: 26px;
+  padding-bottom: 18px;
+  margin-bottom: 16px;
 }
 /* 首页头部那一行：标题与「国内镜像」开关同排，开关靠右。
    其它屏的 hero 没有这一层，标题照旧独占一行。 */
@@ -2151,6 +2153,7 @@ mark {
    标题与卡片边框仍然贴着版心。 */
 .doc {
   max-width: none;
+  padding-top: 16px;
 }
 .doc h3 {
   margin: 26px 0 8px;
@@ -2161,9 +2164,12 @@ mark {
   align-items: baseline;
   gap: 10px;
 }
+.doc > h3:first-child {
+  margin-top: 0;
+}
 .doc h3 span {
-  font: 700 12px/1 var(--display);
-  letter-spacing: 0.1em;
+  font: 800 17px/1 var(--display);
+  letter-spacing: 0.04em;
   color: var(--amber);
 }
 .doc p {
@@ -2180,20 +2186,23 @@ mark {
 }
 .pains li {
   counter-increment: p;
-  padding: 13px 14px 13px 46px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  column-gap: 12px;
+  padding: 13px 14px;
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: var(--panel);
-  position: relative;
   font-size: 13.5px;
   color: var(--ink-2);
 }
+.pains__txt {
+  display: block;
+  min-width: 0;
+}
 .pains li::before {
   content: "0" counter(p);
-  position: absolute;
-  left: 14px;
-  top: 12px;
-  font: 700 13px/1.4 var(--display);
+  font: 700 13.5px/1.75 var(--display);
   color: var(--amber);
 }
 .pains b {
@@ -2497,7 +2506,7 @@ mark {
     font-size: 12.5px;
   }
   .nav a::before {
-    inset: 6px 0;
+    inset: 0;
   }
   /* 手机档只留当前主题那一枚图标：两枚并排要 60px，会把 390px 顶栏挤断行。
      另一枚直接 display:none；可读名字仍由 .theme__txt 与 aria-label 提供。
@@ -3151,6 +3160,10 @@ mark {
      外扩 5px 的透明热区补到 44×44。可读名字在 .theme__txt 里藏着，不要去动它。 */
   .theme {
     position: relative;
+  }
+  /* 触控/窄屏上点按后不要出现焦点外圈：点击态只保留圆形的图标本身。 */
+  .theme:focus-visible {
+    outline: none;
   }
   .theme::after {
     content: "";
@@ -4613,24 +4626,80 @@ html.kb-open .dock {
    ========================================================================== */
 
 #authbar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 4px 12px;
-  margin: 0 0 14px;
-  line-height: 1.75;
+  gap: 2px 12px;
+  margin: 0 0 16px;
+  padding: 16px 18px 15px;
+  border: 1px solid var(--amber-line);
+  border-radius: var(--r);
+  background:
+    radial-gradient(130% 170% at 0% 0%, var(--amber-wash), transparent 60%),
+    var(--panel);
+  box-shadow: 0 12px 30px -26px var(--shadow);
+  line-height: 1.7;
 }
 #authbar[hidden] {
   display: none;
 }
-#authbar a {
+.authbar__ico {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
   color: var(--amber);
-  text-decoration: none;
-  border-bottom: 1px solid var(--amber-line);
-  white-space: nowrap;
+  background: var(--amber-wash);
+  box-shadow: inset 0 0 0 1px var(--amber-line);
 }
-#authbar a:hover {
-  border-bottom-color: var(--amber);
+.authbar__ttl {
+  font: 700 15.5px/1.4 var(--sans);
+  letter-spacing: 0.01em;
+  color: var(--amber);
+}
+.authbar__sub {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.authbar__sub b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.authbar__cta {
+  grid-row: 1;
+  grid-column: 3;
+  justify-self: end;
+  padding: 9px 18px;
+  font-size: 13px;
+  text-decoration: none;
+}
+.authbar__arrow {
+  margin-left: 2px;
+  transition: transform 0.16s var(--ease);
+}
+.authbar__cta:hover .authbar__arrow {
+  transform: translateX(2px);
+}
+@media (max-width: 620px) {
+  #authbar {
+    padding: 14px 14px 13px;
+    gap: 2px 10px;
+  }
+  .authbar__ico {
+    width: 34px;
+    height: 34px;
+  }
+  .authbar__cta {
+    grid-row: 3;
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    justify-content: center;
+    margin-top: 8px;
+  }
 }
 
 /* ==========================================================================
