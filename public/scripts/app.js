@@ -144,6 +144,10 @@ const state = {
   // 它是「一次动作一个结论」那一格；卡上那份（card.ack）只装后端逐枚回执。
   batchResult: null,
   query: "",
+  // 模块库的「国内镜像」开关：只管下载按钮的地址。这里只是「默认开」这一个默认值，
+  // 真实取值在 bindMirror() 里从 localStorage 读回（状态对象在 MIRROR_KEY 之前初始化，
+  // 在字面量里直接读会踩 const 的 TDZ，读不到就成了永远默认开）。
+  mirror: true,
   turnstileToken: "",
   // 解析期间的视图租约：一批包是一张一张解析的（applyProp 只有一份，它写的是表单），
   // 所以解析中点别的卡先记下来，等这次解析交出租约再兑现。
@@ -3524,7 +3528,7 @@ async function submitIdentity() {
     const res = await issueIdentitySession({
       coolapkUid: uid,
       secret,
-      pledge: "pledge-v2",
+      pledge: "pledge-v3",
     });
     /* 成功一次就清零：这一对 (uid, commit) 的连续失败到此为止。
        顺手清掉「等级不足」那把锁 —— 能走到这里说明服务端这一次认了等级，而同一个 uid
@@ -4033,7 +4037,7 @@ function batchPayload() {
     uploader: fieldValue("uploader"),
     coolapkUid: fieldValue("coolapkUid"),
     // 承诺文本的版本号：一次整套勾一次那四条，所以它是顶层那一个字段，不逐枚重复。
-    pledge: "pledge-v2",
+    pledge: "pledge-v3",
     // 签名的随机部分：一次上传一份，覆盖这一整套。派生串不在这里算 —— 后端自己重算。
     nonce: state.nonce,
     // 会话凭据令牌（90 天免改签名）：属于输入框里这串 UID 才发。判据只有 sessionFor 一份，
@@ -4629,6 +4633,53 @@ function authorHomepage(m) {
   return normalizeCoolapkUserUrl(m.authorCoolapkUrl) || normalizeGithubUserUrl(m.authorGithubUrl) || "";
 }
 
+/* 模块下载镜像 ------------------------------------------------------------
+   索引里的 latest.zipUrl 指向 github.com 的 release 资产，国内直连时好时坏，
+   所以模块库给一个「国内镜像」开关：打开时把原始地址原样接到 CONFIG.GH_PROXY_PREFIX
+   后面（gh-proxy 的约定就是「前缀 + 原始地址」）。
+   只认 GitHub 的下载域名 —— 索引是外部数据，别的域名一律原样放行，绝不由我们
+   把陌生地址塞进第三方代理。开关状态存 localStorage，没存过就是默认开。 */
+const MIRROR_KEY = "sukisu-mirror";
+const GITHUB_ASSET_HOSTS = new Set([
+  "github.com",
+  "raw.githubusercontent.com",
+  "objects.githubusercontent.com",
+  "codeload.github.com",
+]);
+
+function readMirrorEnabled() {
+  try {
+    const raw = localStorage.getItem(MIRROR_KEY);
+    return raw === null ? true : raw === "1"; // 没存过 = 默认开
+  } catch {
+    return true; // 隐私模式下 localStorage 会抛，仍按默认开
+  }
+}
+
+function writeMirrorEnabled(on) {
+  try {
+    localStorage.setItem(MIRROR_KEY, on ? "1" : "0");
+  } catch {
+    /* 存不下只影响下次打开，当前页照常生效 */
+  }
+}
+
+/** 把 GitHub 下载地址换成镜像地址；不适用（开关关、前缀空、非 GitHub、已是镜像）就原样返回。 */
+function mirrorDownloadUrl(href) {
+  const prefix = String(CONFIG.GH_PROXY_PREFIX || "");
+  if (!state.mirror || !prefix || !href) return href;
+  if (href.startsWith(prefix)) return href;
+  let u;
+  try {
+    u = new URL(href);
+  } catch {
+    return href;
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return href;
+  if (!GITHUB_ASSET_HOSTS.has(u.hostname.toLowerCase())) return href;
+  return prefix + href;
+}
+
 /**
  * 列表行的两个身份（契约 §6 第 3 条）：「作者：<name>」与「上传者：<name>」并排，名字有主页就可点。
  *
@@ -4744,7 +4795,7 @@ function modRow(m, q) {
   const link = latest && safeUrl(latest.zipUrl);
   if (link) {
     const a = node("a", "mod__dl sp", "下载 ZIP");
-    a.href = link;
+    a.href = mirrorDownloadUrl(link); // 开关打开时改走 gh-proxy，关掉就直连
     a.target = "_blank";
     a.rel = "noopener noreferrer";
     ft.append(a);
@@ -5105,6 +5156,19 @@ function bindSearch() {
     if (parseHash().name === "index") renderIndex();
   }, 140);
   input.addEventListener("input", apply);
+}
+
+function bindMirror() {
+  const box = $("#ck-mirror");
+  if (!box) return; // 页面里没有这一格（旧缓存或裁剪版）就当开关不存在
+  state.mirror = readMirrorEnabled();
+  box.checked = state.mirror;
+  box.addEventListener("change", () => {
+    state.mirror = box.checked;
+    writeMirrorEnabled(state.mirror);
+    // 重画卡片，让下载地址当场换过来；重画不动工具条，复选框状态不会被重置
+    if (parseHash().name === "index") renderIndex();
+  });
 }
 
 function bindIncSearch() {
@@ -6297,6 +6361,7 @@ function init() {
   bindCheck();
   bindConfirm();
   bindSearch();
+  bindMirror();
   bindIncSearch();
   bindReport();
   bindTheme();

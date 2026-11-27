@@ -364,16 +364,16 @@
                   </div>
                   <div class="field span2">
                     <div class="field__lab"><label for="f-author-github">作者 GitHub 主页<span class="opt">选填</span></label></div>
-                    <input class="mono" type="text" id="f-author-github" data-k="authorGithubUrl" placeholder="https://github.com/octocat" autocomplete="off" spellcheck="false" />
+                    <input class="mono" type="text" id="f-author-github" data-k="authorGithubUrl" placeholder="https://github.com/username" autocomplete="off" spellcheck="false" />
                     <p class="field__help">
-                      作者<b>本人</b>的 GitHub 主页，例如 <b>https://github.com/octocat</b>；只填到用户名，不要带仓库名。
+                      作者<b>本人</b>的 GitHub 主页，例如 <b>https://github.com/username</b>；只填到用户名，不要带仓库名。
                     </p>
-                    <p class="field__err" data-err="authorGithubUrl">请填作者的个人主页，如 https://github.com/octocat</p>
+                    <p class="field__err" data-err="authorGithubUrl">请填作者的个人主页，如 https://github.com/username</p>
                     <p class="field__help" id="author-hint" hidden></p>
                   </div>
                   <div class="field span2">
                     <div class="field__lab"><label for="f-description">描述<span class="opt">选填</span></label></div>
-                    <textarea class="mono" id="f-description" data-k="description" placeholder="用一句话说明模块用途" rows="3"></textarea>
+                    <textarea id="f-description" data-k="description" placeholder="用一句话说明模块用途" rows="3"></textarea>
                   </div>
                 </div>
               </div>
@@ -476,6 +476,11 @@
               spellcheck="false"
             />
           </div>
+          <label class="mirror" for="ck-mirror" title="GitHub 直连在国内不稳定；打开后下载走 gh-proxy 镜像">
+            <input type="checkbox" id="ck-mirror" />
+            <span class="mirror__track" aria-hidden="true"></span>
+            <span class="mirror__txt">国内镜像</span>
+          </label>
           <span class="count" id="count"></span>
         </div>
 
@@ -824,7 +829,7 @@
             </p>
             <ul class="ticks ticks--flat">
               <li><span class="tick__txt">我上传的模块<b>不包含恶意代码</b>：不窃取账号、不擅自回传数据、不破坏系统与数据。</span></li>
-              <li><span class="tick__txt">我是<b>作者</b>，或该模块<b>已公开分享</b>，或<b>已获得作者授权</b>；所填来源真实可查。</span></li>
+              <li><span class="tick__txt">我是<b>作者</b>，或该模块<b>本身为公开分享</b>，或<b>已获得作者授权</b>；所填来源真实可查。</span></li>
               <li><span class="tick__txt">我上传的模块包中<b>不包含个人隐私、账号信息与密钥</b>。</span></li>
             </ul>
             <label class="tick tick--pledge" for="ck-pledge">
