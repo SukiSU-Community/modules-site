@@ -1161,6 +1161,87 @@ textarea:focus {
   color: var(--ink-3);
 }
 
+/* E 节订阅地址：地址单行显示，右侧一个复制图标 */
+.srcrow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 9px 9px 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--well);
+  min-width: 0;
+}
+.srcrow__url {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* 覆盖站点对 <code> 的默认药丸样式，容器由 .srcrow 提供 */
+  background: transparent;
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+  font: 400 12.5px/1.5 var(--mono);
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.srcrow__url::-webkit-scrollbar {
+  display: none;
+}
+.srcrow__copy {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--ink) 24%, var(--line-2));
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: color 0.16s var(--ease), border-color 0.16s var(--ease),
+    background 0.16s var(--ease);
+}
+.srcrow__copy:hover {
+  color: var(--amber);
+  border-color: var(--amber-line);
+  background: var(--amber-wash);
+}
+.srcrow__copy.is-copied {
+  color: var(--mint);
+  border-color: color-mix(in srgb, var(--mint) 50%, var(--line-2));
+}
+.srcrow__copy svg {
+  display: block;
+}
+/* 复制结果提示气泡：悬在图标左侧，短暂显示 */
+.srcrow__tip {
+  position: absolute;
+  right: 44px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 3px 9px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.16s var(--ease);
+}
+.srcrow__tip.is-show {
+  opacity: 1;
+}
+
 /* 状态卡 */
 .chip {
   display: inline-flex;

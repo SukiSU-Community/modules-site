@@ -6206,6 +6206,12 @@ function ledgerHitFor(q) {
 
 /* ---------------------------------------------------------------- 说明页 */
 
+// E 节订阅地址复制按钮用的两个图标（静态字符串，内容可信）。
+const ICON_COPY =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h8"></path></svg>';
+const ICON_CHECK =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>';
+
 function renderAbout() {
   const checks = [
     { k: "API_BASE", v: CONFIG.API_BASE || "未配置", ok: IS_API_CONFIGURED },
@@ -6264,34 +6270,84 @@ function renderAbout() {
   }
 
   const add = $("#addsrc");
+  if (!add) return;
   add.textContent = "";
-  if (CONFIG.SCHEME_ADD_SOURCE) {
-    const a = node("a", "btn btn--go btn--sm", "添加订阅源");
-    a.href = CONFIG.SCHEME_ADD_SOURCE;
-    add.append(a);
-  }
   if (IS_INDEX_CONFIGURED) {
-    const p = node("p", null, "在管理器的「仓库 / Repository」中添加以下订阅地址：");
-    const code = node("div", "term");
-    code.append(node("div", null, CONFIG.INDEX_URL));
-    const copy = node("button", "btn btn--ghost btn--sm", "复制地址");
+    add.append(
+      node("p", null, "在管理器的「仓库 / Repository」中添加以下订阅地址：")
+    );
+    // 订阅地址一行显示：地址占满剩余宽度且不换行；复制按钮做成剪贴板图标贴在右侧。
+    const row = node("div", "srcrow");
+    row.append(node("code", "srcrow__url", CONFIG.INDEX_URL));
+    // 复制结果提示（悬在图标左侧，短暂显示，兼作无障碍播报）
+    const tip = node("span", "srcrow__tip");
+    tip.setAttribute("role", "status");
+    tip.setAttribute("aria-live", "polite");
+    const copy = node("button", "srcrow__copy");
     copy.type = "button";
+    copy.title = "复制地址";
+    copy.setAttribute("aria-label", "复制地址");
+    copy.innerHTML = ICON_COPY;
     copy.addEventListener("click", async () => {
+      let tipTimer = 0;
+      const flashTip = (text) => {
+        tip.textContent = text;
+        tip.classList.add("is-show");
+        clearTimeout(tipTimer);
+        tipTimer = setTimeout(() => tip.classList.remove("is-show"), 1800);
+      };
+      const done = (ok) => {
+        copy.innerHTML = ok ? ICON_CHECK : ICON_COPY;
+        copy.classList.toggle("is-copied", ok);
+        copy.title = ok ? "已复制" : "复制失败，请手动选择地址";
+        flashTip(ok ? "已复制" : "复制失败，请长按选择地址");
+        if (!ok) {
+          const u = row.querySelector(".srcrow__url");
+          if (u) {
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(u);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        }
+        setTimeout(() => {
+          copy.innerHTML = ICON_COPY;
+          copy.classList.remove("is-copied");
+          copy.title = "复制地址";
+        }, 1800);
+      };
       try {
         await navigator.clipboard.writeText(CONFIG.INDEX_URL);
-        copy.textContent = "已复制";
+        done(true);
+        return;
       } catch {
-        copy.textContent = "无法自动复制，请手动选择";
+        /* 剪贴板 API 不可用（非安全上下文 / 未授权）时退回 execCommand */
       }
-      setTimeout(() => (copy.textContent = "复制地址"), 2200);
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = CONFIG.INDEX_URL;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.top = "-9999px";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand("copy");
+        ta.remove();
+        done(ok);
+      } catch {
+        done(false);
+      }
     });
-    add.append(p, code, node("br"), copy);
+    row.append(copy, tip);
+    add.append(row);
   } else {
     add.append(
       node(
         "span",
         null,
-        "在 config.js 中配置模块库地址（INDEX_URL）后，此处将显示订阅地址与添加订阅源按钮。"
+        "在 config.js 中配置模块库地址（INDEX_URL）后，此处将显示订阅地址。"
       )
     );
   }
