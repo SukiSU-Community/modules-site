@@ -6273,9 +6273,14 @@ function renderAbout() {
   if (!add) return;
   add.textContent = "";
   if (IS_INDEX_CONFIGURED) {
-    add.append(
-      node("p", null, "本管理器（TsukiSU）已预置这条订阅地址，无需手动添加；其他支持自定义模块仓库地址的 App，可在其「模块仓库 -自定义地址」中手动添加：")
-    );
+    const intro = node("p");
+    intro.append("本管理器（");
+    const brand = node("a", null, "TsukiSU");
+    brand.href = "https://github.com/yufeng-liang/TsukiSU";
+    brand.target = "_blank";
+    brand.rel = "noopener noreferrer";
+    intro.append(brand, "）已预置这条订阅地址，无需手动添加；其他支持自定义模块仓库地址的 App，可在其「模块仓库 -自定义地址」中手动添加：");
+    add.append(intro);
     // 订阅地址一行显示：地址占满剩余宽度且不换行；复制按钮做成剪贴板图标贴在右侧。
     const row = node("div", "srcrow");
     row.append(node("code", "srcrow__url", CONFIG.INDEX_URL));
