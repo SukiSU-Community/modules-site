@@ -18,11 +18,11 @@
   --line-hover: #4e5b70;
   --well: #0b0d12;
   --btn-hover: #2e3847;
-  --ph: #5d697c;
+  --ph: #8d99ab;
 
   --ink: #e9ecf3;
   --ink-2: #98a3b5;
-  --ink-3: #5f6a7b;
+  --ink-3: #8d99ab;
 
   /* --amber 一族：文字/描边用前景色，色块填充另开一组，
      因为浅色模式下可读的琥珀是深棕，而按钮底必须是亮的。 */
@@ -64,7 +64,7 @@
     "Noto Sans SC", "Microsoft YaHei", sans-serif;
 
   /* —— 度量 —— */
-  --r: 4px;
+  --r: 10px; /* 全站统一圆角：对齐移动端模块卡（10px）；胶囊类仍用 999px */
   --gut: 18px;
   --chamfer: 9px;
   --maxw: 940px;
@@ -84,11 +84,11 @@
   --line-hover: #b3aa96;
   --well: #fdfcf9;
   --btn-hover: #e7e2d8;
-  --ph: #8f887a;
+  --ph: #736d60;
 
   --ink: #15171b;
   --ink-2: #525a67;
-  --ink-3: #626a78;
+  --ink-3: #5b6370;
 
   --amber: #8a5300;
   --amber-2: #6d4000;
@@ -140,6 +140,9 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
+  /* 让页脚永远贴在视口底部：body 变纵向弹性容器，main 吃掉剩余高度。 */
+  display: flex;
+  flex-direction: column;
   padding-bottom: env(safe-area-inset-bottom);
   font-family: var(--sans);
   font-size: 15px;
@@ -209,7 +212,7 @@ code {
   font-size: 0.87em;
   padding: 1px 5px;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--r);
   background: var(--void-2);
   color: var(--amber);
   overflow-wrap: anywhere;
@@ -245,22 +248,10 @@ code {
   border-bottom: 1px solid var(--line);
 }
 
+/* 顶栏那条琥珀渐变整条去掉：既不做流光，也不留静态高光。
+   .bezel 自己的 border-bottom 已经是顶栏与内容的分界线。 */
 .bezel__rail {
-  height: 2px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--amber-fill) 22%,
-    var(--amber-hot) 42%,
-    transparent 62%
-  );
-  background-size: 240% 100%;
-  animation: rail 6.5s -2s linear infinite;
-}
-@keyframes rail {
-  to {
-    background-position: -240% 0;
-  }
+  display: none;
 }
 
 .bezel__in {
@@ -356,7 +347,7 @@ code {
   border-radius: var(--r);
   color: var(--nav-fg);
   text-decoration: none;
-  font-size: 13.5px;
+  font-size: 15px;
   white-space: nowrap;
   transition: color 0.16s var(--ease);
 }
@@ -371,12 +362,6 @@ code {
   border-radius: var(--r);
   background: transparent;
   transition: border-color 0.16s var(--ease), background 0.16s var(--ease);
-}
-.nav a i {
-  font: 600 10px/1 var(--mono);
-  font-style: normal;
-  color: var(--ink-3);
-  letter-spacing: 0.08em;
 }
 .nav a:hover {
   color: var(--ink);
@@ -394,47 +379,86 @@ code {
   border-color: var(--amber-line);
   background: var(--amber-wash);
 }
-.nav a[aria-current="page"] i {
-  color: var(--amber);
-}
 
-/* 日/夜切换 */
+/* 日/夜切换：太阳与月亮两枚图标拼成的分段开关，琥珀色圆底是滑块，
+   切主题时滑到另一枚下面去。整颗是一个按钮，点哪半边都切 ——
+   与 aria-label 说的是同一件事，不做两段各自可点。 */
 .theme {
+  --slot: 26px;
+  --pad: 3px;
   flex: none;
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
+  gap: 2px;
+  padding: var(--pad);
   border: 1px solid var(--line-2);
   border-radius: 999px;
   background: var(--void-2);
-  color: var(--ink-2);
-  font: 500 10px/1 var(--mono);
-  letter-spacing: 0.12em;
+  color: var(--ink-3);
   cursor: pointer;
-  transition: color 0.16s var(--ease), border-color 0.16s var(--ease),
-    background 0.16s var(--ease);
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease);
+}
+/* 滑块画在伪元素上：位置只由 data-theme 决定，位移交给 CSS 过渡，
+   于是切主题时它会从一枚图标滑到另一枚，而不是原地换色。 */
+.theme::before {
+  content: "";
+  position: absolute;
+  top: var(--pad);
+  left: var(--pad);
+  width: var(--slot);
+  height: var(--slot);
+  border-radius: 50%;
+  background: var(--amber-wash);
+  box-shadow: inset 0 0 0 1px var(--amber-line);
+  transition: transform 0.42s cubic-bezier(0.34, 1.22, 0.5, 1);
+}
+[data-theme="dark"] .theme::before {
+  transform: translateX(calc(var(--slot) + 2px));
 }
 .theme:hover {
-  color: var(--amber);
   border-color: var(--amber-line);
-  background: var(--amber-wash);
 }
 .theme:active {
   transform: translateY(1px);
 }
+.theme:focus-visible {
+  outline: 2px solid var(--amber-line);
+  outline-offset: 2px;
+}
+.theme__slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--slot);
+  height: var(--slot);
+  color: var(--ink-3);
+  transition: color 0.28s var(--ease);
+}
 .theme__ico {
-  width: 13px;
-  height: 13px;
+  width: 15px;
+  height: 15px;
+  transition: transform 0.42s cubic-bezier(0.34, 1.22, 0.5, 1);
 }
-.theme__ico--sun {
-  display: none;
+/* 没点亮的那一枚收小一点、太阳再歪一点：切换时看着是「转过来」，不是硬换色。 */
+.theme__slot--sun .theme__ico {
+  transform: rotate(-35deg) scale(0.9);
 }
-[data-theme="light"] .theme__ico--sun {
-  display: block;
+[data-theme="light"] .theme__slot--sun .theme__ico {
+  transform: none;
 }
-[data-theme="light"] .theme__ico--moon {
-  display: none;
+[data-theme="dark"] .theme__slot--moon,
+[data-theme="light"] .theme__slot--sun {
+  color: var(--amber);
+}
+/* 「夜间 / 日间」只留给读屏：图标本身已经把状态说完了。 */
+.theme__txt {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* 切主题的那一下给个短暂的颜色过渡，别硬跳 */
@@ -445,6 +469,11 @@ html.theming *::after {
   transition: background-color 0.22s var(--ease), border-color 0.22s var(--ease),
     color 0.22s var(--ease), fill 0.22s var(--ease) !important;
 }
+/* 上面那条统一过渡会把伪元素的 transition 一起改掉，滑块的位移就变成瞬移。
+   这里单独把 transform 还给它（选择器更具体，同 important 下后写者胜）。 */
+html.theming .theme::before {
+  transition: transform 0.42s cubic-bezier(0.34, 1.22, 0.5, 1) !important;
+}
 
 /* ==========================================================================
    版式
@@ -453,7 +482,9 @@ html.theming *::after {
 main {
   max-width: var(--maxw);
   margin: 0 auto;
-  padding: 26px var(--gut) 96px;
+  padding: 26px var(--gut) 44px;
+  width: 100%;
+  flex: 1 0 auto;
 }
 
 .view {
@@ -467,6 +498,14 @@ main {
   padding-bottom: 24px;
   border-bottom: 1px dashed var(--line-2);
   margin-bottom: 26px;
+}
+/* 首页头部那一行：标题与「国内镜像」开关同排，开关靠右。
+   其它屏的 hero 没有这一层，标题照旧独占一行。 */
+.hero__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 .hero__grid {
   display: grid;
@@ -606,12 +645,14 @@ h2 {
   left: -1px;
   border-right: 0;
   border-bottom: 0;
+  border-top-left-radius: var(--r);
 }
 .panel::after {
   right: -1px;
   bottom: -1px;
   border-left: 0;
   border-top: 0;
+  border-bottom-right-radius: var(--r);
 }
 .panel--dim {
   background: var(--void-2);
@@ -671,7 +712,7 @@ h2 {
 .field__lab .opt {
   color: var(--ink-3);
   border: 1px solid var(--line-2);
-  border-radius: 3px;
+  border-radius: var(--r);
   padding: 1px 5px;
   font-size: 11px;
   letter-spacing: 0.04em;
@@ -680,7 +721,7 @@ h2 {
 .field__lab .auto {
   color: var(--amber);
   border: 1px solid var(--amber-line);
-  border-radius: 3px;
+  border-radius: var(--r);
   padding: 1px 5px;
   font-size: 11px;
   letter-spacing: 0.04em;
@@ -1031,7 +1072,7 @@ textarea:focus {
   margin: 0 0 8px;
   padding: 3px 8px;
   border: 1px solid var(--line-2);
-  border-radius: 3px;
+  border-radius: var(--r);
   background: none;
   color: var(--ink-3);
   font: 500 11px/1.6 var(--mono);
@@ -1301,7 +1342,7 @@ textarea:focus {
   height: 19px;
   margin: 1px 0 0;
   border: 1px solid var(--line-2);
-  border-radius: 3px;
+  border-radius: var(--r);
   background: var(--well);
   display: grid;
   place-items: center;
@@ -1672,12 +1713,19 @@ textarea:focus {
 .mirror {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  /* 与搜索框（16px 字号 + 10px 上下内边距，约 42px 高）对齐：这里用 42px 的最小高度
+     把文字与开关一起垂直居中，读起来是同一行控件，而不是贴在右边的一行小注。 */
+  min-height: 42px;
+  padding: 0 2px;
   cursor: pointer;
-  font: 500 11.5px/1.6 var(--mono);
-  letter-spacing: 0.06em;
-  color: var(--ink-3);
+  font: 600 13px/1.25 var(--mono);
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
   user-select: none;
+}
+.mirror:hover {
+  color: var(--ink);
 }
 .mirror input {
   position: absolute;
@@ -1692,9 +1740,9 @@ textarea:focus {
 }
 .mirror__track {
   position: relative;
-  width: 30px;
-  height: 17px;
-  flex: 0 0 30px;
+  width: 40px;
+  height: 22px;
+  flex: 0 0 40px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: transparent;
@@ -1705,8 +1753,8 @@ textarea:focus {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 11px;
-  height: 11px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: var(--ink-3);
   transition: transform 0.16s ease, background 0.16s ease;
@@ -1716,12 +1764,44 @@ textarea:focus {
   border-color: var(--amber-line);
 }
 .mirror input:checked + .mirror__track::after {
-  transform: translateX(13px);
+  transform: translateX(18px);
   background: var(--amber-fill);
 }
 .mirror input:focus-visible + .mirror__track {
   outline: 2px solid var(--amber);
-  outline-offset: 2px;
+  outline-offset: 3px;
+}
+/* 窄屏：工具条本来就换行了，横着再挤一次会把「国内镜像」压成一小截；
+   改成文字在上、开关在下两块叠放，用竖着的那点空间，阅读顺序也先看到名字再看到状态。 */
+@media (max-width: 620px) {
+  .mirror {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    min-height: 0;
+    padding: 2px 0;
+    font-size: 13px;
+  }
+  .mirror__txt {
+    order: -1; /* DOM 里开关在前，这里把文字提到上面 */
+  }
+  /* 竖排后 flex-basis 落在高度轴上，会把 40×22 的轨道撑成 40×40 的圆；
+     这里退回内容尺寸，让它保持胶囊形。 */
+  .mirror__track {
+    flex: none;
+    width: 44px;
+    height: 24px;
+    border-radius: 999px;
+  }
+  .mirror__track::after {
+    width: 18px;
+    height: 18px;
+    top: 2px;
+    left: 2px;
+  }
+  .mirror input:checked + .mirror__track::after {
+    transform: translateX(20px);
+  }
 }
 
 .mods {
@@ -1753,7 +1833,7 @@ textarea:focus {
 }
 .sk {
   height: 11px;
-  border-radius: 3px;
+  border-radius: var(--r);
   background: linear-gradient(90deg, var(--panel-2) 0%, var(--panel-3) 50%, var(--panel-2) 100%);
   background-size: 200% 100%;
   animation: sk-sweep 1.15s var(--ease) infinite;
@@ -1814,27 +1894,38 @@ textarea:focus {
   font: 400 11.5px/1.7 var(--mono);
   color: var(--ink-3);
 }
+/* 桌面档这两层容器只是包装，不影响原来的平铺布局。 */
+.mod__meta,
+.mod__meta-r {
+  display: contents;
+}
 .mod__ft .sp {
   margin-left: auto;
 }
+/* 下载是每张卡唯一的主操作：给一块实心琥珀，别让它和旁边那串灰读数一个分量。 */
 .mod__dl {
-  color: var(--amber);
+  /* 白字压一点阴影，亮琥珀底上也不至于糊成一片。 */
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(60, 30, 0, 0.45);
   text-decoration: none;
-  border: 1px solid var(--amber-line);
-  border-radius: 3px;
-  padding: 3px 9px;
-  font-weight: 500;
-  transition: background 0.16s var(--ease);
+  background: var(--amber-fill);
+  border: 1px solid var(--amber-fill);
+  border-radius: var(--r);
+  padding: 5px 12px;
+  font-weight: 600;
+  transition: filter 0.16s var(--ease), transform 0.16s var(--ease);
 }
 .mod__dl:hover {
-  background: var(--amber-wash);
+  background: var(--amber-fill);
+  filter: brightness(1.12);
+  transform: translateY(-1px);
 }
 /* 举报入口排在那一串读数后面、下载按钮左边：它不该抢下载的视觉权重，所以不套琥珀那套。 */
 .mod__rep {
   color: var(--ink-2);
   text-decoration: none;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--r);
   padding: 3px 9px;
   transition: color 0.16s var(--ease), border-color 0.16s var(--ease);
 }
@@ -1861,6 +1952,11 @@ textarea:focus {
 .mod__who-k {
   color: var(--ink-3);
 }
+/* 作者与上传者之间、两个平台主页之间的分隔斜杠 */
+.mod__who-sep {
+  color: var(--ink-3);
+  margin: 0 1px;
+}
 .mod__who-a {
   color: var(--ink-2);
   text-decoration: none;
@@ -1878,11 +1974,12 @@ textarea:focus {
 }
 /* 「未验证」是这一行的免责声明：给一圈细边就够，别用亮色，让它比名字还抢眼 */
 .mod__who-tag {
+  margin-left: 4px;
   font-size: 10.5px;
   letter-spacing: 0.04em;
   color: var(--ink-3);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--r);
   padding: 0 4px;
   cursor: help;
 }
@@ -1926,7 +2023,7 @@ textarea:focus {
 mark {
   background: var(--amber-wash);
   color: var(--amber);
-  border-radius: 2px;
+  border-radius: var(--r);
   padding: 0 1px;
 }
 
@@ -2188,8 +2285,9 @@ mark {
 
 .nameplate {
   max-width: var(--maxw);
-  margin: 0 auto;
-  padding: 18px var(--gut) 26px;
+  margin: auto auto 0;
+  width: 100%;
+  padding: 14px var(--gut) 14px;
   border-top: 1px solid var(--line);
   display: flex;
   gap: 10px 18px;
@@ -2393,9 +2491,6 @@ mark {
   .nav {
     gap: 2px;
   }
-  .nav a i {
-    display: none;
-  }
   .nav a {
     gap: 0;
     padding: 9px 6px;
@@ -2404,18 +2499,24 @@ mark {
   .nav a::before {
     inset: 6px 0;
   }
+  /* 手机档只留当前主题那一枚图标：两枚并排要 60px，会把 390px 顶栏挤断行。
+     另一枚直接 display:none；可读名字仍由 .theme__txt 与 aria-label 提供。
+     只剩一枚时滑块就停在它正下方，不跟着 translate 走。 */
+  /* 手机档只剩一枚图标：外层这圈边框与底色去掉，否则琥珀滑块外面再套一圈，看着是两个圈。 */
   .theme {
+    --slot: 26px;
+    --pad: 3px;
     position: relative;
-    padding: 6px;
+    gap: 0;
+    border-color: transparent;
+    background: transparent;
   }
-  /* 不用 display:none —— 那样按钮就没有可读名字了；只把它从视觉上收掉。 */
-  .theme span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+  .theme::before {
+    transform: none !important;
+  }
+  [data-theme="dark"] .theme__slot--sun,
+  [data-theme="light"] .theme__slot--moon {
+    display: none;
   }
 }
 
@@ -2547,7 +2648,7 @@ mark {
   color: var(--ink-2);
   background: var(--void-2);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--r);
   padding: 2px 7px;
 }
 .pc__open {
@@ -2598,7 +2699,7 @@ mark {
        且它在视觉上跟我们的界面隔开，一眼是「外部平台的数据」）。 ---- */
 .ck {
   border: 1px solid #2b3340;
-  border-radius: 6px;
+  border-radius: var(--r);
   overflow: hidden;
   background: #12161d;
   max-width: 560px;
@@ -2774,7 +2875,7 @@ mark {
 }
 .ec__layer {
   padding: 10px 12px;
-  border-radius: 3px;
+  border-radius: var(--r);
 }
 .ec__layer--facts {
   border: 1px solid var(--line-2);
@@ -2875,7 +2976,7 @@ mark {
 .ec__fse {
   padding: 0 6px;
   border: 1px solid var(--red-line);
-  border-radius: 2px;
+  border-radius: var(--r);
   color: var(--red);
 }
 .ec__floc {
@@ -2898,7 +2999,7 @@ mark {
 .es {
   padding: 10px 12px;
   border: 1px solid var(--mint-line);
-  border-radius: 3px;
+  border-radius: var(--r);
   background: var(--mint-wash);
 }
 .es--miss {
@@ -3046,15 +3147,15 @@ mark {
   .nav a {
     min-height: 44px;
   }
-  /* 主题开关实际只有 27×27：外扩 9px 的透明热区到 45×45。
-     可读名字仍在 .theme span 里用 clip-path 藏着，不要去动它。 */
+  /* 主题开关桌面档 34×34、手机档 34×34（单枚 24 + 4 边 + 1 边线），
+     外扩 5px 的透明热区补到 44×44。可读名字在 .theme__txt 里藏着，不要去动它。 */
   .theme {
     position: relative;
   }
   .theme::after {
     content: "";
     position: absolute;
-    inset: -9px;
+    inset: -5px;
   }
   /* 帮助行里的句内小链接只有 18px 高。扩到 24px：
      句内链本来就在 WCAG 2.5.8 的豁免清单里，这里只是不想太抠。 */
@@ -3487,7 +3588,7 @@ mark {
 .stage__dot.is-on {
   background: var(--amber);
   width: 16px;
-  border-radius: 3px;
+  border-radius: var(--r);
 }
 
 /* 窄屏：只留主卡，露头与箭头都收掉，靠左右滑动切换 */
@@ -4274,7 +4375,7 @@ mark {
   /* 页面末尾的留白：96px 是按桌面「一行读完」的节奏给的，手机上等于小半屏空白。
      上传页另有 108px 给 dock 让位（见上面那个按屏区分的规则），这里不碰它。 */
   main {
-    padding-bottom: 64px;
+    padding-bottom: 36px;
   }
 }
 
@@ -4628,7 +4729,7 @@ html.kb-open .dock {
 /* —— 4. 层标题：编号做成实心小方块，标题拉开字距 —— */
 .ec__layer {
   padding: 12px 14px;
-  border-radius: 4px;
+  border-radius: var(--r);
 }
 .ec__hd {
   gap: 8px;
@@ -4642,7 +4743,7 @@ html.kb-open .dock {
   min-width: 20px;
   height: 18px;
   padding: 0 4px;
-  border-radius: 2px;
+  border-radius: var(--r);
   background: var(--ink);
   color: var(--bg);
   font: 700 10px/1 var(--mono);
@@ -4728,7 +4829,7 @@ html.kb-open .dock {
   aspect-ratio: 1 / 1;
   padding: 0;
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--r);
   background: var(--panel);
   overflow: hidden;
   isolation: isolate;
@@ -4898,6 +4999,219 @@ html.kb-open .dock {
     display: flex;
     max-width: none;
     margin: 9px 0 0;
+  }
+}
+
+/* ==========================================================================
+   模块卡 · 右上角「更多」：源码信息与举报都收进这一层
+   卡片本身只留「这是什么、谁做的、怎么下载」，核对类的内容点开才出现。
+   ========================================================================== */
+.mod {
+  position: relative;
+}
+.mod__hd {
+  padding-right: 34px;
+}
+.mod__more {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.mod__more-sum {
+  list-style: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r);
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+.mod__more-sum::-webkit-details-marker {
+  display: none;
+}
+.mod__more-sum::before {
+  content: "⋯";
+  font-size: 20px;
+  line-height: 1;
+  transform: translateY(-2px);
+}
+.mod__more-sum:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+.mod__more[open] .mod__more-sum {
+  background: var(--amber-wash);
+  color: var(--amber);
+}
+.mod__menu {
+  position: absolute;
+  top: 34px;
+  right: 0;
+  z-index: 20;
+  width: min(78vw, 300px);
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.32);
+}
+.mod__menu .mod__repo {
+  margin-top: 0;
+}
+.mod__repo-t {
+  margin-bottom: 4px;
+  color: var(--ink-2);
+}
+/* 举报是危险操作：这一项用警示红，别和「源码信息」那类中性读数混成一个色。 */
+.mod__menu-rep {
+  display: block;
+  margin-top: 10px;
+  padding: 7px 8px;
+  border-top: 1px dashed var(--line);
+  border-radius: var(--r);
+  color: var(--red);
+  font: 600 12.5px/1.6 var(--mono);
+  text-decoration: none;
+  transition: background 0.16s var(--ease);
+}
+.mod__menu-rep:hover {
+  background: var(--red-wash);
+}
+
+/* ==========================================================================
+   模块卡 · 手机档
+   头部：名称/ID 一行，⋯ 贴右上；署名竖排；读数在左、下载按钮压右下。
+   ========================================================================== */
+@media (max-width: 620px) {
+  /* 首页：读数与搜索框之间不留分割线，也收紧这段距离。 */
+  #view-index .hero {
+    padding-bottom: 8px;
+    border-bottom: 0;
+    margin-bottom: 12px;
+  }
+  #view-index .hero__row {
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 10px;
+  }
+  #view-index .hero__row h1 {
+    margin-bottom: 0;
+  }
+  /* 开关在标题这一行，但文字与轨道分两行：文字在上、开关在下，整体靠右。 */
+  #view-index .hero__row .mirror {
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    min-height: 0;
+    padding: 0;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  #view-index .hero__row .mirror__txt {
+    order: -1;
+    text-align: center;
+  }
+  #view-index .hero__row .mirror__track {
+    flex: none;
+    width: 38px;
+    height: 21px;
+  }
+  #view-index .hero__row .mirror__track::after {
+    width: 15px;
+    height: 15px;
+  }
+  #view-index .hero__row .mirror input:checked + .mirror__track::after {
+    transform: translateX(17px);
+  }
+  /* 搜索框与「x 个 / 共 x」同一行：搜索占满，读数靠右。 */
+  #view-index .tools {
+    flex-wrap: nowrap;
+    gap: 10px;
+    margin-top: 0;
+  }
+  #view-index .search {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  #view-index .count {
+    margin-left: 0;
+    flex: none;
+    white-space: nowrap;
+  }
+
+  .mod {
+    padding: 12px 12px 11px;
+    border-radius: 10px;
+  }
+  .mod:hover {
+    transform: none;
+  }
+  .mod__hd {
+    gap: 6px 8px;
+    padding-right: 30px;
+  }
+  .mod__nm {
+    font-size: 15.5px;
+  }
+  .mod__ds {
+    margin-top: 5px;
+    font-size: 13px;
+  }
+  .mod__who {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    margin-top: 9px;
+    font-size: 12px;
+  }
+  .mod__who-item {
+    gap: 4px;
+  }
+  .mod__ft {
+    margin-top: 11px;
+    padding-top: 0;
+    border-top: 0;
+    gap: 4px 12px;
+    align-items: stretch;
+    flex-wrap: nowrap;
+  }
+  /* 读数两行：版本/大小顶到按钮上边，日期底到按钮下边，中间用 space-between 撑开。 */
+  .mod__meta {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    line-height: 1.35;
+  }
+  .mod__meta-r {
+    display: flex;
+    gap: 3px 10px;
+    flex-wrap: wrap;
+  }
+  /* 手机上按钮纵高收一档：它只是卡片里的一个动作，不该占掉半行高度。 */
+  .mod__dl {
+    margin-left: auto;
+    align-self: stretch;
+    display: inline-flex;
+    align-items: center;
+    min-height: 0;
+    padding: 2px 13px;
+    border-radius: var(--r);
+    font-size: 12.5px;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+  .mod__more {
+    top: 6px;
+    right: 6px;
+  }
+  .mod__more-sum {
+    width: 34px;
+    height: 34px;
   }
 }
 

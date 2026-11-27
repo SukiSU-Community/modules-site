@@ -708,14 +708,14 @@ async function main() {
   const rpPanel = (modHtml.match(/<div id="panel-report"[\s\S]*?<\/div>\s*\n\s*<div id="panel-ledger"/) || [""])[0];
   check(
     "举报那半的三处在位：nav 有一条合并后的入口、VIEWS 指对容器、面板自己有 aria-labelledby",
-    /<a href="#\/moderation\?tab=ledger"><i>03<\/i>举报与处置<\/a>/.test(formHtml) &&
+    /<a href="#\/moderation\?tab=ledger">举报与处置<\/a>/.test(formHtml) &&
       /moderation: \{ el: "#view-moderation"/.test(appSrc) &&
       /id="view-moderation" aria-labelledby="h-moderation"/.test(modHtml) &&
       /<h1 id="h-moderation">/.test(modHtml) &&
       /<div id="panel-report" role="tabpanel" aria-labelledby="tab-report"/.test(modHtml) &&
       /<div id="panel-ledger" role="tabpanel" aria-labelledby="tab-ledger"/.test(modHtml) &&
-      (formHtml.match(/<i>03<\/i>/g) || []).length === 1,
-    "nav/VIEWS/section 任一处缺就是这一屏进不去，或编号有两种说法"
+      (formHtml.match(/<i>0\d<\/i>/g) || []).length === 0,
+    "nav/VIEWS/section 任一处缺就是这一屏进不去，或导航里又冒出 01 这类编号"
   );
   check(
     "切换器是真 tablist：两枚 role=tab、各带 aria-controls，选中态与键盘都靠 JS 收尾",
@@ -802,9 +802,12 @@ async function main() {
   );
   check(
     "举报入口只在索引给得出 64 位 sha256 时才出现（口令来源不齐就别许诺这枚报得了）",
-    /if \(latest && SHA256_HEX_RE\.test\(String\(latest\.sha256 \|\| ""\)\)\) \{[\s\S]{0,240}#\/moderation\?tab=report&id=/.test(
+    /const canReport = Boolean\(latest && SHA256_HEX_RE\.test\(String\(latest\.sha256 \|\| ""\)\)\);/.test(
       appSrc
-    )
+    ) &&
+      /if \(canReport\) \{[\s\S]{0,240}#\/moderation\?tab=report&id=/.test(
+        appSrc.slice(appSrc.indexOf("function modMenu("), appSrc.indexOf("\n}", appSrc.indexOf("function modMenu(")))
+      )
   );
   check(
     "举报页把「这一发不动索引」与「之后由逐字复验决定下架」都写在界面上，且不承诺有人在签",
@@ -1493,8 +1496,8 @@ async function main() {
       !/以上三条/.test(confirmSlice)
   );
   /* 承诺的版本号与那段文案必须绑在一起。
-     归档里那句「他接受过承诺」以后是要被人拿出来的，它的可辩护性全靠「pledge-v2 指的是哪段话」
-     还答得出来：文案改了而版本号照旧，归档就写着「他接受过 pledge-v2」，而 pledge-v2 今天指的
+     归档里那句「他接受过承诺」以后是要被人拿出来的，它的可辩护性全靠「pledge-v3 指的是哪段话」
+     还答得出来：文案改了而版本号照旧，归档就写着「他接受过 pledge-v3」，而 pledge-v3 今天指的
      已经不是用户当时勾的那段话 —— 这一句就成了假话，且没有任何一处会报错。
      所以两条必须**同时**成立，缺一条就算红；版本字面量也在本文件里钉死一份，
      不让它靠「和 Worker 同值」那条跨仓库检查来兜 —— fork 里那条根本不跑。
@@ -1507,8 +1510,8 @@ async function main() {
   })();
   const pledgeSent = /pledge:\s*["']([^"']+)["']/.exec(appSrc)?.[1] ?? "";
   check(
-    "承诺版本字面量与身份页三条绑在一起：pledge-v2、「不窃取账号」、「承诺与账号一并存档」必须同时存在",
-    pledgeSent === "pledge-v2" &&
+    "承诺版本字面量与身份页三条绑在一起：pledge-v3、「不窃取账号」、「承诺与账号一并存档」必须同时存在",
+    pledgeSent === "pledge-v3" &&
       identitySlice.includes("不窃取账号") &&
       identitySlice.includes("承诺与账号一并存档"),
     `app.js 发的 pledge=${JSON.stringify(pledgeSent)}，身份页有「不窃取账号」=${identitySlice.includes("不窃取账号")}、有「承诺与账号一并存档」=${identitySlice.includes("承诺与账号一并存档")}`
@@ -1862,35 +1865,37 @@ async function main() {
     appSrc.indexOf("function authorHomepage("),
     appSrc.indexOf("\n}", appSrc.indexOf("function authorHomepage("))
   );
-  const authEvBody = appSrc.slice(
-    appSrc.indexOf("function authorEvidence("),
-    appSrc.indexOf("\n}", appSrc.indexOf("function authorEvidence("))
-  );
   const modRowBody = appSrc.slice(appSrc.indexOf("function modRow("), appSrc.indexOf("\n}", appSrc.indexOf("function modRow(")));
+  const modMenuBody = appSrc.slice(
+    appSrc.indexOf("function modMenu("),
+    appSrc.indexOf("\n}", appSrc.indexOf("function modMenu("))
+  );
   check(
-    "列表行两个身份：作者与上传者并排，名字有主页才画链接，作者那侧永远带「未核实」",
-    whoBody.includes('"作者"') &&
+    "列表行两个身份：作者拆成酷安/GitHub 两条链接，上传者有 UID 才有链接，声明链接一律标「未核实」",
+    whoBody.includes("作者：") &&
       whoBody.includes('"上传者"') &&
       whoBody.includes('"未核实"') &&
       whoBody.includes("authorHomepage(m)") &&
       whoBody.includes("uploaderCoolapkUrl(m.coolapkUid)") &&
       whoBody.includes("safeUrl(") &&
       whoBody.includes("if (!name && !link) return null;") &&
+      whoBody.includes("酷安@") &&
+      whoBody.includes("GitHub@") &&
       homepageBody.includes("normalizeCoolapkUserUrl(m.authorCoolapkUrl)") &&
       homepageBody.includes("normalizeGithubUserUrl(m.authorGithubUrl)"),
     whoBody.slice(0, 80)
   );
   check(
-    "作者主页那一行：没有链接就整个不画（不留空壳），有链接才挂「由上传者代填，未核实」",
-    authEvBody.includes('"作者主页（由上传者代填，未核实）"') &&
-      authEvBody.includes("if (!links.length) return null;") &&
-      authEvBody.includes("normalizeCoolapkUserUrl(m.authorCoolapkUrl)") &&
-      authEvBody.includes("normalizeGithubUserUrl(m.authorGithubUrl)") &&
-      authEvBody.includes("safeUrl(") &&
+    "作者主页不再单开一块：两平台链接并进署名行，源码信息与举报都收进右上角「更多」",
+    !appSrc.includes("作者主页（由上传者代填，未核实）") &&
+      !appSrc.includes("function authorEvidence(") &&
       modRowBody.includes("whoRow(m)") &&
-      modRowBody.includes("authorEvidence(m)") &&
-      !modRowBody.includes("by ${m.author}"),
-    authEvBody.slice(0, 80)
+      modRowBody.includes("modMenu(m, latest)") &&
+      !modRowBody.includes("authorEvidence(m)") &&
+      !modRowBody.includes("by ${m.author}") &&
+      modMenuBody.includes("repoEvidence(m)") &&
+      modMenuBody.includes("举报该模块"),
+    modRowBody.slice(0, 80)
   );
   const authorCoolapkInput = /<input[^>]*id="f-author-coolapk"[^>]*>/.exec(appHtml)?.[0] || "";
   const authorGithubInput = /<input[^>]*id="f-author-github"[^>]*>/.exec(appHtml)?.[0] || "";

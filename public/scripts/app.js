@@ -3843,7 +3843,7 @@ function openConfirm() {
     const block = node("div", "warn__mod");
     const head = node("div", "warn__mod-hd");
     head.append(node("b", null, `第 ${i + 1} 个 · ${v.id || "（未填写 ID）"}`));
-    head.append(node("span", null, `${v.name || "—"} · ${v.version ? `v${String(v.version).replace(/^v/i, "")}` : "—"} · 版本代号 ${v.versionCode || "—"} · ${card.file ? fmtBytes(card.file.size) : "—"}`));
+    head.append(node("span", null, `${v.name || "—"} · ${v.version ? `v${String(v.version).replace(/^v/i, "")}` : "—"} · ${card.file ? fmtBytes(card.file.size) : "—"}`));
     block.append(head);
     block.append(
       node(
@@ -4591,8 +4591,8 @@ function repoFact(key, value) {
  * 索引里没有的格子整行不画 —— 这里每一行都是可选的，「没采到」写满一屏反而看不出哪条要紧。
  */
 function repoEvidence(m) {
-  const box = node("details", "mod__repo");
-  box.append(node("summary", "mod__repo-sum", "源码信息"));
+  const box = node("div", "mod__repo");
+  box.append(node("div", "mod__repo-t", "源码信息"));
   if (!m.repoUrl) {
     box.append(node("p", "mod__repo-none", "作者未提供公开源码"));
     return box;
@@ -4688,17 +4688,40 @@ function mirrorDownloadUrl(href) {
  * 空壳会让人以为「这个人的主页丢了」。
  */
 function whoRow(m) {
-  const authorName = String(m.author || "").trim();
-  const authorRaw = authorHomepage(m);
-  const authorLink = authorRaw ? safeUrl(authorRaw) : "";
+  const raw = String(m.author || "").trim();
+  const coolUrl = safeUrl(normalizeCoolapkUserUrl(m.authorCoolapkUrl));
+  const ghUrl = safeUrl(normalizeGithubUserUrl(m.authorGithubUrl));
+  // 作者那一格从「酷安@xx/GitHub@xx」里拆出两边的昵称：索引里就是这一串，
+  // 拆开才能让两边各自指向各自的主页，而不是整串粘在一个链接上。
+  let coolName = "";
+  let ghName = "";
+  const plain = [];
+  for (const seg of raw.split(/[\/／]/)) {
+    const t = seg.trim();
+    if (!t) continue;
+    let mt = t.match(/^酷安\s*@\s*(.+)$/);
+    if (mt) {
+      coolName = mt[1].trim();
+      continue;
+    }
+    mt = t.match(/^(?:GitHub|GH)\s*@\s*(.+)$/i);
+    if (mt) {
+      ghName = mt[1].trim();
+      continue;
+    }
+    plain.push(t);
+  }
+  // 只登记了主页、没写昵称时，用链接末段当名字 —— 总比「查看主页」更认得出来是谁。
+  if (!coolName && coolUrl) coolName = decodeURIComponent(coolUrl.replace(/\/+$/, "").split("/").pop());
+  if (!ghName && ghUrl) ghName = ghUrl.replace(/\/+$/, "").split("/").pop();
+
   const uploaderName = String(m.uploader || "").trim();
   const uploaderLink = safeUrl(uploaderCoolapkUrl(m.coolapkUid));
-  if (!authorName && !authorLink && !uploaderName && !uploaderLink) return null;
+  if (!raw && !coolName && !ghName && !uploaderName && !uploaderLink) return null;
 
   const row = node("div", "mod__who");
-  // name 与 link 是两件事：有链接没名字时，链接文字说明它指向哪，不编一个假名字；
-  // 有名字没链接时就是纯文本 —— 「可点」只在真有主页时发生。
-  const side = (label, name, link, tag, tagTitle) => {
+  // name 与 link 是两件事：有链接没名字时，链接文字说明它指向哪；有名字没链接时就是纯文本。
+  const side = (label, name, link) => {
     if (!name && !link) return null;
     const item = node("span", "mod__who-item");
     item.append(node("span", "mod__who-k", `${label}：`));
@@ -4712,52 +4735,44 @@ function whoRow(m) {
     } else {
       item.append(node("span", "mod__who-v", text));
     }
-    if (tag) {
-      const badge = node("span", "mod__who-tag", tag);
-      if (tagTitle) badge.title = tagTitle;
-      item.append(badge);
-    }
     return item;
   };
-  const authorItem = side(
-    "作者",
-    authorName,
-    authorLink,
-    authorLink ? "未核实" : "",
-    "作者主页由上传者代填，本站未核实"
-  );
-  const uploaderItem = side("上传者", uploaderName, uploaderLink, "", "");
-  if (authorItem) row.append(authorItem);
+
+  // 作者：酷安 / GitHub 各成一条链接，平台前缀写在名字里。
+  const parts = [];
+  const linkPart = (label, href) => {
+    const el = href ? node("a", "mod__who-a", label) : node("span", "mod__who-v", label);
+    if (href) {
+      el.href = href;
+      el.target = "_blank";
+      el.rel = "noopener noreferrer";
+    }
+    return el;
+  };
+  if (coolName) parts.push(linkPart(`酷安@${coolName}`, coolUrl));
+  if (ghName) parts.push(linkPart(`GitHub@${ghName}`, ghUrl));
+  if (!parts.length && plain.length) {
+    // 没写平台前缀的老格式：当成一个整体，能用登记的主页就链过去。
+    parts.push(linkPart(plain.join(" / "), safeUrl(authorHomepage(m))));
+  }
+  if (parts.length) {
+    const authorItem = node("span", "mod__who-item");
+    authorItem.append(node("span", "mod__who-k", "作者："));
+    parts.forEach((el, i) => {
+      if (i) authorItem.append(node("span", "mod__who-sep", "/"));
+      authorItem.append(el);
+    });
+    // 链接是上传者代填的声明，不是本站核实过的身份 —— 只要有链接就带这枚免责标签。
+    if ((coolName && coolUrl) || (ghName && ghUrl)) {
+      const badge = node("span", "mod__who-tag", "未核实");
+      badge.title = "作者主页由上传者代填，本站未核实";
+      authorItem.append(badge);
+    }
+    row.append(authorItem);
+  }
+  const uploaderItem = side("上传者", uploaderName, uploaderLink);
   if (uploaderItem) row.append(uploaderItem);
   return row;
-}
-
-/**
- * 详情/证据区的那一行「作者主页（契约 §6 第 4 条）」。
- * 只在真有链接时画：没有链接时作者名已经在那行署名里了，这里再来一个空壳只会看着像坏链。
- * 折叠起来、样式复用源码证据那一套 —— 它是「要核的人才点开」的读数，不是第二条视觉主轴。
- */
-function authorEvidence(m) {
-  const links = [];
-  const cool = safeUrl(normalizeCoolapkUserUrl(m.authorCoolapkUrl));
-  const gh = safeUrl(normalizeGithubUserUrl(m.authorGithubUrl));
-  if (cool) links.push(["酷安", cool]);
-  if (gh) links.push(["GitHub", gh]);
-  if (!links.length) return null;
-  const box = node("details", "mod__repo");
-  // 这句话是这一格的全部意义：链接是上传者填的声明，不是本站核实过的身份。
-  box.append(node("summary", "mod__repo-sum", "作者主页（由上传者代填，未核实）"));
-  for (const [key, link] of links) {
-    const row = node("div", "mod__repo-row");
-    row.append(node("span", "mod__repo-k", key));
-    const a = node("a", "mod__repo-a", link.replace(/^https:\/\//, ""));
-    a.href = link;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    row.append(a);
-    box.append(row);
-  }
-  return box;
 }
 
 function modRow(m, q) {
@@ -4785,12 +4800,18 @@ function modRow(m, q) {
 
   const ft = node("div", "mod__ft");
   const latest = m.latest;
+  // 读数折成两行：第一行版本与大小，第二行日期。桌面档 .mod__meta 是 display:contents，
+  // 这三段仍平铺进 .mod__ft，观感与以前完全一致；手机档才变成两行、去和下载按钮上下边对齐。
+  const meta = node("span", "mod__meta");
+  const metaRow = node("span", "mod__meta-r");
   const bits = [];
-  if (latest) bits.push(`v${String(latest.version || "?").replace(/^v/i, "")} · 版本代号 ${latest.versionCode ?? "?"}`);
+  if (latest) bits.push(`v${String(latest.version || "?").replace(/^v/i, "")}`);
   const size = Number(latest && latest.size);
   if (latest && latest.size !== "" && Number.isFinite(size) && size > 0) bits.push(fmtBytes(size));
-  if (latest && latest.time) bits.push(fmtDate(Number(latest.time)));
-  for (const text of bits) ft.append(node("span", null, text));
+  for (const text of bits) metaRow.append(node("span", null, text));
+  meta.append(metaRow);
+  if (latest && latest.time) meta.append(node("span", "mod__meta-date", fmtDate(Number(latest.time))));
+  ft.append(meta);
 
   const link = latest && safeUrl(latest.zipUrl);
   if (link) {
@@ -4800,19 +4821,38 @@ function modRow(m, q) {
     a.rel = "noopener noreferrer";
     ft.append(a);
   }
-  // 举报从「就是这一枚」这一格进去：带着 id 与 versionCode，签名的两个来源就不用用户手打。
-  if (latest && SHA256_HEX_RE.test(String(latest.sha256 || ""))) {
-    const rep = node("a", "mod__rep", "举报");
-    rep.href = `#/moderation?tab=report&id=${encodeURIComponent(m.id)}&vc=${encodeURIComponent(latest.versionCode)}`;
-    ft.append(rep);
-  }
   li.append(ft);
-  // 作者主页（有链接时才有）与源码证据各是一块：一个说的是「这个人是谁」，一个说的是「源码在哪」。
-  const authEv = authorEvidence(m);
-  if (authEv) li.append(authEv);
-  li.append(repoEvidence(m));
+  // 源码信息与举报收进右上角「更多」：卡片只留主操作，核对类的内容点开才出现。
+  li.append(modMenu(m, latest));
   return li;
 }
+
+/** 卡片右上角的「更多」：源码信息与举报都收在这一层里。 */
+function modMenu(m, latest) {
+  const canReport = Boolean(latest && SHA256_HEX_RE.test(String(latest.sha256 || "")));
+  const det = node("details", "mod__more");
+  const sum = node("summary", "mod__more-sum");
+  sum.setAttribute("aria-label", "更多");
+  sum.title = "源码信息与举报";
+  det.append(sum);
+  const panel = node("div", "mod__menu");
+  panel.append(repoEvidence(m));
+  if (canReport) {
+    // 举报带着 id 与 versionCode 过去：签名的两个来源就不用用户手打。
+    const rep = node("a", "mod__menu-rep", "举报该模块");
+    rep.href = `#/moderation?tab=report&id=${encodeURIComponent(m.id)}&vc=${encodeURIComponent(latest.versionCode)}`;
+    panel.append(rep);
+  }
+  det.append(panel);
+  return det;
+}
+
+/* 点开一张卡的「更多」后，点页面别处就收起来：原生 details 不会自己关。 */
+document.addEventListener("click", (e) => {
+  for (const d of document.querySelectorAll("details.mod__more[open]")) {
+    if (!d.contains(e.target)) d.open = false;
+  }
+});
 
 /** 索引缓存：模块库一天也改不了几次，同一份 JSON 不必每次进站都重下一遍。
     缓存只负责「先画出来」，随后仍会静默刷新；10 分钟内不再重复请求。 */

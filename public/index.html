@@ -163,20 +163,26 @@
           <span class="plate__lat" id="brand-lat"><span data-w>COOL</span><span data-w>MODULE</span></span>
         </div>
         <nav class="nav" aria-label="站点导航">
-          <a href="#/submit"><i>01</i>上传模块</a>
-          <a href="#/index"><i>02</i>模块库</a>
-          <a href="#/moderation?tab=ledger"><i>03</i>举报与处置</a>
-          <a href="#/about"><i>04</i>说明</a>
+          <a href="#/submit">上传模块</a>
+          <a href="#/index">模块库</a>
+          <a href="#/moderation?tab=ledger">举报与处置</a>
+          <a href="#/about">说明</a>
         </nav>
+        <!-- 日/夜切换：太阳与月亮两枚图标组成的分段开关，当前主题那一枚点亮。
+             整颗仍是一个按钮，点哪儿都切；文字只留给读屏（视觉上收在 .theme__txt 里）。 -->
         <button class="theme" id="theme" type="button" title="切换深色 / 浅色">
-          <svg class="theme__ico theme__ico--moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-            <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z" />
-          </svg>
-          <svg class="theme__ico theme__ico--sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-            <circle cx="12" cy="12" r="4.4" />
-            <path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6" stroke-linecap="round" />
-          </svg>
-          <span id="theme-txt">夜间</span>
+          <span class="theme__slot theme__slot--sun">
+            <svg class="theme__ico theme__ico--sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.4" />
+              <path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6" stroke-linecap="round" />
+            </svg>
+          </span>
+          <span class="theme__slot theme__slot--moon">
+            <svg class="theme__ico theme__ico--moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z" />
+            </svg>
+          </span>
+          <span class="theme__txt" id="theme-txt">夜间</span>
         </button>
         <!-- 当前验证身份：没会话时整个不出现（不是禁用，是不渲染）。
              头像与昵称只认后端 /session/check 回来的那一张，输入框里的字不算数。 -->
@@ -456,7 +462,14 @@
       <!-- ====================== 02 已收录 ====================== -->
       <section class="view" id="view-index" aria-labelledby="h-index">
         <div class="hero rise">
-          <h1 id="h-index">模块<span class="hi">库</span></h1>
+          <div class="hero__row">
+            <h1 id="h-index">模块<span class="hi">库</span></h1>
+            <label class="mirror" for="ck-mirror" title="GitHub 直连在国内不稳定；打开后下载走 gh-proxy 镜像">
+              <input type="checkbox" id="ck-mirror" />
+              <span class="mirror__track" aria-hidden="true"></span>
+              <span class="mirror__txt">国内镜像</span>
+            </label>
+          </div>
           <p class="readout" id="index-readout" aria-live="polite"></p>
         </div>
 
@@ -476,11 +489,6 @@
               spellcheck="false"
             />
           </div>
-          <label class="mirror" for="ck-mirror" title="GitHub 直连在国内不稳定；打开后下载走 gh-proxy 镜像">
-            <input type="checkbox" id="ck-mirror" />
-            <span class="mirror__track" aria-hidden="true"></span>
-            <span class="mirror__txt">国内镜像</span>
-          </label>
           <span class="count" id="count"></span>
         </div>
 
