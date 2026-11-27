@@ -842,6 +842,12 @@ async function main() {
     /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/.test(panelCss) &&
       !/\.spec\s*\{[^}]*grid-template-columns:\s*1fr/.test(panelCss)
   );
+  // 背景网格若用 background-attachment: fixed，移动端每个滚动帧都会重绘整屏。
+  // 200 张卡片的压测里光栅任务 1337→219、Paint 399→23，所以这条必须钉死。
+  check(
+    "背景不使用 background-attachment: fixed（移动端滚动不重绘整屏）",
+    !/background-attachment:[^;]*\bfixed\b/.test(panelCss)
+  );
   // 四格之间是十字线，不是四张卡片：外框一条 + 中间一横一竖，缝里不许有 gap。
   check(
     "硬性条件用十字线分格：.spec 无 gap、格子无琥珀内描边、右/下两条线在 nth-child 处收口",
